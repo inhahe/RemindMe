@@ -23,7 +23,7 @@
                 android:textStyle="bold" android:layout_marginTop="4dp" />
             <TextView android:layout_width="match_parent" android:layout_height="wrap_content" style="@style/Hint"
                 android:layout_marginTop="4dp"
-                android:text="Devices on this network appear by themselves. Tap Link next to one, then accept on that device, after checking that both show the same code." />
+                android:text="Devices on this network appear by themselves. Tap Link next to one: both devices then show a code. Check that the codes match, then accept on both." />
 
             <com.google.android.material.card.MaterialCardView style="@style/Pane" android:layout_marginTop="12dp">
                 <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"

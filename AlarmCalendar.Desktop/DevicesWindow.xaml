@@ -24,7 +24,7 @@
             <TextBlock x:Name="PairStatus" Margin="10,0,0,0" VerticalAlignment="Center" TextWrapping="Wrap" />
         </DockPanel>
         <TextBlock Style="{StaticResource Hint}" Margin="0,4,0,8"
-                   Text="Devices on this network appear by themselves. To link one, select it and click Link, then accept on that device, after checking that both show the same code." />
+                   Text="Devices on this network appear by themselves. To link one, select it and click Link: both devices then show a code. Check that the codes match, then accept on both." />
 
         <Border Style="{StaticResource Pane}" Background="White">
             <StackPanel>

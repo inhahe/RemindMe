@@ -82,8 +82,9 @@ plays instead and the alarm window says so.
 Open **Devices…** (in the toolbar or the tray menu).
 
 - **On the same network**: other copies of the app appear by themselves. Select
-  one and click **Link…**. The other device asks whether to link, and shows a
-  six-digit code. Check that it matches the code shown on this one, then accept.
+  one and click **Link…**. Both devices then show a six-digit code and ask
+  whether to link. Check that the two codes match, then accept on both; neither
+  links until its own user accepts.
   The two devices then share all their tasks, and keep the tasks and their state
   in sync: mark a task done on one, and its alarm stops on the others. It doesn't
   matter which device you click Link on: the one linked with fewer devices joins

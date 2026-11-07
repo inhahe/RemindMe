@@ -110,15 +110,15 @@ user asked for all the rest (Phase 6):
 - [x] `README.md` (the user-facing document): features, settings, how to link devices
 - [x] `known-issues.md` kept current
 - [~] Independent code review of each batch (global rules):
-  - Core and desktop: Opus `xhigh`, 14 fixes (`ad3961e`).
-  - Sync: Opus `max`, 14 fixes (`8aa87eb`); then Fable `xhigh` on the reworked sync layer, 15 fixes, including pairing that could be forced without the user's yes (`8ef0b5d`).
-  - Android and the pairing redesign: Opus `max`, 15 fixes (`4374ce7`).
+  - Core and desktop: Opus `xhigh`, 14 fixes (`8e22c43`).
+  - Sync: Opus `max`, 14 fixes (`6f43870`); then Fable `xhigh` on the reworked sync layer, 15 fixes, including pairing that could be forced without the user's yes (`32611fc`).
+  - Android and the pairing redesign: Opus `max`, 15 fixes (`6177b1e`).
   - Opus `xhigh` on that follow-up: 15 fixes, among them pairing rounds,
     announcements MACed under the group key, and the safety net withdrawing
-    alarms once answered (`4eff033`, `bea9b14`).
+    alarms once answered (`da3430f`, `e5f6967`).
   - Opus `max` on those two: 13 fixes, among them dated announcements against
     replay, an IPv4-only listener without outside connections, and alarms
-    withdrawn even after the process died (`950def3`, `8832b76`).
+    withdrawn even after the process died (`d56952c`, `0ebfc79`).
   - Fable `xhigh` on the whole round, as the second review its security and
     data-handling parts call for: 12 fixes, among them alerts kept across a
     process's death and announcements numbered per process, so a member's clock
@@ -133,5 +133,5 @@ user asked for all the rest (Phase 6):
 - [x] S2: **Calendar**: a month grid of what is still to come or waiting, with each day's list, on both platforms
 - [x] S3: **Wake the PC from sleep** for the next alarm (waitable timer with resume, 20 s ahead), screen kept on while its sound plays, with a setting; not testable here without putting the machine to sleep (known-issues.md says how to check it)
 - [x] S9: **Releases**: `VERSION`, `build-msi.ps1` (WiX MSI with firewall rules, launch-now, upgrade-in-place via `--exit`; self-contained exe), `build-apk.ps1` (versionCode from `VERSION`, release key from the environment), and `release.bat` (`release.ps1`): tests, builds and publishes to [inhahe/RemindMe](https://github.com/inhahe/RemindMe) only from `main` as GitHub has it, with a new `VERSION`, as in the user's other projects; `--dry-run`. The release key and the license are the user's to settle (known-issues.md)
-- [x] Reviewed: Opus `max` on S2–S10, 15 findings (`81cdebe`, `beced82`); then Fable `xhigh` on those and the fixes, 9 findings (`83442f6`)
+- [x] Reviewed: Opus `max` on S2–S10, 15 findings (`f16a157`, `a1c9f73`); then Fable `xhigh` on those and the fixes, 9 findings (`c0672af`)
 - [x] S11: **Automatic backups** after every add, edit or delete (here or synced), thinned with age; `Documents\RemindMe backups` on Windows (changeable), `Download/RemindMe backups` on Android; restored with Import

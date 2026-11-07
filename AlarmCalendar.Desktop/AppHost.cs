@@ -108,14 +108,31 @@ public static class AppHost
 
     private static string SettingsPath => Path.Combine(DataDir, "settings.json");
 
+    /// <summary>Where tasks and settings live unless <c>--data-dir</c> says otherwise.</summary>
+    public static string DefaultDataDir { get; } =
+        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "AlarmCalendar");
+
+    /// <summary>Where backups go unless Settings names a folder: "Alarm Calendar backups" in
+    /// Documents, where people look for their files (and which a cloud drive often keeps).
+    /// An instance with a data folder of its own (<c>--data-dir</c>) keeps its backups
+    /// inside it instead, away from the real ones.</summary>
+    public static string DefaultBackupFolder { get; private set; } = "";
+
+    public static BackupService Backup { get; private set; } = null!;
+
     public static void Initialize(string dataDir)
     {
         DataDir = dataDir;
         Directory.CreateDirectory(dataDir);
+        DefaultBackupFolder = string.Equals(Path.GetFullPath(dataDir).TrimEnd('\\'), DefaultDataDir, StringComparison.OrdinalIgnoreCase)
+            ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "Alarm Calendar backups")
+            : Path.Combine(dataDir, "backups");
         Settings = AppSettings.Load(SettingsPath, Environment.MachineName, Log);
         Store = new TaskStore(Path.Combine(dataDir, "tasks.json"), Settings.NodeId, Clock, Log);
         Sounds = new SoundService();
         Alarms = new AlarmCoordinator(Store, Sounds);
+        Backup = new BackupService(Store, Settings.NodeId);
+        Backup.Schedule();   // brings an out-of-date or missing backup up to date, once started
         Microsoft.Win32.SystemEvents.TimeChanged += (_, _) => TimeZoneInfo.ClearCachedData();
         RestartSync();
     }
@@ -148,6 +165,7 @@ public static class AppHost
         if (Exiting) return;
         Exiting = true;
         Alarms?.Dispose();
+        Backup?.Flush();
     }
 
     public static void Shutdown()

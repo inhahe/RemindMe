@@ -54,6 +54,7 @@ user asked for all the rest (Phase 6):
 | S8 | **Export and import** tasks as a JSON file. |
 | S9 | Releases: an MSI and APK, `VERSION` and a release script as in LanLink. |
 | S10 | Per-task volume, and a gradual volume ramp-up. |
+| S11 | **Automatic backups**. Suggested as weekly; the user asked for one after every add or edit instead. Built as a series of files thinned with age, so a mistake can't overwrite the backup that still has what was lost. |
 
 ## Phases
 
@@ -130,5 +131,7 @@ user asked for all the rest (Phase 6):
 - [x] S10: **Volume** (10–100% of the system or alarm volume) and **fade-in** (10 s to 5 min) per task, with defaults in Settings, on both platforms
 - [x] S8: **Export and import** tasks as a JSON file, in Settings on both platforms; import merges, restores deleted tasks, and rings nothing from the past
 - [x] S2: **Calendar**: a month grid of what is still to come or waiting, with each day's list, on both platforms
-- [x] S3: **Wake the PC from sleep** for the next alarm (waitable timer with resume, 20 s ahead), screen kept on while it rings, with a setting; not testable here without putting the machine to sleep
+- [x] S3: **Wake the PC from sleep** for the next alarm (waitable timer with resume, 20 s ahead), screen kept on while its sound plays, with a setting; not testable here without putting the machine to sleep (known-issues.md says how to check it)
 - [x] S9: **Releases**: `VERSION`, `build-msi.ps1` (WiX MSI with firewall rules, launch-now, upgrade-in-place via `--exit`; self-contained exe), `build-apk.ps1` (versionCode from `VERSION`, release key from the environment), `release-github.ps1` with `-DryRun`. The repository, the release key and the license are the user's to settle (known-issues.md)
+- [x] Reviewed: Opus `max` on S2–S10, 15 findings (`81cdebe`, `beced82`); then Fable `xhigh` on those and the fixes, 9 findings (`83442f6`)
+- [x] S11: **Automatic backups** after every add, edit or delete (here or synced), thinned with age; `Documents\Alarm Calendar backups` on Windows (changeable), `Download/Alarm Calendar backups` on Android; restored with Import

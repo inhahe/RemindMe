@@ -108,6 +108,22 @@ have, including ones you deleted, and updates any the file has a newer version
 of; a backup older than your edits changes nothing. Nothing that came up in the
 past rings because of an import.
 
+**Automatic backups** (on unless you untick "Back up automatically after every
+change"): a few seconds after a task is added, changed or deleted, on this
+device or a linked one, the app writes a backup file. Marking done, snoozing and
+pausing don't count. Each backup is a new file, so a mistake can't overwrite the
+backup that still has what you lost:
+- Every backup from the last day is kept, then the newest of each day for 60
+  days, then the newest of each month for two years.
+- On Windows they go to `Documents\Alarm Calendar backups` (Settings can name
+  another folder, and **Open folder** shows it). On Android they go to
+  `Download/Alarm Calendar backups`, where they stay even if the app is
+  uninstalled.
+- To restore, import one (above). It brings back deleted tasks, but doesn't undo
+  edits made since, since the newer version of a task wins.
+- Each file name ends with the device's ID, so devices sharing a folder (a
+  Documents folder in the same cloud drive, say) each thin out only their own.
+
 ## Syncing your devices
 
 Open **Devices…** (in the toolbar or the tray menu).

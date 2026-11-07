@@ -26,9 +26,7 @@ public partial class App : Application
         base.OnStartup(e);
         bool minimized = e.Args.Contains("--minimized");
         bool exit = e.Args.Contains("--exit");
-        string dataDir = ArgValue(e.Args, "--data-dir")
-            ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "AlarmCalendar");
-        dataDir = Path.GetFullPath(dataDir);
+        string dataDir = Path.GetFullPath(ArgValue(e.Args, "--data-dir") ?? AppHost.DefaultDataDir);
 
         // One instance per data directory: a second launch brings the first one forward.
         // (--data-dir gives tests and experiments an instance of their own.)

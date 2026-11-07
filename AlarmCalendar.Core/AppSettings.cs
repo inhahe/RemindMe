@@ -25,6 +25,13 @@ public sealed class AppSettings
     /// <summary>Seconds of fade-in for tasks left on the default; 0 is none (S10).</summary>
     public int DefaultFadeInSeconds { get; set; }
 
+    // ---- Backups ----
+
+    /// <summary>Write a backup after every change to the tasks (<see cref="Backups"/>).</summary>
+    public bool AutoBackup { get; set; } = true;
+    /// <summary>Desktop: the folder backups go to; null means the app's default.</summary>
+    public string? BackupFolder { get; set; }
+
     // ---- Desktop ----
 
     public bool StartWithWindows { get; set; } = true;

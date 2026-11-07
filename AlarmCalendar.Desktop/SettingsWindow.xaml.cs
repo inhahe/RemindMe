@@ -9,6 +9,8 @@ namespace AlarmCalendar.Desktop;
 public partial class SettingsWindow : Window
 {
     private SoundRef? _sound;
+    /// <summary>The backup folder as chosen here, saved by Save; null is the default.</summary>
+    private string? _backupFolder;
 
     public SettingsWindow()
     {
@@ -29,10 +31,51 @@ public partial class SettingsWindow : Window
         StartWithWindows.IsChecked = Autostart.IsEnabled();
         CloseToTray.IsChecked = s.CloseToTray;
         WakeFromSleep.IsChecked = s.WakeFromSleep;
+        AutoBackup.IsChecked = s.AutoBackup;
+        _backupFolder = s.BackupFolder;
         ShowSound();
+        ShowBackup();
+        AppHost.Backup.Changed += ShowBackup;
+        Closed += (_, _) => AppHost.Backup.Changed -= ShowBackup;
     }
 
     private void ShowSound() => SoundButton.Content = (_sound ?? SoundService.BuiltIn).Name + "…";
+
+    private string BackupFolder => _backupFolder ?? AppHost.DefaultBackupFolder;
+
+    private void ShowBackup()
+    {
+        BackupFolderText.Text = _backupFolder ?? $"{AppHost.DefaultBackupFolder} (the default)";
+        BackupFolderText.ToolTip = BackupFolder;
+        var b = AppHost.Backup;
+        BackupStatus.Text = b.Problem
+            ?? (b.Newest is { } n
+                ? $"Last backup: {TextFormat.When(new DateTimeOffset(n.At), AppHost.Clock.UtcNow, AppHost.Clock.Zone)}, {System.IO.Path.GetFileName(n.Path)}."
+                : "No backup yet.");
+    }
+
+    private void ChangeBackupFolder_Click(object sender, RoutedEventArgs e)
+    {
+        var dialog = new Microsoft.Win32.OpenFolderDialog { Title = "Folder for backups" };
+        if (System.IO.Directory.Exists(BackupFolder)) dialog.InitialDirectory = BackupFolder;
+        if (dialog.ShowDialog(this) != true) return;
+        _backupFolder = string.Equals(dialog.FolderName, AppHost.DefaultBackupFolder, StringComparison.OrdinalIgnoreCase)
+            ? null : dialog.FolderName;
+        ShowBackup();
+    }
+
+    private void OpenBackupFolder_Click(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            System.IO.Directory.CreateDirectory(BackupFolder);
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(BackupFolder) { UseShellExecute = true });
+        }
+        catch (Exception ex) when (ex is System.IO.IOException or UnauthorizedAccessException or System.ComponentModel.Win32Exception)
+        {
+            BackupStatus.Text = $"Couldn't open the folder: {ex.Message}";
+        }
+    }
 
     private void Sound_Click(object sender, RoutedEventArgs e)
     {
@@ -98,8 +141,12 @@ public partial class SettingsWindow : Window
         var restart = RestartOnSchedule.IsChecked == true ? RestartMode.OnSchedule : RestartMode.FromDone;
         bool startWithWindows = StartWithWindows.IsChecked == true, closeToTray = CloseToTray.IsChecked == true;
         bool wake = WakeFromSleep.IsChecked == true;
+        bool autoBackup = AutoBackup.IsChecked == true;
+        var backupFolder = _backupFolder;
         AppHost.UpdateSettings(s =>
         {
+            s.AutoBackup = autoBackup;
+            s.BackupFolder = backupFolder;
             s.DefaultSound = sound;
             s.DefaultSoundMode = mode;
             s.DefaultVolume = volume;

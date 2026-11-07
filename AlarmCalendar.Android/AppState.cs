@@ -74,8 +74,10 @@ public static class AppState
         {
             AlarmScheduler.Reschedule(Context);
             RingingService.Poke();
+            AutoBackup.Schedule();
             TasksChanged?.Invoke();
         });
+        if (!Provisional) OnMain(AutoBackup.Schedule);   // brings an out-of-date or missing backup up to date
     }
 
     /// <summary>Loads the data if the phone was locked when the process started
@@ -160,6 +162,7 @@ public static class AppState
             else SyncService.Stop(Context);
         }
         AlarmScheduler.Reschedule(Context);
+        if (updated.AutoBackup && !old.AutoBackup) AutoBackup.Schedule();
     }
 
     // ---- Sync --------------------------------------------------------------------------

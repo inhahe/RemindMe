@@ -238,6 +238,40 @@ from sync.
 Both apps offer it under *Your tasks* in Settings: file dialogs on the desktop,
 the document picker on Android.
 
+**Automatic backups (S11, `Backups.cs`)**: a file in the export format, written
+once the tasks have changed and nothing more has changed for 5 s
+(`Backups.Settle`). Import is therefore the restore.
+- **What counts as a change**: `Backups.Fingerprint`, the live tasks' IDs and
+  `DefVersion`s. Adding, editing and deleting change it, whether made here or
+  arriving by sync. Marking done, snoozing and pausing don't, so they write
+  nothing. A backup is written only when the fingerprint differs from that of
+  this device's newest backup (read from the folder at startup), so a restart or
+  an import that changes nothing writes nothing.
+- **A series, not one file**: overwriting a single file would make it a mirror.
+  A task deleted by mistake (or by a linked device) would then be gone from the
+  backup within seconds. `Backups.ToDelete` keeps the newest backup whatever its
+  age, every one from the last day, the newest of each day for 60 days, and the
+  newest of each month for two years.
+- **Names**: `alarm-calendar-backup-2026-11-07-075300-de193e1e.json`, local time
+  then `Backups.DeviceTag` (the start of the sync node ID). Several devices can
+  share one folder (a Documents folder in the same cloud drive), and each thins
+  out only its own series.
+- **Desktop** (`BackupService`): the folder in Settings, by default
+  `Documents\Alarm Calendar backups`, where people look for their files and
+  which a cloud drive often keeps. An instance with its own `--data-dir` uses
+  `<data dir>\backups` instead, keeping test data out of the real folder. A
+  write waiting to settle is done at exit (`AppHost.BeginExit`). Settings shows
+  the last backup or the failure; a failure is logged once per message.
+- **Android** (`AutoBackup`): MediaStore's `Download/Alarm Calendar backups`.
+  It needs no permission, shows in the Files app and the import's picker, and
+  survives an uninstall. The app sees only the files it wrote itself, so after a
+  reinstall it starts a new series and leaves the old one alone. Shared storage
+  opens only after the first unlock since a restart, so until then nothing is
+  written. Files are written with `IS_PENDING` until complete. The work runs off
+  the main thread, since MediaStore calls go to another process.
+- **Limit**: Import merges, so restoring brings back deleted tasks but doesn't
+  undo an edit made since the backup: the newer version wins.
+
 ## Sync merge
 
 Each part of a task merges on its own:

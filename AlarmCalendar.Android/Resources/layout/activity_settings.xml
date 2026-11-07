@@ -76,6 +76,12 @@
                         android:text="Export saves every task to a file, as a backup or to move them to a device that isn't linked. Importing a file adds the tasks it has that this phone doesn't (deleted ones included), and updates any it holds a newer version of; nothing that came up in the past rings. These act at once, without Save." />
                     <TextView android:id="@+id/transfer_text" android:layout_width="match_parent" android:layout_height="wrap_content"
                         android:layout_marginTop="4dp" />
+                    <CheckBox android:id="@+id/auto_backup" android:layout_width="wrap_content" android:layout_height="wrap_content"
+                        android:layout_marginTop="8dp" android:text="Back up automatically after every change" />
+                    <TextView android:id="@+id/backup_status" android:layout_width="match_parent" android:layout_height="wrap_content"
+                        style="@style/Hint" />
+                    <TextView android:layout_width="match_parent" android:layout_height="wrap_content" style="@style/Hint"
+                        android:text="To Download/Alarm Calendar backups, a few seconds after a task is added, changed or deleted, here or on a linked device (marking done doesn't count). Every backup from the last day is kept, then one a day for 60 days, then one a month for two years. To restore, import one: it brings back deleted tasks, and doesn't undo changes made since." />
                 </LinearLayout>
             </com.google.android.material.card.MaterialCardView>
 

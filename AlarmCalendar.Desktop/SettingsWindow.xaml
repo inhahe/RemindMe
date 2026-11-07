@@ -53,7 +53,7 @@
                 <CheckBox x:Name="CloseToTray" Content="Closing the main window keeps the app running in the _tray" />
                 <CheckBox x:Name="WakeFromSleep" Content="Wake the computer from sleep for _alarms" Margin="0,6,0,0" />
                 <TextBlock Style="{StaticResource Hint}" Margin="20,2,0,0" TextWrapping="Wrap"
-                           Text="Only while the app is running, and only if Windows allows wake timers (Power Options → Change advanced power settings → Sleep → Allow wake timers); many laptops don't on battery. The screen stays on while an alarm rings." />
+                           Text="Only while the app is running, and only if Windows allows wake timers (Power Options → Change advanced power settings → Sleep → Allow wake timers); many laptops don't on battery. The screen stays on while an alarm's sound plays." />
             </StackPanel>
         </Border>
 
@@ -67,6 +67,15 @@
                 <TextBlock Style="{StaticResource Hint}" Margin="0,4,0,0" TextWrapping="Wrap"
                            Text="Export saves every task to a file, as a backup or to move them to a device that isn't linked. Importing a file adds the tasks it has that this device doesn't (deleted ones included), and updates any it holds a newer version of; nothing that came up in the past rings. These act at once, without Save." />
                 <TextBlock x:Name="TransferText" Margin="0,4,0,0" TextWrapping="Wrap" />
+                <CheckBox x:Name="AutoBackup" Content="_Back up automatically after every change" Margin="0,10,0,0" />
+                <DockPanel Margin="20,4,0,0">
+                    <Button DockPanel.Dock="Right" Content="O_pen folder" Click="OpenBackupFolder_Click" Padding="10,2" Margin="6,0,0,0" />
+                    <Button DockPanel.Dock="Right" Content="Change _folder…" Click="ChangeBackupFolder_Click" Padding="10,2" Margin="6,0,0,0" />
+                    <TextBlock x:Name="BackupFolderText" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                </DockPanel>
+                <TextBlock x:Name="BackupStatus" Style="{StaticResource Hint}" Margin="20,4,0,0" TextWrapping="Wrap" />
+                <TextBlock Style="{StaticResource Hint}" Margin="20,2,0,0" TextWrapping="Wrap"
+                           Text="A new file a few seconds after a task is added, changed or deleted, here or on a linked device (marking done doesn't count). Every backup from the last day is kept, then one a day for 60 days, then one a month for two years. To restore, import one: it brings back deleted tasks, and doesn't undo changes made since." />
             </StackPanel>
         </Border>
 

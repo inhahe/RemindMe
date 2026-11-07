@@ -39,6 +39,7 @@ public sealed class SettingsActivity : Screen
         Find<EditText>(Resource.Id.rem_minutes).Text = (s.DefaultReminderMinutes % 60).ToString(CultureInfo.CurrentCulture);
         Find<RadioButton>(Resource.Id.restart_from_done).Checked = s.DefaultRestartMode == RestartMode.FromDone;
         Find<RadioButton>(Resource.Id.restart_on_schedule).Checked = s.DefaultRestartMode == RestartMode.OnSchedule;
+        Find<CheckBox>(Resource.Id.auto_backup).Checked = s.AutoBackup;
         Find<Button>(Resource.Id.sound).Click += (_, _) => _chooser.Show(_sound, allowDefault: false);
         Find<Button>(Resource.Id.time_of_day).Click += (_, _) => Ui.PickTime(this, _timeOfDay, v => { _timeOfDay = v; Show(); });
         Find<Button>(Resource.Id.export_tasks).Click += (_, _) => StartActivityForResult(
@@ -69,7 +70,21 @@ public sealed class SettingsActivity : Screen
     {
         base.OnResume();
         ShowPermissions();   // the user may be back from a system settings screen
+        AutoBackup.Changed += ShowBackup;
+        ShowBackup();
     }
+
+    protected override void OnPause()
+    {
+        AutoBackup.Changed -= ShowBackup;
+        base.OnPause();
+    }
+
+    private void ShowBackup() =>
+        Find<TextView>(Resource.Id.backup_status).Text = AutoBackup.Problem
+            ?? (AutoBackup.NewestAt is { } at
+                ? $"Last backup: {TextFormat.When(new DateTimeOffset(at), AppState.Clock.UtcNow, AppState.Clock.Zone)}."
+                : "No backup yet.");
 
 
     private void Show()
@@ -119,8 +134,10 @@ public sealed class SettingsActivity : Screen
         int volume = SoundLevels.Volumes[Math.Max(0, Find<Spinner>(Resource.Id.default_volume).SelectedItemPosition)];
         int fadeIn = SoundLevels.FadeIns[Math.Max(0, Find<Spinner>(Resource.Id.default_fade_in).SelectedItemPosition)];
         var restart = Find<RadioButton>(Resource.Id.restart_on_schedule).Checked ? RestartMode.OnSchedule : RestartMode.FromDone;
+        bool autoBackup = Find<CheckBox>(Resource.Id.auto_backup).Checked;
         AppState.UpdateSettings(s =>
         {
+            s.AutoBackup = autoBackup;
             s.DefaultSound = sound;
             s.DefaultSoundMode = mode;
             s.DefaultVolume = volume;

@@ -1,8 +1,10 @@
 using System.Globalization;
 using System.Windows;
+using System.Windows.Automation;
 using System.Windows.Controls;
 using System.Windows.Documents;
 using System.Windows.Input;
+using System.Windows.Media;
 using System.Windows.Threading;
 
 namespace RemindMe.Desktop;
@@ -40,6 +42,8 @@ public partial class CalendarWindow : Window
     private readonly MainWindow _main;
     /// <summary>The styles of a day in the grid, and of the chosen one (CalendarWindow.xaml).</summary>
     private readonly Style _cell, _chosenCell;
+    /// <summary>The grid's day buttons, by date, as last built.</summary>
+    private readonly Dictionary<DateOnly, Button> _cells = new();
     /// <summary>Wakes at the next time shown coming up, and at least once a minute for the date.</summary>
     private readonly DispatcherTimer _clock = new();
     private DateTime _month;
@@ -98,7 +102,11 @@ public partial class CalendarWindow : Window
         Build();
     }
 
-    private void Build()
+    /// <summary>Builds the month and the chosen day's list. The keyboard focus, if it was on
+    /// a day, goes to the rebuilt <paramref name="focus"/>, or to the rebuilt same day.</summary>
+    private void Build() => Build(null);
+
+    private void Build(DateOnly? focus)
     {
         var culture = CultureInfo.CurrentCulture;
         _builtOn = Today();
@@ -108,7 +116,10 @@ public partial class CalendarWindow : Window
         ScheduleTick();
         MonthTitle.Text = _month.ToString("MMMM yyyy", culture);
 
+        // The day with the focus, to give it back to the rebuilt day: the old one goes.
+        var focusedDay = focus ?? (FocusedIn(MonthGrid) is Button { Tag: DateOnly date } ? date : null);
         MonthGrid.Children.Clear();
+        _cells.Clear();
         MonthGrid.RowDefinitions.Clear();
         MonthGrid.ColumnDefinitions.Clear();
         for (int c = 0; c < 7; c++) MonthGrid.ColumnDefinitions.Add(new ColumnDefinition());
@@ -129,11 +140,51 @@ public partial class CalendarWindow : Window
             Grid.SetRow(cell, 1 + i / 7);
             Grid.SetColumn(cell, i % 7);
             MonthGrid.Children.Add(cell);
+            _cells[_days[i].Date] = cell;
         }
+        ShowDay();
+        if (focusedDay is { } day && _cells.TryGetValue(day, out var again)) FocusSoon(again);
+    }
+
+    /// <summary>The arrow keys move between days: a day left or right, a week up or down,
+    /// choosing each (a day with the focus is the chosen one). Past the six weeks shown,
+    /// they turn the month.</summary>
+    private void MonthGrid_PreviewKeyDown(object sender, KeyEventArgs e)
+    {
+        int step = e.Key switch { Key.Left => -1, Key.Right => 1, Key.Up => -7, Key.Down => 7, _ => 0 };
+        if (step == 0 || FocusedIn(MonthGrid) is not Button { Tag: DateOnly from }) return;
+        e.Handled = true;
+        var to = from.AddDays(step);
+        if (_cells.TryGetValue(to, out var cell)) { cell.Focus(); return; }
+        _chosen = to;
+        _month = new DateTime(to.Year, to.Month, 1);
+        Build(to);
+    }
+
+    /// <summary>Makes <paramref name="date"/> the chosen day, and shows its tasks.</summary>
+    private void Choose(DateOnly date)
+    {
+        if (date == _chosen) return;
+        if (_cells.TryGetValue(_chosen, out var old)) { old.Style = _cell; old.IsTabStop = false; }
+        _chosen = date;
+        if (_cells.TryGetValue(date, out var cell)) { cell.Style = _chosenCell; cell.IsTabStop = true; }
         ShowDay();
     }
 
-    private Border Cell(CalendarDay day)
+    /// <summary>The element within <paramref name="scope"/> that has this window's focus
+    /// (logical focus, so also while another window is active), or null.</summary>
+    private DependencyObject? FocusedIn(Visual scope) =>
+        FocusManager.GetFocusedElement(this) is DependencyObject f && scope.IsAncestorOf(f) ? f : null;
+
+    /// <summary>Focuses <paramref name="element"/> once it is laid out: a new element can't
+    /// take the focus before then.</summary>
+    private void FocusSoon(UIElement element) =>
+        Dispatcher.BeginInvoke(DispatcherPriority.Loaded, () => element.Focus());
+
+    private static string LongDate(DateOnly date) =>
+        date.ToDateTime(TimeOnly.MinValue).ToString("dddd d MMMM yyyy", CultureInfo.CurrentCulture);
+
+    private Button Cell(CalendarDay day)
     {
         var panel = new StackPanel();
         var number = Ink(new TextBlock
@@ -165,17 +216,27 @@ public partial class CalendarWindow : Window
         if (day.Entries.Count > LinesPerCell)
             panel.Children.Add(Ink(new TextBlock { Text = $"+{day.Entries.Count - (LinesPerCell - 1)} more", FontSize = 11 }, Quiet));
 
-        var cell = new Border { Child = panel, Style = day.Date == _chosen ? _chosenCell : _cell };
-        cell.MouseLeftButtonUp += (_, _) => { _chosen = day.Date; Build(); };
+        bool chosen = day.Date == _chosen;
+        // Only the chosen day is a tab stop: Tab enters the grid there, and arrows move on.
+        var cell = new Button { Content = panel, Tag = day.Date, Style = chosen ? _chosenCell : _cell, IsTabStop = chosen };
+        // A day with the focus is the chosen one, so the arrow keys choose as they move.
+        cell.Click += (_, _) => Choose(day.Date);
+        cell.GotKeyboardFocus += (_, _) => Choose(day.Date);
+        int count = day.Entries.Count;
+        AutomationProperties.SetName(cell, LongDate(day.Date) + (day.IsToday ? ", today" : "")
+            + (count == 0 ? ", nothing comes up" : count == 1 ? ", 1 task" : $", {count} tasks"));
         return cell;
     }
 
-    /// <summary>The chosen day's tasks, in full, beside the grid.</summary>
+    /// <summary>The chosen day's tasks, in full, beside the grid. A task selected before,
+    /// and the focus if it was on one, stay on that task.</summary>
     private void ShowDay()
     {
         var culture = CultureInfo.CurrentCulture;
         var day = _days.FirstOrDefault(d => d.Date == _chosen);
-        DayTitle.Text = _chosen.ToDateTime(TimeOnly.MinValue).ToString("dddd d MMMM yyyy", culture);
+        DayTitle.Text = LongDate(_chosen);
+        var selected = (DayList.SelectedItem as ListBoxItem)?.Tag;
+        bool focused = FocusedIn(DayList) is not null;
         DayList.Items.Clear();
         if (day is null || day.Entries.Count == 0)
         {
@@ -195,6 +256,10 @@ public partial class CalendarWindow : Window
             text.Inlines.Add(Ink(new Run(TextFormat.Schedule(t.Def, t.State, now, zone, culture)) { FontSize = 11 }, Quiet));
             DayList.Items.Add(new ListBoxItem { Content = text, Tag = e.TaskId });
         }
+        if (selected is null) return;
+        if (DayList.Items.OfType<ListBoxItem>().FirstOrDefault(i => Equals(i.Tag, selected)) is not { } again) return;
+        DayList.SelectedItem = again;
+        if (focused) FocusSoon(again);
     }
 
     private void OpenChosen()

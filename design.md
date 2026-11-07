@@ -190,7 +190,15 @@ otherwise also give.
   turns red as it comes up.
 - **The desktop window** (`CalendarWindow`) has a grid of up to four lines a
   day, plus "+N more", and the chosen day's full list beside it, which opens
-  the editor.
+  the editor. Each day is a button, named for a screen reader by its date and
+  task count. Only the chosen day is a tab stop, so Tab enters the grid there
+  and goes on to the day's list; the arrow keys (the grid's own handler: WPF's
+  directional navigation, tried first, didn't move between these buttons) move
+  a day or a week, choosing as they go, and turn the month past the six weeks
+  shown.
+  Choosing a day restyles two buttons and refills the list, without rebuilding
+  the grid. A rebuild puts the focus back on its day, and the list's selection
+  and focus back on their task.
 - **Android** (`CalendarActivity`, from the ⋮ menu) shows each day's first
   time, in short ("9:00a", "~6:30p", or "18:30" with a 24-hour clock), and
   "+N", with the chosen day's list below it.

@@ -6,23 +6,42 @@
         Width="1080" Height="700" MinWidth="720" MinHeight="480"
         WindowStartupLocation="CenterOwner" ShowInTaskbar="True">
     <Window.Resources>
-        <!-- A day in the grid: a card, shaded under the mouse. -->
-        <Style x:Key="DayCell" TargetType="Border">
+        <!-- A day in the grid: a card, shaded under the mouse. A button, so the keyboard
+             reaches it: Tab enters the grid at the chosen day (the only one that is a tab
+             stop), and the arrow keys move between days (MonthGrid_PreviewKeyDown). -->
+        <Style x:Key="DayCell" TargetType="Button">
             <Setter Property="Background" Value="{DynamicResource CardBackgroundFillColorDefaultBrush}" />
             <Setter Property="BorderBrush" Value="{DynamicResource CardStrokeColorDefaultBrush}" />
             <Setter Property="BorderThickness" Value="1" />
-            <Setter Property="CornerRadius" Value="6" />
             <Setter Property="Padding" Value="6,4" />
             <Setter Property="Margin" Value="2" />
             <Setter Property="Cursor" Value="Hand" />
-            <Style.Triggers>
-                <Trigger Property="IsMouseOver" Value="True">
-                    <Setter Property="Background" Value="{DynamicResource ControlFillColorSecondaryBrush}" />
-                </Trigger>
-            </Style.Triggers>
+            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+            <Setter Property="VerticalContentAlignment" Value="Stretch" />
+            <Setter Property="FocusVisualStyle" Value="{DynamicResource DefaultControlFocusVisualStyle}" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Back" Background="{TemplateBinding Background}" CornerRadius="6"
+                                BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}"
+                                Padding="{TemplateBinding Padding}">
+                            <ContentPresenter HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                              VerticalAlignment="{TemplateBinding VerticalContentAlignment}" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Back" Property="Background" Value="{DynamicResource ControlFillColorSecondaryBrush}" />
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="Back" Property="Background" Value="{DynamicResource ControlFillColorTertiaryBrush}" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
         </Style>
         <!-- The chosen day: outlined in the accent colour, its contents where they were. -->
-        <Style x:Key="ChosenDayCell" TargetType="Border" BasedOn="{StaticResource DayCell}">
+        <Style x:Key="ChosenDayCell" TargetType="Button" BasedOn="{StaticResource DayCell}">
             <Setter Property="BorderBrush" Value="{DynamicResource AccentFillColorDefaultBrush}" />
             <Setter Property="BorderThickness" Value="2" />
             <Setter Property="Padding" Value="5,3" />
@@ -48,16 +67,23 @@
             <TextBlock DockPanel.Dock="Right" Style="{StaticResource Hint}" VerticalAlignment="Center"
                        Text="Red: came up, not marked done yet. ~: an estimate, for a task that restarts when marked done. Paused tasks aren't shown." />
         </DockPanel>
-        <Border DockPanel.Dock="Right" Width="320" Margin="10,0,0,0" Style="{StaticResource Pane}">
-            <DockPanel>
-                <TextBlock x:Name="DayTitle" DockPanel.Dock="Top" FontSize="15" FontWeight="SemiBold" TextWrapping="Wrap" />
-                <TextBlock DockPanel.Dock="Bottom" Style="{StaticResource Hint}" Margin="0,6,0,0" TextWrapping="Wrap"
-                           Text="Double-click a task, or press Enter, to edit it." />
-                <ListBox x:Name="DayList" Margin="0,8,0,0" BorderThickness="0" Background="Transparent"
-                         MouseDoubleClick="DayList_DoubleClick" KeyDown="DayList_KeyDown"
-                         ScrollViewer.HorizontalScrollBarVisibility="Disabled" />
-            </DockPanel>
-        </Border>
-        <Grid x:Name="MonthGrid" />
+        <!-- The month, then the chosen day: their order is the order Tab takes. -->
+        <Grid>
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+            <Grid x:Name="MonthGrid" PreviewKeyDown="MonthGrid_PreviewKeyDown" />
+            <Border Grid.Column="1" Width="320" Margin="10,0,0,0" Style="{StaticResource Pane}">
+                <DockPanel>
+                    <TextBlock x:Name="DayTitle" DockPanel.Dock="Top" FontSize="15" FontWeight="SemiBold" TextWrapping="Wrap" />
+                    <TextBlock DockPanel.Dock="Bottom" Style="{StaticResource Hint}" Margin="0,6,0,0" TextWrapping="Wrap"
+                               Text="Double-click a task, or press Enter, to edit it." />
+                    <ListBox x:Name="DayList" Margin="0,8,0,0" BorderThickness="0" Background="Transparent"
+                             MouseDoubleClick="DayList_DoubleClick" KeyDown="DayList_KeyDown"
+                             ScrollViewer.HorizontalScrollBarVisibility="Disabled" />
+                </DockPanel>
+            </Border>
+        </Grid>
     </DockPanel>
 </Window>

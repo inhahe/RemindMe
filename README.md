@@ -98,6 +98,10 @@ restarts when marked done, only its next time is certain; the later ones,
 marked "~", assume you mark it done on time; once it has come up, they count
 from now. Paused tasks aren't shown.
 
+On Windows the calendar works from the keyboard too: the arrow keys move from day
+to day (a week at a time with Up and Down, into the next or last month past the
+edge), and Tab moves on to the day's tasks, where Enter opens one.
+
 ## Sounds
 
 The **Sound** button in the task editor shows the task's sound; click it to pick

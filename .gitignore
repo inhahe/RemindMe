@@ -13,4 +13,5 @@ TestResults/
 scratch/
 release/
 installer/publish/
+installer/publish-fd/
 todo.txt

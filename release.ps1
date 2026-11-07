@@ -1,7 +1,8 @@
 <#
   Publishes a GitHub release of RemindMe (github.com/inhahe/RemindMe), as release.bat
-  runs it: the Windows installer and exe and the Android APK of the version in VERSION,
-  tagged v<version>, once the tests pass. A 0.x version is published as a pre-release.
+  runs it: the version in VERSION, tagged v<version>, once the tests pass, with the
+  Windows installer, the two Windows exes (RemindMe.exe with .NET included, RemindMeFD.exe
+  without; see build-msi.ps1) and the Android APK. A 0.x version is a pre-release.
 
   What is released is main as GitHub has it, so nothing is published unless:
   - origin is github.com/inhahe/RemindMe;
@@ -109,10 +110,13 @@ Write-Host '[1/3] Running the tests...'
 dotnet test (Join-Path $root 'RemindMe.Core.Tests')
 if ($LASTEXITCODE) { Stop-Release 'The tests failed.' }
 Write-Host '[2/3] Building...'
+# The exes' names carry no version, so an older build's could otherwise be attached
+# should this one fail to replace it.
+$names = "RemindMe-$version.msi", 'RemindMe.exe', 'RemindMeFD.exe', "RemindMe-$version.apk"
+$assets = @($names | ForEach-Object { Join-Path $root "release\$_" })
+$assets | Where-Object { Test-Path $_ } | Remove-Item -Force
 & (Join-Path $root 'build-msi.ps1')
 & (Join-Path $root 'build-apk.ps1')
-$names = "RemindMe-$version.msi", "RemindMe-$version.exe", "RemindMe-$version.apk"
-$assets = @($names | ForEach-Object { Join-Path $root "release\$_" })
 foreach ($asset in $assets) { if (-not (Test-Path $asset)) { Stop-Release "The build made no $asset." } }
 
 # --- The release notes: what it is, how to install it, and what changed ---
@@ -121,7 +125,13 @@ $notes = @(
     ''
     '> **Alpha:** RemindMe is at an early stage and has not been tested in real use yet. Expect bugs, and don''t rely on it alone for anything that matters.'
     ''
-    "**Windows** (10 or 11, x64): run ``RemindMe-$version.msi`` to install it, or use ``RemindMe-$version.exe``, the same program on its own, with nothing to install."
+    '**Windows** (10 or 11, 64-bit): three files of the same program. Download one:'
+    ''
+    "- **RemindMe-$version.msi** installs it, with .NET built in: in the Start menu, starting with Windows, and let through Windows Firewall for syncing on private networks. If unsure, take this one."
+    '- **RemindMe.exe** (about 75 MB) is the program on its own, with nothing to install: .NET is built in.'
+    '- **RemindMeFD.exe** (under 1 MB) is the same program, but needs the [.NET 10 Desktop Runtime](https://dotnet.microsoft.com/download/dotnet/10.0) installed. FD stands for framework-dependent.'
+    ''
+    'Either exe can be renamed, to RemindMe.exe say.'
     ''
     "**Android** (10 or later): download ``RemindMe-$version.apk`` on the phone and open it, allowing your browser or file manager to install apps when asked."
     ''

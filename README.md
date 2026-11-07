@@ -8,12 +8,18 @@ Android, kept in sync between your computers and your phone.
 > no more. Expect bugs, and don't rely on it alone for anything that matters.
 > [`known-issues.md`](known-issues.md) lists what hasn't been checked.
 
-**Download** from the [releases page](https://github.com/inhahe/RemindMe/releases):
-`RemindMe-<version>.msi` installs it on Windows 10 or 11 (x64), and
-`RemindMe-<version>.exe` is the same program on its own, with nothing to
-install. `RemindMe-<version>.apk` is the Android app (Android 10 or later), to
-install by hand: open it on the phone and allow your browser or file manager to
-install apps when asked.
+**Download** from the [releases page](https://github.com/inhahe/RemindMe/releases).
+For Windows 10 or 11 (64-bit), take one of:
+- `RemindMe-<version>.msi`, which installs it, with .NET built in. If unsure,
+  take this one.
+- `RemindMe.exe` (about 75 MB), the program on its own, with nothing to
+  install: .NET is built in.
+- `RemindMeFD.exe` (under 1 MB), the same program, which needs the
+  [.NET 10 Desktop Runtime](https://dotnet.microsoft.com/download/dotnet/10.0)
+  installed. FD stands for framework-dependent.
+
+For Android 10 or later, `RemindMe-<version>.apk` is installed by hand: open it
+on the phone, and allow your browser or file manager to install apps when asked.
 
 ## Tasks
 
@@ -230,7 +236,7 @@ is 0, a release is published as a pre-release. Each script puts its output in
 
 | Script | Builds |
 |---|---|
-| `build-msi.ps1` | `RemindMe-<version>.msi`, the Windows installer, and `RemindMe-<version>.exe`, the program on its own (self-contained, no .NET needed). Needs the WiX Toolset (`dotnet tool install --global wix`, done for you) with its EULA accepted once (`wix eula accept wix7`). |
+| `build-msi.ps1` | `RemindMe-<version>.msi`, the Windows installer; `RemindMe.exe`, the program on its own with .NET included (self-contained); and `RemindMeFD.exe`, the same without .NET (framework-dependent, under 1 MB, needs the .NET 10 Desktop Runtime). The two exes are named as in the user's other projects. Needs the WiX Toolset (`dotnet tool install --global wix`, done for you) with its EULA accepted once (`wix eula accept wix7`). |
 | `build-apk.ps1` | `RemindMe-<version>.apk`. Sign it with your own key by setting `REMINDME_KEYSTORE`, `REMINDME_KEY_ALIAS`, `REMINDME_STORE_PASS` and `REMINDME_KEY_PASS` (the script's header says how to make one); otherwise it uses this machine's debug key, and an APK built elsewhere won't install over it. |
 | `release.bat` (which runs `release.ps1`) | The tests, both of the above, then the GitHub release `v<version>` on [inhahe/RemindMe](https://github.com/inhahe/RemindMe) with all three attached, using the GitHub CLI (`gh`). It publishes nothing unless this is `main` as GitHub has it (committed and pushed) and `VERSION` is new and above the last release. The notes say how to install and list the commits since the last release. `release.bat --dry-run` does everything but publish, and shows the notes. |
 

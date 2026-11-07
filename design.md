@@ -732,9 +732,15 @@ command separator to `cmd`.
   `AllowSameVersionUpgrades` makes a fourth-part bump an upgrade anyway. The
   price: an older MSI that differs only in the fourth part installs over a
   newer one without the downgrade message.
-- **`build-msi.ps1`**: a self-contained single-file `RemindMe.exe`
-  (win-x64), then `installer/RemindMe.wxs` with WiX 7 and its UI and
-  Firewall extensions.
+- **`build-msi.ps1`**: two single-file builds of the desktop app (win-x64),
+  then `installer/RemindMe.wxs` with WiX 7 and its UI and Firewall extensions.
+  - The self-contained build, with .NET included (about 75 MB, compressed), goes
+    into the MSI and beside it as `RemindMe.exe`.
+  - The framework-dependent build (under 1 MB; it needs the .NET 10 Desktop
+    Runtime) is `RemindMeFD.exe`.
+  - These are the names the user's NotepadRedo uses for its two exes: plain,
+    without the version, which is the release's.
+  - The MSI keeps .NET included, so installing needs nothing else.
   - Per machine, into `Program Files\RemindMe`. The install folder is
     remembered for upgrades, and the `UpgradeCode` is fixed forever (it
     predates the rename from Alarm & Calendar, which nothing released had).
@@ -756,8 +762,9 @@ command separator to `cmd`.
     GitHub's `main` doesn't have.
   - It refuses a version already released, or tagged without a release, or not
     above the last release (`git describe` of the last `v*` tag).
-  - Then the tests, `build-msi.ps1` and `build-apk.ps1` (all three assets
-    required).
+  - Then the tests, `build-msi.ps1` and `build-apk.ps1`. All four files are
+    required. The two exes' names carry no version, so they are deleted
+    before the build, and a stale one from an older build can't be attached.
   - Then `gh release create --target <commit>`, with notes on what it is, the
     alpha warning, how to install, and the commits since the last release. A
     0.x version is a pre-release.

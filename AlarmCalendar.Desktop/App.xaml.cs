@@ -9,8 +9,8 @@ namespace AlarmCalendar.Desktop;
 public partial class App : Application
 {
     private Mutex? _instanceMutex;
-    private EventWaitHandle? _showSignal;
-    private RegisteredWaitHandle? _showWait;
+    private EventWaitHandle? _showSignal, _exitSignal;
+    private RegisteredWaitHandle? _showWait, _exitWait;
     private bool _showingError;
 
     protected override void OnSessionEnding(SessionEndingCancelEventArgs e)
@@ -25,6 +25,7 @@ public partial class App : Application
     {
         base.OnStartup(e);
         bool minimized = e.Args.Contains("--minimized");
+        bool exit = e.Args.Contains("--exit");
         string dataDir = ArgValue(e.Args, "--data-dir")
             ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "AlarmCalendar");
         dataDir = Path.GetFullPath(dataDir);
@@ -33,6 +34,19 @@ public partial class App : Application
         // (--data-dir gives tests and experiments an instance of their own.)
         string tag = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(dataDir.ToLowerInvariant())))[..16];
         _instanceMutex = new Mutex(true, $"AlarmCalendar-{tag}", out bool first);
+        if (exit)
+        {
+            // --exit (the installer, before replacing the exe): the running copy, if any, is
+            // told to exit, and this waits until it has, so its files are free.
+            if (!first && EventWaitHandle.TryOpenExisting($"AlarmCalendar-{tag}-exit", out var quit))
+            {
+                quit.Set();
+                try { _instanceMutex.WaitOne(TimeSpan.FromSeconds(15)); }
+                catch (AbandonedMutexException) { }   // it exited holding it: as good as released
+            }
+            Shutdown();
+            return;
+        }
         if (!first)
         {
             if (!minimized && EventWaitHandle.TryOpenExisting($"AlarmCalendar-{tag}-show", out var show))
@@ -77,12 +91,17 @@ public partial class App : Application
         _showSignal = new EventWaitHandle(false, EventResetMode.AutoReset, $"AlarmCalendar-{tag}-show");
         _showWait = ThreadPool.RegisterWaitForSingleObject(_showSignal,
             (_, _) => Dispatcher.BeginInvoke(main.ShowFromTray), null, Timeout.Infinite, executeOnlyOnce: false);
+        _exitSignal = new EventWaitHandle(false, EventResetMode.AutoReset, $"AlarmCalendar-{tag}-exit");
+        _exitWait = ThreadPool.RegisterWaitForSingleObject(_exitSignal,
+            (_, _) => Dispatcher.BeginInvoke(main.ExitApp), null, Timeout.Infinite, executeOnlyOnce: true);
     }
 
     protected override void OnExit(ExitEventArgs e)
     {
         _showWait?.Unregister(null);
         _showSignal?.Dispose();
+        _exitWait?.Unregister(null);
+        _exitSignal?.Dispose();
         AppHost.Shutdown();
         _instanceMutex?.Dispose();
         base.OnExit(e);

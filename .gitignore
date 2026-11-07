@@ -11,3 +11,5 @@ TestResults/
 *.pdb
 *.log
 scratch/
+release/
+installer/publish/

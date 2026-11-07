@@ -141,6 +141,7 @@ private networks.
 |---|---|
 | `--minimized` | Start in the tray (start with Windows uses this). |
 | `--data-dir <folder>` | Keep tasks and settings in another folder; that folder gets its own instance. |
+| `--exit` | Tell the running copy (of that data folder) to exit, and wait until it has. The installer uses this before an upgrade. |
 
 Tasks and settings live in `%LOCALAPPDATA%\AlarmCalendar` (`tasks.json`,
 `settings.json`, each with a `.bak` of the previous version) along with `app.log`.
@@ -187,3 +188,20 @@ dotnet publish AlarmCalendar.Android -c Release -f net10.0-android
 The APK lands in `AlarmCalendar.Android/bin/Release/net10.0-android/publish/`
 (`com.inhahe.alarmcalendar-Signed.apk`). It is signed with the debug key, which
 is fine for installing by hand.
+
+### Releases
+
+The version is in `VERSION` (four numbers, e.g. `1.0.0.0`); bump it for every
+release. Each script puts its output in `release/`:
+
+| Script | Builds |
+|---|---|
+| `build-msi.ps1` | `AlarmCalendar-<version>.msi`, the Windows installer, and `AlarmCalendar-<version>.exe`, the program on its own (self-contained, no .NET needed). Needs the WiX Toolset (`dotnet tool install --global wix`, done for you) with its EULA accepted once (`wix eula accept wix7`). |
+| `build-apk.ps1` | `AlarmCalendar-<version>.apk`. Sign it with your own key by setting `ALARMCAL_KEYSTORE`, `ALARMCAL_KEY_ALIAS`, `ALARMCAL_STORE_PASS` and `ALARMCAL_KEY_PASS` (the script's header says how to make one); otherwise it uses this machine's debug key, and an APK built elsewhere won't install over it. |
+| `release-github.ps1` (or `release-github.bat`) | Both of the above, then a GitHub release `v<version>` with them attached, using the GitHub CLI (`gh`). `-DryRun` builds everything and shows the release command without running it; `-Repo owner/name` names the repository if `origin` isn't it. |
+
+The installer puts the program in `Program Files\AlarmCalendar`, adds it to the
+Start menu, and lets it through Windows Firewall on private and domain networks,
+so sync works without the first-run prompt. It can start it when it finishes. An
+upgrade closes the running copy first (`AlarmCalendar.exe --exit`) and installs
+over the previous version. Tasks and settings stay where they are, per user.

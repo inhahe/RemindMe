@@ -60,10 +60,22 @@ Checked on the emulator:
 
 ## Decisions waiting on the user
 
-### No installer, no release script
-The desktop app is a plain build output, and the APK is signed with the debug
-key. LanLink's pattern (a `VERSION` file, an MSI that adds the firewall rules,
-`release-github.bat`) would fit; see ROADMAP S9.
+### Releasing (S9 is built; these are yours to settle)
+- **A GitHub repository.** The project has no remote yet; `release-github.ps1`
+  needs one (`origin`, or `-Repo owner/name`), and publishes nothing until then.
+- **A release key for the APK.** `build-apk.ps1` signs with your key when the
+  `ALARMCAL_*` variables point at one, and with this machine's debug key
+  otherwise. Whatever key the first published APK uses, every update must use
+  too, so it is worth making a real one (the script's header says how) before
+  publishing, and keeping it safe.
+- **A license.** The installer shows no license page, because none is chosen.
+  LanLink's installer shows a "do whatever you want with it" text; say if this
+  project should carry the same (`installer/License.rtf` plus one line in the
+  `.wxs`).
+- **Not tried: an actual install.** The MSI was built and its payload unpacked
+  (`msiexec /a`), and the exe it contains starts and exits; installing it for
+  real would change this machine (Program Files, firewall rules), so that, and
+  an upgrade over it, are yours to try.
 
 ### F-Droid can't build .NET apps
 Choosing .NET for Android (so one Core serves both apps) rules out F-Droid. The

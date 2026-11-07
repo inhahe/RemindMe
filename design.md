@@ -599,6 +599,37 @@ it runs on Android 10 (API 29) and up. The root namespace is
   through a source-generated `JsonSerializerContext` (`CoreJson`), so nothing
   depends on reflection.
 
+## Releases (S9)
+
+As in LanLink, with PowerShell instead of batch files: the project folder's `&`
+is a command separator to `cmd`.
+
+- **`VERSION`** (four numbers) is the single source of the version. It becomes
+  the desktop assembly's version, Android's `versionName`, and its
+  `versionCode` (a·10⁶ + b·10⁴ + c·10² + d), which Android compares for
+  upgrades.
+- **`build-msi.ps1`**: a self-contained single-file `AlarmCalendar.exe`
+  (win-x64), then `installer/AlarmCalendar.wxs` with WiX 7 and its UI and
+  Firewall extensions.
+  - Per machine, into `Program Files\AlarmCalendar`, with no `&` in the folder
+    name. The install folder is remembered for upgrades, and the `UpgradeCode`
+    is fixed forever.
+  - A Start menu shortcut.
+  - Firewall exceptions for the exe on private and domain networks (not
+    public), which replace the first-run prompt.
+  - No license page, since none is chosen.
+  - "Launch now" on the last page, run as the installing user.
+  - An upgrade first runs the installed exe with `--exit`, which signals the
+    running copy (through a named event per data folder, like the existing
+    "show" one) and waits until it has exited, so the exe can be replaced.
+- **`build-apk.ps1`**: the Release APK with that version. It is signed with the
+  key the `ALARMCAL_*` environment variables name (passwords passed as
+  `env:NAME`, so they appear on no command line), or this machine's debug key.
+- **`release-github.ps1`**: builds both and creates the GitHub release
+  `v<version>` with `gh`, unless it exists already. The APK is optional.
+  `-DryRun` builds and prints the command; the repository comes from `origin`
+  or `-Repo`.
+
 ## Simplification opportunities
 
 - LanLink.Core and this project's sync layer share a design: discovery, framing,

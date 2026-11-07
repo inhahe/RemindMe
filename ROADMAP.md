@@ -131,4 +131,4 @@ user asked for all the rest (Phase 6):
 - [x] S8: **Export and import** tasks as a JSON file, in Settings on both platforms; import merges, restores deleted tasks, and rings nothing from the past
 - [x] S2: **Calendar**: a month grid of what is still to come or waiting, with each day's list, on both platforms
 - [x] S3: **Wake the PC from sleep** for the next alarm (waitable timer with resume, 20 s ahead), screen kept on while it rings, with a setting; not testable here without putting the machine to sleep
-- [ ] S9: releases (version, MSI, signed APK, release script)
+- [x] S9: **Releases**: `VERSION`, `build-msi.ps1` (WiX MSI with firewall rules, launch-now, upgrade-in-place via `--exit`; self-contained exe), `build-apk.ps1` (versionCode from `VERSION`, release key from the environment), `release-github.ps1` with `-DryRun`. The repository, the release key and the license are the user's to settle (known-issues.md)

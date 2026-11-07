@@ -25,7 +25,7 @@ public sealed class TaskEditActivity : Screen
     private readonly CheckBox[] _days = new CheckBox[7];
     private SoundChooser _chooser = null!;
     private SoundRef? _sound;
-    private DateTime _startDate, _onceDate;
+    private DateTime _startDate, _onceDate, _weeksFrom;
     private TimeOnly _startTime, _weeklyTime, _onceTime;
 
     public static Intent IntentFor(Context c, Guid? id)
@@ -73,6 +73,9 @@ public sealed class TaskEditActivity : Screen
 
         BuildDays(d);
         _weeklyTime = d.Kind == ScheduleKind.Weekly ? d.TimeOfDay : s.DefaultTimeOfDay;
+        bool everyFew = d.Kind == ScheduleKind.Weekly && d.WeekInterval > 1;
+        Find<EditText>(Resource.Id.week_interval).Text = (everyFew ? d.WeekInterval : 1).ToString(CultureInfo.CurrentCulture);
+        _weeksFrom = everyFew ? d.WeeksFrom.ToDateTime(TimeOnly.MinValue) : nowWall.Date;
         var at = d.Kind == ScheduleKind.Once ? d.At : nextHour;
         (_onceDate, _onceTime) = (at.Date, TimeOnly.FromDateTime(at));
 
@@ -100,6 +103,7 @@ public sealed class TaskEditActivity : Screen
             ShowTimes();
         };
         Find<Button>(Resource.Id.weekly_time).Click += (_, _) => Ui.PickTime(this, _weeklyTime, v => { _weeklyTime = v; ShowTimes(); });
+        Find<Button>(Resource.Id.weeks_from).Click += (_, _) => Ui.PickDate(this, _weeksFrom, v => { _weeksFrom = v; ShowTimes(); });
         Find<Button>(Resource.Id.once_date).Click += (_, _) => Ui.PickDate(this, _onceDate, v => { _onceDate = v; ShowTimes(); });
         Find<Button>(Resource.Id.once_time).Click += (_, _) => Ui.PickTime(this, _onceTime, v => { _onceTime = v; ShowTimes(); });
         Find<Button>(Resource.Id.sound).Click += (_, _) => _chooser.Show(_sound, allowDefault: true);
@@ -123,6 +127,7 @@ public sealed class TaskEditActivity : Screen
         outState.PutLong("startDate", _startDate.Ticks);
         outState.PutLong("startTime", _startTime.Ticks);
         outState.PutLong("weeklyTime", _weeklyTime.Ticks);
+        outState.PutLong("weeksFrom", _weeksFrom.Ticks);
         outState.PutLong("onceDate", _onceDate.Ticks);
         outState.PutLong("onceTime", _onceTime.Ticks);
         int mask = 0;
@@ -136,6 +141,7 @@ public sealed class TaskEditActivity : Screen
         _startDate = new DateTime(s.GetLong("startDate"));
         _startTime = new TimeOnly(s.GetLong("startTime"));
         _weeklyTime = new TimeOnly(s.GetLong("weeklyTime"));
+        _weeksFrom = new DateTime(s.GetLong("weeksFrom"));
         _onceDate = new DateTime(s.GetLong("onceDate"));
         _onceTime = new TimeOnly(s.GetLong("onceTime"));
         int mask = s.GetInt("days");
@@ -163,6 +169,7 @@ public sealed class TaskEditActivity : Screen
         Find<Button>(Resource.Id.start_date).Text = Ui.FormatDate(_startDate);
         Find<Button>(Resource.Id.start_time).Text = Ui.FormatTime(this, _startTime);
         Find<Button>(Resource.Id.weekly_time).Text = Ui.FormatTime(this, _weeklyTime);
+        Find<Button>(Resource.Id.weeks_from).Text = Ui.FormatDate(_weeksFrom);
         Find<Button>(Resource.Id.once_date).Text = Ui.FormatDate(_onceDate);
         Find<Button>(Resource.Id.once_time).Text = Ui.FormatTime(this, _onceTime);
     }
@@ -229,7 +236,18 @@ public sealed class TaskEditActivity : Screen
             int mask = 0;
             for (int i = 0; i < 7; i++) if (_days[i].Checked) mask |= 1 << i;
             if (mask == 0) errors.Add("Tick at least one day of the week.");
-            d = d with { Kind = ScheduleKind.Weekly, Days = mask, TimeOfDay = _weeklyTime };
+            if (!FieldParsing.TryInt(Find<EditText>(Resource.Id.week_interval).Text ?? "", 1, Occurrences.MaxWeekInterval, out int weeks))
+                errors.Add($"\"Every … weeks\" needs a whole number from 1 to {Occurrences.MaxWeekInterval}.");
+            d = d with { Kind = ScheduleKind.Weekly, Days = mask, TimeOfDay = _weeklyTime, WeekInterval = Math.Max(1, weeks) };
+            if (weeks > 1)
+                d = d with
+                {
+                    WeeksFrom = DateOnly.FromDateTime(_weeksFrom),
+                    // An existing task keeps the week start it was saved with, so opening it on a
+                    // device whose weeks start on another day doesn't move its schedule.
+                    FirstDayOfWeek = _original is { Kind: ScheduleKind.Weekly, WeekInterval: > 1 }
+                        ? _original.FirstDayOfWeek : CultureInfo.CurrentCulture.DateTimeFormat.FirstDayOfWeek,
+                };
         }
         else
         {

@@ -76,6 +76,14 @@ public sealed record TaskDefinition
     /// <summary>Bit (int)DayOfWeek set for each day the task fires; bit 0 is Sunday.</summary>
     public int Days { get; init; }
     public TimeOnly TimeOfDay { get; init; } = new(9, 0);
+    /// <summary>Rings every this many weeks; 1 is every week (S7).</summary>
+    public int WeekInterval { get; init; } = 1;
+    /// <summary>With <see cref="WeekInterval"/> above 1: a date in the first week that rings.
+    /// From that week on, every <see cref="WeekInterval"/>th rings; none before it.</summary>
+    public DateOnly WeeksFrom { get; init; }
+    /// <summary>With <see cref="WeekInterval"/> above 1: the day weeks start on, taken from the
+    /// culture of the device that saved the task, so that every device agrees which weeks ring.</summary>
+    public DayOfWeek FirstDayOfWeek { get; init; } = DayOfWeek.Monday;
 
     // Once
     /// <summary>Wall-clock date and time of a Once task.</summary>
@@ -114,7 +122,8 @@ public sealed record TaskDefinition
         Kind != other.Kind || Kind switch
         {
             ScheduleKind.Interval => IntervalCount != other.IntervalCount || Unit != other.Unit || Start != other.Start,
-            ScheduleKind.Weekly => Days != other.Days || TimeOfDay != other.TimeOfDay,
+            ScheduleKind.Weekly => Days != other.Days || TimeOfDay != other.TimeOfDay || WeekInterval != other.WeekInterval
+                || (WeekInterval > 1 && (WeeksFrom != other.WeeksFrom || FirstDayOfWeek != other.FirstDayOfWeek)),
             ScheduleKind.Once => At != other.At,
             ScheduleKind.Countdown => Duration != other.Duration,
             _ => true,

@@ -61,6 +61,14 @@
                                     <TextBlock Text="At " VerticalAlignment="Center" />
                                     <TextBox x:Name="WeeklyTime" Width="90" VerticalContentAlignment="Center" />
                                 </WrapPanel>
+                                <WrapPanel Margin="0,6,0,0">
+                                    <TextBlock Text="Every " VerticalAlignment="Center" />
+                                    <TextBox x:Name="WeekIntervalBox" Style="{StaticResource Small}" Width="56" />
+                                    <TextBlock Text=" weeks, starting the week of " VerticalAlignment="Center" />
+                                    <DatePicker x:Name="WeeksFromDate" Width="165" />
+                                </WrapPanel>
+                                <TextBlock Style="{StaticResource Hint}" Margin="0,2,0,0"
+                                           Text="1: every week. 2: every other week, and so on." />
                             </StackPanel>
                         </Border>
 

@@ -87,15 +87,35 @@ public static class Occurrences
 
     // ---- Weekly --------------------------------------------------------------------
 
+    /// <summary>The largest week interval the editors allow; it bounds the day-by-day scans.</summary>
+    public const int MaxWeekInterval = 99;
+
+    private static int WeekInterval(TaskDefinition d) => Math.Clamp(d.WeekInterval, 1, MaxWeekInterval);
+
+    /// <summary>Whether the task rings on <paramref name="day"/> (a wall-clock date).</summary>
+    private static bool RingsOn(TaskDefinition d, DateTime day)
+    {
+        if (!d.HasDay(day.DayOfWeek)) return false;
+        int n = WeekInterval(d);
+        if (n == 1) return true;
+        // Day numbers, not DateTime arithmetic, which can't step before 0001-01-01.
+        long weekZero = d.WeeksFrom.DayNumber - (((int)d.WeeksFrom.DayOfWeek - (int)d.FirstDayOfWeek + 7) % 7);
+        long sinceWeekZero = DateOnly.FromDateTime(day).DayNumber - weekZero;
+        return sinceWeekZero >= 0 && sinceWeekZero / 7 % n == 0;
+    }
+
+    /// <summary>How far a scan for the previous or next ringing day must go: across a whole
+    /// cycle of N weeks, plus a day either side for times near midnight.</summary>
+    private static int ScanDays(TaskDefinition d) => 7 * WeekInterval(d) + 8;
+
     private static DateTimeOffset? WeeklyAtOrBefore(TaskDefinition d, DateTimeOffset t, TimeZoneInfo z)
     {
         if ((d.Days & 0x7F) == 0) return null;
         var today = TimeMath.ToWall(t, z).Date;
-        // Eight days back always reaches the same weekday of the previous week.
-        for (int back = 0; back <= 8; back++)
+        for (int back = 0, scan = ScanDays(d); back <= scan; back++)
         {
             var day = today.AddDays(-back);
-            if (!d.HasDay(day.DayOfWeek)) continue;
+            if (!RingsOn(d, day)) continue;
             var o = TimeMath.ToInstant(day + d.TimeOfDay.ToTimeSpan(), z);
             if (o <= t) return o;
         }
@@ -105,11 +125,16 @@ public static class Occurrences
     private static DateTimeOffset? WeeklyAfter(TaskDefinition d, DateTimeOffset t, TimeZoneInfo z)
     {
         if ((d.Days & 0x7F) == 0) return null;
-        var today = TimeMath.ToWall(t, z).Date;
-        for (int fwd = -1; fwd <= 8; fwd++)
+        var start = TimeMath.ToWall(t, z).Date;
+        // Nothing rings before the first ringing week, which may be further off than a scan
+        // reaches: start the scan just before it.
+        int firstWeek = d.WeeksFrom.DayNumber - 7;
+        if (WeekInterval(d) > 1 && firstWeek > DateOnly.FromDateTime(start).DayNumber)
+            start = DateOnly.FromDayNumber(firstWeek).ToDateTime(TimeOnly.MinValue);
+        for (int fwd = -1, scan = ScanDays(d); fwd <= scan; fwd++)
         {
-            var day = today.AddDays(fwd);
-            if (!d.HasDay(day.DayOfWeek)) continue;
+            var day = start.AddDays(fwd);
+            if (!RingsOn(d, day)) continue;
             var o = TimeMath.ToInstant(day + d.TimeOfDay.ToTimeSpan(), z);
             if (o > t) return o;
         }

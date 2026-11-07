@@ -17,7 +17,7 @@ internal sealed class CamelCaseEnum<T>() : JsonStringEnumConverter<T>(JsonNaming
     PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase,
     DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
     Converters = [typeof(CamelCaseEnum<ScheduleKind>), typeof(CamelCaseEnum<IntervalUnit>), typeof(CamelCaseEnum<RestartMode>),
-        typeof(CamelCaseEnum<SoundMode>), typeof(CamelCaseEnum<SoundSource>)])]
+        typeof(CamelCaseEnum<SoundMode>), typeof(CamelCaseEnum<SoundSource>), typeof(CamelCaseEnum<DayOfWeek>)])]
 [JsonSerializable(typeof(AppSettings))]
 [JsonSerializable(typeof(StoreFile))]
 [JsonSerializable(typeof(SyncMessage))]
@@ -38,7 +38,7 @@ public static class Json
         Converters =
         {
             new CamelCaseEnum<ScheduleKind>(), new CamelCaseEnum<IntervalUnit>(), new CamelCaseEnum<RestartMode>(),
-            new CamelCaseEnum<SoundMode>(), new CamelCaseEnum<SoundSource>(),
+            new CamelCaseEnum<SoundMode>(), new CamelCaseEnum<SoundSource>(), new CamelCaseEnum<DayOfWeek>(),
         },
     });
 

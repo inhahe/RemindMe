@@ -11,7 +11,7 @@ schedules:
 | Schedule | What it does |
 |---|---|
 | **Every N** years, months, weeks, days, hours, minutes or seconds | Starts at a date and time you choose (today and now by default). |
-| **On days of the week** | Tick the days, and choose a time (09:00 unless you change the default in Settings). |
+| **On days of the week** | Tick the days, and choose a time (09:00 unless you change the default in Settings). **Every 2 weeks** (or 3, and so on) rings only every other week, starting the week you choose: "every other Monday and Thursday". |
 | **Once** | A single date and time. |
 | **Countdown timer** | A one-shot timer: it rings once when it runs out. |
 

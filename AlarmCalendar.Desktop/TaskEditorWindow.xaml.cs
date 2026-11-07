@@ -74,6 +74,11 @@ public partial class TaskEditorWindow : Window
         var weeklyTime = d.Kind == ScheduleKind.Weekly ? d.TimeOfDay : s.DefaultTimeOfDay;
         WeeklyTime.Text = Fields.FormatTime(weeklyTime);
         for (int i = 0; i < 7; i++) _days[i].IsChecked = d.HasDay((DayOfWeek)i);
+        bool everyFew = d.Kind == ScheduleKind.Weekly && d.WeekInterval > 1;
+        WeekIntervalBox.Text = (everyFew ? d.WeekInterval : 1).ToString(CultureInfo.CurrentCulture);
+        WeeksFromDate.SelectedDate = everyFew ? d.WeeksFrom.ToDateTime(TimeOnly.MinValue) : nowWall.Date;
+        WeekIntervalBox.TextChanged += (_, _) => UpdateWeeksFrom();
+        UpdateWeeksFrom();
 
         var at = d.Kind == ScheduleKind.Once ? d.At : nextHour;
         OnceDate.SelectedDate = at.Date;
@@ -132,6 +137,10 @@ public partial class TaskEditorWindow : Window
             : st.Triggered ? "It has finished and is waiting to be marked done." : "It has finished.";
         RestartCountdown.IsChecked = st.NextOccurrence is null;
     }
+
+    /// <summary>The first week matters only when it isn't every week.</summary>
+    private void UpdateWeeksFrom() =>
+        WeeksFromDate.IsEnabled = !Fields.TryInt(WeekIntervalBox.Text, 1, Occurrences.MaxWeekInterval, out int n) || n > 1;
 
     private static string FormatWall(DateTime t) => Fields.FormatTime(TimeOnly.FromDateTime(t));
 
@@ -202,7 +211,21 @@ public partial class TaskEditorWindow : Window
             for (int i = 0; i < 7; i++) if (_days[i].IsChecked == true) mask |= 1 << i;
             if (mask == 0) errors.Add("Tick at least one day of the week.");
             if (!Fields.TryTime(WeeklyTime.Text, out var time)) errors.Add("The time of day isn't a time, e.g. 9:30 or 21:30.");
-            d = d with { Kind = ScheduleKind.Weekly, Days = mask, TimeOfDay = time };
+            if (!Fields.TryInt(WeekIntervalBox.Text, 1, Occurrences.MaxWeekInterval, out int weeks))
+                errors.Add($"\"Every … weeks\" needs a whole number from 1 to {Occurrences.MaxWeekInterval}.");
+            d = d with { Kind = ScheduleKind.Weekly, Days = mask, TimeOfDay = time, WeekInterval = Math.Max(1, weeks) };
+            if (weeks > 1)
+            {
+                if (WeeksFromDate.SelectedDate is not { } from) errors.Add("Choose the week it starts.");
+                d = d with
+                {
+                    WeeksFrom = DateOnly.FromDateTime(WeeksFromDate.SelectedDate ?? DateTime.Today),
+                    // An existing task keeps the week start it was saved with, so opening it on a
+                    // device whose weeks start on another day doesn't move its schedule.
+                    FirstDayOfWeek = _original is { Kind: ScheduleKind.Weekly, WeekInterval: > 1 }
+                        ? _original.FirstDayOfWeek : CultureInfo.CurrentCulture.DateTimeFormat.FirstDayOfWeek,
+                };
+            }
         }
         else
         {

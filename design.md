@@ -59,6 +59,7 @@ with its own version (a hybrid logical clock, `Hlc`):
 | `Start` | Wall-clock start of an Interval schedule: occurrence *k* is `Start + k·N·unit` |
 | `Restart` | `FromDone` (the next occurrence is N after you mark it done) or `OnSchedule` (it keeps to the grid set by `Start`). Interval only. |
 | `Days`, `TimeOfDay` | Weekly: a bitmask indexed by `DayOfWeek` (bit 0 is Sunday), and a wall-clock time |
+| `WeekInterval`, `WeeksFrom`, `FirstDayOfWeek` | Weekly, every N weeks (S7): N (1 is every week), a date in the first week that rings, and the day weeks start on. That day comes from the culture of the device that first saved the schedule, and editing elsewhere keeps it, so every device agrees which weeks ring. |
 | `At` | Once: a wall-clock date and time |
 | `Duration` | Countdown: the length |
 | `ReminderMinutes` | How long after a dismissal it reminds again, while not done. 0 means it doesn't. |
@@ -94,7 +95,13 @@ An occurrence is an instant. For each kind:
 - **Interval, fixed-length units** (seconds, minutes, hours):
   `ToInstant(anchor) + k·N·unit`, in absolute time. "Every 8 hours" stays 8
   hours apart across a DST change.
-- **Weekly**: every enabled weekday at `TimeOfDay`.
+- **Weekly**: every enabled weekday at `TimeOfDay`. Every N weeks: only in the
+  weeks numbered 0, N, 2N… counting from the week of `WeeksFrom` (weeks
+  starting on `FirstDayOfWeek`), and none before it. The previous and next
+  ringing days are found by scanning day by day across one cycle (7·N + 8 days;
+  N is at most 99), with week numbers taken from day numbers rather than
+  `DateTime` arithmetic, which a record from elsewhere with no first week would
+  push before year 1.
 - **Once** and **Countdown**: a single occurrence, or none while the countdown
   isn't running.
 

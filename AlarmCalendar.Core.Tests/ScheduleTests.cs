@@ -118,6 +118,44 @@ public class OccurrenceTests
     }
 
     [Fact]
+    public void EveryOtherWeekRingsOnlyInItsWeeks()
+    {
+        // Mondays and Thursdays every 2 weeks, weeks starting on Monday, from the week of
+        // Wed 2026-06-03 (so the weeks of Jun 1, Jun 15, Jun 29 ring).
+        var d = new TaskDefinition
+        {
+            Kind = ScheduleKind.Weekly, TimeOfDay = new TimeOnly(9, 0), WeekInterval = 2,
+            WeeksFrom = new DateOnly(2026, 6, 3), FirstDayOfWeek = DayOfWeek.Monday,
+        }.WithDay(DayOfWeek.Monday, true).WithDay(DayOfWeek.Thursday, true);
+        Assert.Equal(NY(2026, 6, 4, 9), Occurrences.After(d, NoState, NY(2026, 6, 3, 12), NewYork));
+        Assert.Equal(NY(2026, 6, 15, 9), Occurrences.After(d, NoState, NY(2026, 6, 4, 9), NewYork));   // skips the week of Jun 8
+        Assert.Equal(NY(2026, 6, 4, 9), Occurrences.AtOrBefore(d, NoState, NY(2026, 6, 14, 23), NewYork));
+        Assert.Equal(4, Occurrences.Count(d, NoState, NY(2026, 5, 20), NY(2026, 6, 19), NewYork));   // Jun 1, 4, 15, 18
+        // Nothing before the first week, even a cycle earlier.
+        Assert.Null(Occurrences.AtOrBefore(d, NoState, NY(2026, 5, 31, 23), NewYork));
+        Assert.Equal(NY(2026, 6, 1, 9), Occurrences.After(d, NoState, NY(2026, 5, 1), NewYork));
+
+        // Weeks starting on Sunday instead: the week of Jun 3 is May 31 to Jun 6, so the next
+        // ringing week starts on Sunday Jun 14, and its Monday is Jun 15 again, its Thursday Jun 18.
+        var sunday = d with { FirstDayOfWeek = DayOfWeek.Sunday };
+        Assert.Equal(NY(2026, 6, 15, 9), Occurrences.After(sunday, NoState, NY(2026, 6, 5), NewYork));
+    }
+
+    [Fact]
+    public void AFirstRingingWeekFarAheadIsFound()
+    {
+        var d = new TaskDefinition
+        {
+            Kind = ScheduleKind.Weekly, TimeOfDay = new TimeOnly(9, 0), WeekInterval = 3, WeeksFrom = new DateOnly(2027, 3, 10),
+        }.WithDay(DayOfWeek.Friday, true);
+        Assert.Equal(NY(2027, 3, 12, 9), Occurrences.After(d, NoState, NY(2026, 6, 1), NewYork));
+        // A record from elsewhere with no first week: no crash (weeks count from year 1).
+        Assert.NotNull(Occurrences.After(d with { WeeksFrom = default, FirstDayOfWeek = DayOfWeek.Sunday }, NoState, NY(2026, 6, 1), NewYork));
+        Assert.Equal("Fri at 9:00 AM, every 3 weeks from the week of 10 Mar 2027",
+            TextFormat.Schedule(d, NoState, NY(2026, 6, 1), NewYork, System.Globalization.CultureInfo.GetCultureInfo("en-US")));
+    }
+
+    [Fact]
     public void OnceAndCountdown()
     {
         var once = new TaskDefinition { Kind = ScheduleKind.Once, At = new DateTime(2026, 6, 3, 15, 0, 0) };

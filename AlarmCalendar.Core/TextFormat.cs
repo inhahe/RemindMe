@@ -161,7 +161,13 @@ public static class TextFormat
                     return $"{every} from {When(TimeMath.ToInstant(d.Start, zone), now, zone, culture)}";
                 }
             case ScheduleKind.Weekly:
-                return $"{Weekdays(d.Days, culture)} at {WallTime(DateTime.Today + d.TimeOfDay.ToTimeSpan(), culture)}";
+                {
+                    string at = $"{Weekdays(d.Days, culture)} at {WallTime(DateTime.Today + d.TimeOfDay.ToTimeSpan(), culture)}";
+                    if (d.WeekInterval <= 1) return at;
+                    string from = d.WeeksFrom.ToDateTime(TimeOnly.MinValue).ToString(
+                        d.WeeksFrom.Year == TimeMath.ToWall(now, zone).Year ? "d MMM" : "d MMM yyyy", culture);
+                    return $"{at}, every {d.WeekInterval} weeks from the week of {from}";
+                }
             case ScheduleKind.Once:
                 return $"Once, {When(TimeMath.ToInstant(d.At, zone), now, zone, culture)}";
             case ScheduleKind.Countdown:

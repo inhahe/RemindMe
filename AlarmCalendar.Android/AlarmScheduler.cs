@@ -101,6 +101,8 @@ public sealed class BootReceiver : BroadcastReceiver
     {
         if (context is null) return;
         TimeZoneInfo.ClearCachedData();
+        // Sent once the phone is unlocked, perhaps to a process that started locked.
+        if (intent?.Action == Intent.ActionBootCompleted) AppState.LoadOnceUnlocked();
         AlarmScheduler.Reschedule(context);
         if (intent?.Action is Intent.ActionLockedBootCompleted or Intent.ActionBootCompleted or Intent.ActionMyPackageReplaced
             && AppState.Settings.SyncEnabled)

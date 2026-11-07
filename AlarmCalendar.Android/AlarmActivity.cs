@@ -14,7 +14,9 @@ namespace AlarmCalendar.Droid;
 /// due and reminds again after its reminder interval (R8). The restart mode (R7) and the
 /// reminder interval can be changed here; only fields the user changed are written back.
 /// When its task stops ringing for any other reason (a notification button, another
-/// device), it moves on to the next ringing task, or closes.
+/// device), it moves on to the next ringing task, or closes, in the background too. It
+/// plays nothing itself: the ringing service does, or, when that couldn't start, the
+/// notification of the safety net.
 /// </summary>
 [Activity(Label = "Alarm", Exported = false, LaunchMode = LaunchMode.SingleTask, TaskAffinity = "com.inhahe.alarmcalendar.alarm",
     ExcludeFromRecents = true, Theme = "@style/AlarmTheme")]
@@ -28,9 +30,6 @@ public sealed class AlarmActivity : Screen
     private int _shownMinutes;
     private RestartMode _shownRestart;
     private bool _leaving;
-    /// <summary>Plays the alarm only when the ringing service isn't running (the fallback
-    /// path, where the notification itself sounds until this screen is opened).</summary>
-    private AlarmSound? _ownSound;
 
     public static Intent IntentFor(Context c, Guid task, bool onRequest = false) =>
         new Intent(c, typeof(AlarmActivity)).PutExtra("task", task.ToString()).PutExtra("show", onRequest)
@@ -48,10 +47,10 @@ public sealed class AlarmActivity : Screen
         Find<Button>(Resource.Id.silence).Click += (_, _) =>
         {
             RingingService.Silence(_id);
-            _ownSound?.Stop(_id);
             Find<Button>(Resource.Id.silence).Enabled = false;
         };
         OnBackPressedDispatcher.AddCallback(this, new BackCallback(() => Leave(done: false)));
+        AppState.TasksChanged += Refresh;
         Load(Intent);
     }
 
@@ -68,12 +67,19 @@ public sealed class AlarmActivity : Screen
             NextOrFinish();
             return;
         }
-        Show(t, intent!.GetBooleanExtra("show", false));
+        bool onRequest = intent!.GetBooleanExtra("show", false);
+        if (id == _id && !_leaving)
+        {
+            // Opened again for the task already shown: keep whatever the user has typed.
+            _shownOnRequest |= onRequest;
+            Refresh();
+            return;
+        }
+        Show(t, onRequest);
     }
 
     private void Show(AlarmTask t, bool onRequest)
     {
-        if (_ownSound is not null && _id != t.Id) _ownSound.Stop(_id);
         _id = t.Id;
         _shownOnRequest = onRequest;
         ShowChoices(t.Def);
@@ -97,7 +103,7 @@ public sealed class AlarmActivity : Screen
 
     protected override void OnDestroy()
     {
-        _ownSound?.StopAll();
+        AppState.TasksChanged -= Refresh;
         base.OnDestroy();
     }
 
@@ -145,21 +151,12 @@ public sealed class AlarmActivity : Screen
         var problem = Find<TextView>(Resource.Id.sound_problem);
         problem.Text = info?.SoundProblem ?? "";
         problem.Visibility = problem.Text.Length > 0 ? ViewStates.Visible : ViewStates.Gone;
-
-        // The fallback path: no service to play the task's sound, so this screen does,
-        // once the user is looking at it (the notification that opened it has stopped).
-        if (st.ShouldAlert && !RingingService.IsRunning && Find<Button>(Resource.Id.silence).Enabled)
-        {
-            _ownSound ??= new AlarmSound(this);
-            if (!_ownSound.IsPlayingOrPlayed(_id))
-                _ownSound.Play(_id, AppState.Settings.SoundFor(d, Platforms.Android), AppState.Settings.SoundModeFor(d) == SoundMode.Repeat);
-        }
     }
 
     /// <summary>Shows the next task that is ringing, or closes when none is.</summary>
     private void NextOrFinish()
     {
-        _ownSound?.Stop(_id);
+        if (IsFinishing) return;
         var next = AlarmScheduler.RingingNow(AppState.Clock.UtcNow, out _).FirstOrDefault(s => s.Task.Id != _id);
         if (next is null) { Finish(); return; }
         _leaving = false;

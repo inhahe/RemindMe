@@ -27,16 +27,16 @@ public static class AppState
 
     public static SyncEngine? Sync { get; private set; }
     public static string SyncStatus { get; private set; } = "";
-    /// <summary>A pairing request no screen has answered yet.</summary>
-    public static PairPrompt? PendingPrompt { get; set; }
+
+    /// <summary>The data isn't loaded yet: the phone hasn't been unlocked since it restarted,
+    /// and the files may still be in the credential-protected storage of an earlier version.
+    /// Until <see cref="LoadOnceUnlocked"/>, nothing is read or written, and sync stays off.</summary>
+    public static bool Provisional { get; private set; }
 
     /// <summary>Raised on the main thread when sync starts or stops, or its peers change.</summary>
     public static event Action? SyncChanged;
     /// <summary>Raised on the main thread as a pairing this device asked for progresses.</summary>
     public static event Action<PairProgress>? PairProgressed;
-    /// <summary>Raised on the main thread for a pairing request; a screen that handles it
-    /// sets <see cref="PendingPrompt"/> to null.</summary>
-    public static event Action<PairPrompt>? PairRequested;
     /// <summary>Raised on the main thread after any task changes.</summary>
     public static event Action? TasksChanged;
 
@@ -45,9 +45,31 @@ public static class AppState
     public static void Initialize(Context context)
     {
         Context = context;
-        DataDir = DataDirectory(context);
-        Settings = AppSettings.Load(SettingsPath, DefaultDeviceName(), Log);
-        Store = new TaskStore(Path.Combine(DataDir, "tasks.json"), Settings.NodeId, Clock, Log);
+        Load();
+        // Only a receiver registered at run time hears of the unlock (no manifest receiver
+        // does); the boot-completed broadcast and the first screen opened cover it too.
+        if (Provisional)
+            AndroidX.Core.Content.ContextCompat.RegisterReceiver(context, new UnlockReceiver(), new IntentFilter(Intent.ActionUserUnlocked),
+                AndroidX.Core.Content.ContextCompat.ReceiverNotExported);
+    }
+
+    private sealed class UnlockReceiver : BroadcastReceiver
+    {
+        public override void OnReceive(Context? context, Intent? intent)
+        {
+            try { Context.UnregisterReceiver(this); }
+            catch (Java.Lang.IllegalArgumentException) { }
+            LoadOnceUnlocked();
+        }
+    }
+
+    private static void Load()
+    {
+        var dir = DataDirectory(Context);
+        Provisional = dir is null;
+        DataDir = dir ?? "";
+        Settings = dir is null ? new AppSettings { SyncEnabled = false } : AppSettings.Load(SettingsPath, DefaultDeviceName(), Log);
+        Store = new TaskStore(dir is null ? null : Path.Combine(dir, "tasks.json"), Settings.NodeId, Clock, Log);
         Store.Changed += _ => OnMain(() =>
         {
             AlarmScheduler.Reschedule(Context);
@@ -56,27 +78,53 @@ public static class AppState
         });
     }
 
+    /// <summary>Loads the data if the phone was locked when the process started
+    /// (<see cref="Provisional"/>) and is unlocked now; then sets the alarms and starts sync.</summary>
+    public static void LoadOnceUnlocked()
+    {
+        if (!Provisional || !IsUnlocked(Context)) return;
+        Load();
+        Log("Loaded the data after the first unlock.");
+        AlarmScheduler.Reschedule(Context);
+        TasksChanged?.Invoke();
+        if (Settings.SyncEnabled) SyncService.Start(Context);
+    }
+
+    private static bool IsUnlocked(Context context) =>
+        ((Android.OS.UserManager?)context.GetSystemService(Context.UserService))?.IsUserUnlocked == true;
+
     /// <summary>
     /// Device-protected storage, readable before the first unlock after a restart, so the
     /// locked-boot receiver can set the alarms of a phone that restarted overnight (as
     /// Android's own clock app does). The cost: those files are protected by the device key
-    /// only, not the user's PIN. Files from the credential-protected directory of earlier
-    /// versions move over once, the first time the phone is unlocked.
+    /// only, not the user's PIN.
+    /// <para>Earlier versions kept their files in credential-protected storage, readable only
+    /// once unlocked. They move over, overwriting, on the first unlocked start, and a marker
+    /// file records that it is done; before that, while locked, there is no data to use.</para>
     /// </summary>
-    private static string DataDirectory(Context context)
+    /// <returns>The directory, or null while the data can't be known yet.</returns>
+    private static string? DataDirectory(Context context)
     {
-        var dp = context.CreateDeviceProtectedStorageContext()!;
-        var dir = dp.FilesDir!.AbsolutePath;
-        var um = (Android.OS.UserManager?)context.GetSystemService(Context.UserService);
-        if (um?.IsUserUnlocked == true && context.FilesDir is { } old && old.AbsolutePath != dir)
-        {
+        var dir = context.CreateDeviceProtectedStorageContext()!.FilesDir!.AbsolutePath;
+        var marker = Path.Combine(dir, "moved-to-device-storage");
+        if (File.Exists(marker)) return dir;
+        if (!IsUnlocked(context)) return null;
+        bool moved = true;
+        if (context.FilesDir is { } old && old.AbsolutePath != dir)
             foreach (var name in new[] { "tasks.json", "tasks.json.bak", "settings.json", "settings.json.bak", "app.log" })
             {
                 var from = Path.Combine(old.AbsolutePath, name);
-                var to = Path.Combine(dir, name);
-                try { if (File.Exists(from) && !File.Exists(to)) File.Move(from, to); }
-                catch (IOException e) { global::Android.Util.Log.Warn("AlarmCalendar", $"Couldn't move {name}: {e.Message}"); }
+                try { if (File.Exists(from)) File.Move(from, Path.Combine(dir, name), overwrite: true); }
+                catch (IOException e)
+                {
+                    moved = false;   // tried again at the next start
+                    global::Android.Util.Log.Warn("AlarmCalendar", $"Couldn't move {name}: {e.Message}");
+                }
             }
+        if (moved)
+        {
+            try { File.WriteAllText(marker, ""); }
+            catch (IOException e) { global::Android.Util.Log.Warn("AlarmCalendar", $"Couldn't write {marker}: {e.Message}"); }
         }
         return dir;
     }
@@ -114,7 +162,7 @@ public static class AppState
     /// which keeps the process alive around it.</summary>
     public static void EnsureSync()
     {
-        if (Sync is not null || !Settings.SyncEnabled) return;
+        if (Sync is not null || !Settings.SyncEnabled || Provisional) return;
         var s = Settings;
         var engine = new SyncEngine(Store, new SyncIdentity(s.NodeId, s.DeviceName, s.GroupId, s.GroupKey), new SyncOptions
         {
@@ -141,19 +189,7 @@ public static class AppState
             Settings.KnownPeers = [];
             SaveSettings();
         });
-        engine.PairRequested += p => OnMain(() =>
-        {
-            if (p.IsWithdrawn) return;   // over before this ran
-            p.Withdrawn += () => OnMain(() =>
-            {
-                if (PendingPrompt != p) return;
-                PendingPrompt = null;
-                Notifications.Cancel(Context, Notifications.PairId);
-            });
-            PendingPrompt = p;
-            PairRequested?.Invoke(p);
-            if (PendingPrompt == p) Notifications.ShowPairRequest(Context, p);
-        });
+        engine.PairRequested += p => OnMain(() => AddPrompt(p));
         engine.PairProgressed += p => OnMain(() => PairProgressed?.Invoke(p));
         engine.PeersChanged += () => OnMain(() =>
         {
@@ -182,6 +218,63 @@ public static class AppState
         Sync = null;
         SyncStatus = Settings.SyncEnabled ? "Sync is stopped." : "Sync is off.";
         SyncChanged?.Invoke();
+    }
+
+    // ---- Pairing questions (main thread only) ------------------------------------------
+
+    private static readonly List<PairPrompt> Prompts = [];
+
+    /// <summary>The pairing question to answer next, if any. The Devices screen asks it while
+    /// in front; otherwise a notification stands for it until it is answered or withdrawn.</summary>
+    public static PairPrompt? PendingPrompt => Prompts.Count > 0 ? Prompts[0] : null;
+
+    /// <summary>Set by the Devices screen while its dialog asks <see cref="PendingPrompt"/>:
+    /// then no notification is needed.</summary>
+    public static bool PromptOnScreen { get; set; }
+
+    /// <summary>A question has become <see cref="PendingPrompt"/>: a Devices screen in front asks it.</summary>
+    public static event Action<PairPrompt>? PairRequested;
+    /// <summary>A question was answered or withdrawn: a screen asking it closes its dialog.</summary>
+    public static event Action<PairPrompt>? PromptEnded;
+
+    private static void AddPrompt(PairPrompt p)
+    {
+        // Subscribed before the check, so that a withdrawal at any moment is seen.
+        p.Withdrawn += () => OnMain(() => EndPrompt(p));
+        if (p.IsWithdrawn) return;
+        Prompts.Add(p);
+        if (PendingPrompt == p) ShowPrompt(p);
+    }
+
+    private static void ShowPrompt(PairPrompt p)
+    {
+        PairRequested?.Invoke(p);
+        if (!PromptOnScreen) Notifications.ShowPairRequest(Context, p);
+    }
+
+    private static void EndPrompt(PairPrompt p)
+    {
+        bool wasNext = PendingPrompt == p;
+        if (!Prompts.Remove(p)) return;
+        PromptEnded?.Invoke(p);
+        if (!wasNext) return;
+        Notifications.Cancel(Context, Notifications.PairId);
+        if (PendingPrompt is { } next) ShowPrompt(next);
+    }
+
+    /// <summary>The user answered <paramref name="p"/>, on the Devices screen.</summary>
+    public static void AnswerPrompt(PairPrompt p, bool yes)
+    {
+        EndPrompt(p);
+        _ = yes ? p.AcceptAsync() : p.RejectAsync();
+    }
+
+    /// <summary>The Devices screen stopped asking the question unanswered (it went to the
+    /// background): the notification stands for it again.</summary>
+    public static void PromptHidden()
+    {
+        PromptOnScreen = false;
+        if (PendingPrompt is { } p) Notifications.ShowPairRequest(Context, p);
     }
 
     public static void LeaveSyncGroup()
@@ -230,20 +323,22 @@ public static class AppState
 
     public static void PostDelayed(Action action, long ms) => Main.PostDelayed(action, ms);
 
+    /// <summary>Logs to logcat, and to <c>app.log</c> once the data directory is known.</summary>
     public static void Log(string message)
     {
+        global::Android.Util.Log.Info("AlarmCalendar", message);
+        if (DataDir.Length == 0) return;   // Provisional: the files can't be written yet
         try
         {
             lock (LogLock)
             {
-                var path = Path.Combine(DataDir.Length > 0 ? DataDir : Path.GetTempPath(), "app.log");
+                var path = Path.Combine(DataDir, "app.log");
                 var info = new FileInfo(path);
                 if (info.Exists && info.Length > 500_000) File.Move(path, path + ".old", overwrite: true);
                 File.AppendAllText(path, $"{DateTime.Now:yyyy-MM-dd HH:mm:ss} {message}{System.Environment.NewLine}");
             }
-            global::Android.Util.Log.Info("AlarmCalendar", message);
         }
-        catch (IOException) { }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
     }
 }
 

@@ -13,9 +13,9 @@ public static class Notifications
     /// <summary>Alarms posted when the ringing service couldn't start: this channel carries
     /// the phone's alarm sound itself.</summary>
     public const string FallbackChannel = "alarms_fallback";
-    /// <summary>The ringing service's own notification. Low importance, deliberately: on the
-    /// alarm channel it counted as a second alerting notification, Android grouped it with
-    /// the alarm, and a grouped alarm's full-screen intent never opened the alarm screen.</summary>
+    /// <summary>The ringing service's own notification. It must not alert: Android groups an
+    /// app's alerting notifications, and a grouped alarm's full-screen intent doesn't open
+    /// the alarm screen.</summary>
     public const string ServiceChannel = "ringing_service";
     public const string SyncChannel = "sync";
     public const string PairChannel = "pairing";
@@ -85,11 +85,14 @@ public static class Notifications
         b.SetPriority(NotificationCompat.PriorityMax);
         b.SetOngoing(true);
         b.SetAutoCancel(false);
+        // Posted again over itself (the service taking over from the safety net, or a silenced
+        // safety-net alarm), it must neither sound nor open the alarm screen a second time.
+        b.SetOnlyAlertOnce(true);
         b.SetContentIntent(openPi);
         b.SetFullScreenIntent(openPi, true);
         b.SetVisibility(NotificationCompat.VisibilityPublic);
-        b.AddAction(0, "Mark done", AlarmActionReceiver.IntentFor(context, st.Task.Id, AlarmActionReceiver.Done));
-        b.AddAction(0, "Remind me later", AlarmActionReceiver.IntentFor(context, st.Task.Id, AlarmActionReceiver.Later));
+        b.AddAction(0, "Mark done", AlarmActionReceiver.IntentFor(context, st, AlarmActionReceiver.Done));
+        b.AddAction(0, "Remind me later", AlarmActionReceiver.IntentFor(context, st, AlarmActionReceiver.Later));
         return b.Build()!;
     }
 
@@ -151,24 +154,38 @@ public static class Notifications
     public static void Cancel(Context context, int id) => NotificationManagerCompat.From(context)!.Cancel(id);
 }
 
-/// <summary>The Mark done and Remind me later buttons of an alarm notification.</summary>
+/// <summary>The Mark done and Remind me later buttons of an alarm notification. Each acts
+/// only on the alert it was posted for: a notification left over from one already answered
+/// must not mark the task done again (which would move an interval task that restarts when
+/// done) or snooze it.</summary>
 [BroadcastReceiver(Enabled = true, Exported = false)]
 public sealed class AlarmActionReceiver : BroadcastReceiver
 {
     public const string Done = "done";
     public const string Later = "later";
 
-    public static PendingIntent IntentFor(Context context, Guid task, string action)
+    public static PendingIntent IntentFor(Context context, TaskStatus st, string action)
     {
-        var i = new Intent(context, typeof(AlarmActionReceiver)).SetAction(action).PutExtra("task", task.ToString());
-        return PendingIntent.GetBroadcast(context, Notifications.AlarmId(task) * 2 + (action == Done ? 0 : 1), i,
+        var i = new Intent(context, typeof(AlarmActionReceiver)).SetAction(action)
+            .PutExtra("task", st.Task.Id.ToString()).PutExtra("due", st.AlertDue?.UtcTicks ?? 0);
+        return PendingIntent.GetBroadcast(context, Notifications.AlarmId(st.Task.Id) * 2 + (action == Done ? 0 : 1), i,
             PendingIntentFlags.Immutable | PendingIntentFlags.UpdateCurrent)!;
     }
 
     public override void OnReceive(Context? context, Intent? intent)
     {
-        if (!Guid.TryParse(intent?.GetStringExtra("task"), out var id)) return;
-        if (intent!.Action == Done) AppState.Store.MarkDone(id);
+        if (!Guid.TryParse(intent?.GetStringExtra("task"), out var id) || AppState.Store.Get(id) is not { } t) return;
+        var st = AlarmEngine.Evaluate(t, AppState.Clock.UtcNow, AppState.Clock.Zone);
+        if (!st.ShouldAlert || st.AlertDue?.UtcTicks != intent!.GetLongExtra("due", -1))
+        {
+            // Every post of a task's alarm updates these buttons, so this notification is
+            // stale: withdrawn. An alert due now is posted afresh by the next evaluation.
+            AppState.Log($"Ignored a notification button for an alert already answered: {TextFormat.Snippet(t.Def.Description, 40)}");
+            Notifications.Cancel(context!, Notifications.AlarmId(id));
+            RingingService.Poke();
+            return;
+        }
+        if (intent.Action == Done) AppState.Store.MarkDone(id);
         else AppState.Store.Dismiss(id);
     }
 }

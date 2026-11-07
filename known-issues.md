@@ -29,12 +29,23 @@ restrict full-screen intents), that background sync survives with the screen off
 - **A cold start under Restricted battery use.** The process couldn't be killed
   without root, which the Play Store system image lacks. The alarm rang on time
   under Restricted with the process alive.
-- **The safety net** (`RingingService.NotifyWithoutService`), which runs only
-  when Android refuses to start the ringing service.
+- **A sticky restart refused the foreground** (`RingingService.OnStartCommand`
+  falling back to the safety net): Android does this only to a service it
+  restarts in the background after killing the process mid-alarm.
+- **A notification button left over from an alert already answered**: the app
+  withdraws such notifications itself, so none was left to press; the check
+  that ignores one is there in case another path leaves one.
 
-(Direct boot *was* checked: with a PIN set and the emulator rebooted, the app's
-alarm was registered while the user was still `RUNNING_LOCKED`, and every task
-was there after unlocking.)
+Checked on the emulator:
+- **Direct boot**: with a PIN set and the emulator rebooted, the app's alarm was
+  registered while the user was still `RUNNING_LOCKED`, and every task was there
+  after unlocking. With no data yet moved to device storage (cleared, as on the
+  first start after the update), the locked process loaded nothing and wrote
+  nothing, then loaded the data the moment the PIN was entered.
+- **The safety net**: with the `START_FOREGROUND` app op denied, the alarm rang
+  as an insistent notification on the fallback channel and opened the alarm
+  screen over the lock screen; Silence posted it again quietly, and Close,
+  remind me later withdrew it.
 
 ## Decisions waiting on the user
 

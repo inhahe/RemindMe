@@ -39,7 +39,7 @@ public sealed class SettingsActivity : Screen
         if (savedInstanceState is { } saved)
         {
             _timeOfDay = new TimeOnly(saved.GetLong("timeOfDay"));
-            _sound = saved.GetBoolean("hasSound") ? SoundChooser.Restore(saved, "sound") : null;
+            _sound = SoundChooser.Restore(saved, "sound");
         }
         Show();
     }
@@ -49,7 +49,6 @@ public sealed class SettingsActivity : Screen
     {
         base.OnSaveInstanceState(outState);
         outState.PutLong("timeOfDay", _timeOfDay.Ticks);
-        outState.PutBoolean("hasSound", _sound is not null);
         SoundChooser.Save(outState, "sound", _sound);
     }
 

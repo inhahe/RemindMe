@@ -132,7 +132,9 @@ laid out for a phone:
   is the same as **Close, remind me later**. Alarms play at the alarm volume, so Do
   Not Disturb lets them through unless it is set to block alarms. They also
   vibrate, and they are set again after a restart. Ones missed while the phone
-  was off ring when it starts, marked late.
+  was off ring when it starts, marked late. If Android or the phone's battery
+  manager won't let the app play its own sound, the alarm still rings, with the
+  phone's alarm sound.
 - **Sounds**: pick one of the phone's alarm, ringtone or notification sounds, or
   a sound file.
 - **Settings** also shows whether notifications, exact alarms and full-screen

@@ -12,9 +12,9 @@ namespace AlarmCalendar.Droid;
 /// vibrates, and re-evaluates every second, so an alarm marked done or dismissed anywhere
 /// (another screen, a notification button, another device) stops here too. A foreground
 /// service, so the sound keeps playing with the app in the background (D4).
-/// <para>The service's own foreground notification has a fixed ID, separate from the
-/// tasks' notifications: Android removes a foreground notification whose ID the service
-/// moves away from, and won't cancel the current one, so sharing IDs lost alarms.</para>
+/// <para>The service's own foreground notification has a fixed ID that is never a task's:
+/// Android won't cancel a running foreground service's notification, and removes the old
+/// one when the service moves to another ID, so no task's alarm may serve as it.</para>
 /// </summary>
 [Service(Exported = false, ForegroundServiceType = ForegroundService.TypeMediaPlayback)]
 public sealed class RingingService : Service
@@ -50,7 +50,9 @@ public sealed class RingingService : Service
             context.StartForegroundService(new Intent(context, typeof(RingingService)));
             return true;
         }
-        catch (Exception e) when (e is Java.Lang.IllegalStateException or ForegroundServiceStartNotAllowedException)
+        // Refused in the background (Android 12+), or by an app op or a missing permission.
+        catch (Exception e) when (e is Java.Lang.IllegalStateException or ForegroundServiceStartNotAllowedException
+            or Java.Lang.SecurityException)
         {
             AppState.Log($"Couldn't start the ringing service: {e.Message}");
             return false;
@@ -59,9 +61,11 @@ public sealed class RingingService : Service
 
     /// <summary>
     /// The safety net when the service can't start (a phone maker's battery manager, or an
-    /// inexact alarm on Android 12 without exact-alarm access): each alert goes out as an
-    /// insistent notification on a channel with the phone's alarm sound, which Android plays
-    /// over and over until the user touches it. The task's own sound isn't used, but it rings.
+    /// inexact alarm on Android 12 without exact-alarm access): each alert goes out as a
+    /// notification on a channel with the phone's alarm sound, which Android itself plays,
+    /// over and over (insistent) for a task whose sound repeats, until it is answered or
+    /// silenced. The task's own sound isn't used, but it rings even if the process dies.
+    /// <see cref="Poke"/> withdraws it once the task is answered anywhere.
     /// </summary>
     public static void NotifyWithoutService(Context context, IEnumerable<TaskStatus> ringing)
     {
@@ -69,9 +73,12 @@ public sealed class RingingService : Service
         foreach (var st in ringing)
         {
             if (HasAlerted(st)) continue;
-            Alerts[st.Task.Id] = NewAlert(st, now, soundProblem: "The alarm couldn't start its own sound, so the phone's alarm sound plays.");
+            var alert = NewAlert(st, now, soundProblem: "The alarm couldn't start its own sound, so the phone's alarm sound plays.");
+            Alerts[st.Task.Id] = alert;
             var n = Notifications.Alarm(context, st, fallback: true);
-            n.Flags |= NotificationFlags.Insistent;
+            if (alert.Repeat) n.Flags |= NotificationFlags.Insistent;
+            // Withdrawn first: an update of a notification still showing wouldn't sound again.
+            Notifications.Cancel(context, Notifications.AlarmId(st.Task.Id));
             Notifications.Post(context, Notifications.AlarmId(st.Task.Id), n);
             AppState.Log($"Ringing without the service: {TextFormat.Snippet(st.Task.Def.Description, 40)}");
         }
@@ -84,8 +91,26 @@ public sealed class RingingService : Service
         return new AlertInfo(st.AlertDue, late, soundProblem, AppState.Settings.SoundModeFor(st.Task.Def) == SoundMode.Repeat);
     }
 
-    /// <summary>Re-evaluates at once (after a task changed).</summary>
-    public static void Poke() => _instance?.Evaluate();
+    /// <summary>Re-evaluates at once, after a task changed. Without the service (the safety
+    /// net), withdraws the notification of every alert that no longer rings, which nothing
+    /// else would: answered on the alarm screen, by a notification button, or on another device.</summary>
+    public static void Poke()
+    {
+        if (_instance is { } s)
+        {
+            s.Evaluate();
+            return;
+        }
+        if (Alerts.Count == 0) return;
+        var ringing = AlarmScheduler.RingingNow(AppState.Clock.UtcNow, out _).ToDictionary(st => st.Task.Id);
+        foreach (var (id, alert) in Alerts.ToList())
+        {
+            if (ringing.TryGetValue(id, out var st) && st.AlertDue == alert.Due) continue;
+            Alerts.Remove(id);
+            Silenced.Remove(id);
+            Notifications.Cancel(AppState.Context, Notifications.AlarmId(id));
+        }
+    }
 
     /// <summary>Stops the sound, and the vibration, of one task without dismissing it.</summary>
     public static void Silence(Guid task)
@@ -95,6 +120,13 @@ public sealed class RingingService : Service
         {
             s._sound?.Stop(task);
             s.UpdateVibration(newAlert: false);
+            return;
+        }
+        // The safety net, where the notification itself sounds: posted again on the silent channel.
+        if (Alerts.ContainsKey(task) && AppState.Store.Get(task) is { } t)
+        {
+            var st = AlarmEngine.Evaluate(t, AppState.Clock.UtcNow, AppState.Clock.Zone);
+            Notifications.Post(AppState.Context, Notifications.AlarmId(task), Notifications.Alarm(AppState.Context, st, fallback: false));
         }
     }
 
@@ -115,7 +147,20 @@ public sealed class RingingService : Service
     public override StartCommandResult OnStartCommand(Intent? intent, StartCommandFlags flags, int startId)
     {
         // A foreground service must call StartForeground promptly, whatever happens next.
-        StartForeground(ServiceNotificationId, Notifications.Ringing(this, Alerts.Count), ForegroundService.TypeMediaPlayback);
+        try
+        {
+            StartForeground(ServiceNotificationId, Notifications.Ringing(this, Alerts.Count), ForegroundService.TypeMediaPlayback);
+        }
+        catch (Exception e) when (e is Java.Lang.IllegalStateException or ForegroundServiceStartNotAllowedException
+            or Java.Lang.SecurityException)
+        {
+            // Restarted in the background (sticky, after Android killed the process), where
+            // Android 12 and later may refuse a foreground service: the safety net rings instead.
+            AppState.Log($"The ringing service couldn't go to the foreground: {e.Message}");
+            NotifyWithoutService(this, AlarmScheduler.RingingNow(AppState.Clock.UtcNow, out _));
+            StopSelf();
+            return StartCommandResult.NotSticky;
+        }
         Evaluate();
         // Sticky: if Android kills the process mid-alarm, it restarts the service, which
         // finds the alarm still due and rings it again.

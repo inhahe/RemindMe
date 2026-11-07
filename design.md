@@ -401,27 +401,38 @@ it runs on Android 10 (API 29) and up. The root namespace is
   intent to `AlarmActivity`, with Mark done and Remind me later handled by
   `AlarmActionReceiver`), plays the sound, vibrates, and stops itself when
   nothing rings. So done or dismissed anywhere, another device included, stops
-  it. It is sticky, so a ringing alarm survives the process being killed. Three
-  notification rules, each found the hard way:
-  - **The service's own foreground notification has a fixed ID, on its own
-    low-importance channel.** Moving a foreground notification to another ID
-    makes Android remove the old one, and it won't cancel the current one, so
-    tying it to a task's alarm lost alarms when two rang at once. On the alarm
-    channel it counted as a second alerting notification, and Android grouped it
-    with the alarm.
+  it. It is sticky, so a ringing alarm survives the process being killed; if
+  Android then refuses it the foreground (a restart in the background, Android
+  12 and later), the safety net rings instead. The notification rules:
+  - **The service's own foreground notification has a fixed ID that is never a
+    task's, on its own low-importance channel.** Android won't cancel a running
+    foreground service's notification, and removes the old one when the service
+    moves to another ID. It must not alert either, or Android groups it with the
+    alarm (next rule).
   - **Each alarm notification has an explicit group of its own.** Android
     auto-groups an app's ungrouped alerting notifications, and an auto-grouped
-    alarm's full-screen intent never opened the alarm screen (measured on API
+    alarm's full-screen intent doesn't open the alarm screen (measured on API
     36: the screen stayed off).
+  - **Alarm notifications alert once**: posted again over themselves (the service
+    taking over from the safety net, a silenced safety-net alarm), they neither
+    sound nor open the alarm screen a second time. The safety net cancels before
+    posting a new alert, so that one does.
+  - **Their buttons act only on the alert they were posted for** (the due time
+    travels in the intent). A leftover notification's Mark done would otherwise
+    mark a task done that isn't due, which moves an interval task that restarts
+    when done; it is withdrawn instead.
   - The service's notification is re-posted only when the count changes.
   Silence stops a task's vibration as well as its sound; vibration repeats while
   some unsilenced alert repeats.
 - **The safety net**: if Android refuses to start `RingingService` (a battery
   manager, or an inexact alarm on Android 12 without exact-alarm access), the
-  receiver posts each alert itself as an insistent notification on
-  `alarms_fallback`, a channel that carries the phone's alarm sound. Android
-  repeats that sound until the notification is touched. `AlarmActivity` then
-  plays the task's own sound.
+  receiver posts each alert itself on `alarms_fallback`, a channel that carries
+  the phone's alarm sound, insistent (repeating) for a task whose sound repeats.
+  Android plays it, so it rings even if the process dies; the task's own sound
+  isn't used. Silence posts it again on the silent alarm channel. Since no
+  service is running to notice, `RingingService.Poke` (on every store change)
+  withdraws each safety-net notification whose alarm no longer rings, answered
+  here, by a button, or on another device.
 - `AlarmSound`: `MediaPlayer` on the alarm stream, one sound at a time, like the
   desktop's. It tries the chosen sound, then the phone's alarm, ringtone and
   notification defaults, then the first installed alarm sound. An emulator, or
@@ -429,25 +440,38 @@ it runs on Android 10 (API 29) and up. The root namespace is
   can be opened is no test: the settings-provider address fails that check yet
   plays. Only a failure of the user's own choice is reported.
 - `AlarmActivity`: `showWhenLocked` and `turnScreenOn`, one ringing task at a
-  time. When its task stops ringing for any reason (answered here, through a
-  notification button, or on another device), it moves on to the next ringing
-  task, or closes. Opened from "Show alarm", it stays up while its task is
-  merely waiting. Back counts as Close, remind me later, and only reminder and
-  restart fields the user changed are written back.
+  time. It plays nothing itself. When its task stops ringing for any reason
+  (answered here, through a notification button, or on another device), it
+  moves on to the next ringing task, or closes, in the background too. Opened
+  again for the task it shows, it keeps what the user has typed. Opened from
+  "Show alarm", it stays up while its task is merely waiting. Back counts as
+  Close, remind me later, and only reminder and restart fields the user changed
+  are written back.
 - **Direct boot**: the app is `directBootAware`, and its files live in
   device-protected storage. The locked-boot receiver can then set alarms before
   the first unlock after a restart, so a phone that rebooted overnight for an
   update still rings at 07:00. That is what Android's own clock app does. The
   cost: those files are protected by the device key only, not the user's PIN.
-  Files from the credential-protected directory move over once, on the first
-  start while the phone is unlocked.
+  Earlier versions kept them in credential-protected storage; they move over,
+  overwriting, on the first start while the phone is unlocked, and a marker file
+  (`moved-to-device-storage`) records that it is done. Before that, a process
+  started while the phone is locked can't know the data, so it is
+  `Provisional`: nothing is read or written, and sync stays off, until
+  `LoadOnceUnlocked`, which the unlock broadcast (a receiver registered at run
+  time), the boot-completed broadcast and the first screen opened each call.
+- **Pairing questions** (`AppState.PendingPrompt`, a queue): the Devices screen
+  asks the first while it is in front, and a notification stands for it
+  otherwise, including after the screen goes to the background unanswered. An
+  answer or a withdrawal removes the question and its notification, and brings
+  up the next.
 - **Startup settling** holds only alarms genuinely missed, those due more than a
   minute before the process started (`AlarmEngine.MissedWhileNotRunning`). On
   Android the alarm usually starts the process itself, a moment after it is due,
   and that alarm is on time.
 - `BootReceiver` (locked boot, boot, time or time-zone change, package
   replaced): clears the time-zone cache and reschedules, so missed alarms ring
-  with the late warning. It also starts `SyncService`.
+  with the late warning. It also starts `SyncService`, and on boot completed
+  loads the data of a process that started while the phone was locked.
 - `SyncService`: a `connectedDevice` foreground service that keeps the process,
   and with it the engine in `AppState`, alive in the background. It is
   `connectedDevice` rather than `dataSync` because Android 15 caps `dataSync` at

@@ -101,6 +101,7 @@ Suggestions, not requested. S1 is built; the rest wait for a yes:
 - [x] Checked on the emulator (`inkdown_test`, API 36): every screen; a countdown ringing over the lock screen; Remind me later from the notification (sound stops, reminder set); ringing resumes after an app update. Linked to the desktop app through `10.0.2.2` with matching codes (722 135); tasks merged both ways; done on the PC showed on the phone; a countdown made on the PC rang on the phone, and dismissing it on the PC stopped the phone ringing.
 - [x] Hardened after review: several alarms at once, the alarm screen following alarms dealt with elsewhere, direct boot (alarms set before the first unlock after a restart), state kept across rotation, a safety net when Android refuses the ringing service
 - [x] Checked on the emulator under power restrictions: an alarm with the screen off and unplugged fires on the second; Android refuses deep Doze while an alarm clock is due (the guarantee), and the alarm is flagged to wake from idle; with background use set to Restricted it still rings on time
+- [x] Checked on the emulator after the fifth review: the safety net (the `START_FOREGROUND` app op denied: an insistent alarm over the lock screen, withdrawn once answered), a first start before the first unlock, and linking with a PC whose request arrives as a notification, the phone redialling at once afterwards
 - [ ] On a real phone: lock-screen alarm on Samsung's One UI, background sync with the screen off, LAN discovery
 
 ### Phase 5: polish and docs
@@ -110,4 +111,6 @@ Suggestions, not requested. S1 is built; the rest wait for a yes:
   - Core and desktop: Opus `xhigh`, 14 fixes (`ad3961e`).
   - Sync: Opus `max`, 14 fixes (`8aa87eb`); then Fable `xhigh` on the reworked sync layer, 15 fixes, including pairing that could be forced without the user's yes (`8ef0b5d`).
   - Android and the pairing redesign: Opus `max`, 15 fixes (`4374ce7`).
-  - Opus `xhigh` on that last follow-up.
+  - Opus `xhigh` on that follow-up: 15 fixes, among them pairing rounds,
+    announcements MACed under the group key, and the safety net withdrawing
+    alarms once answered.

@@ -10,6 +10,14 @@ namespace AlarmCalendar.Droid;
 /// <summary>The app's screens: one place for what each would otherwise repeat.</summary>
 public abstract class Screen : AppCompatActivity
 {
+    protected override void OnCreate(global::Android.OS.Bundle? savedInstanceState)
+    {
+        // If the process started while the phone was locked and it has been unlocked since,
+        // the data is loaded now, before the screen reads it (AppState.Provisional).
+        AppState.LoadOnceUnlocked();
+        base.OnCreate(savedInstanceState);
+    }
+
     protected T Find<[System.Diagnostics.CodeAnalysis.DynamicallyAccessedMembers(Ui.ViewCtors)] T>(int id) where T : View =>
         FindViewById<T>(id)!;
 }

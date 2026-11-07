@@ -128,7 +128,6 @@ public sealed class TaskEditActivity : Screen
         int mask = 0;
         for (int i = 0; i < 7; i++) if (_days[i].Checked) mask |= 1 << i;
         outState.PutInt("days", mask);
-        outState.PutBoolean("hasSound", _sound is not null);
         SoundChooser.Save(outState, "sound", _sound);
     }
 
@@ -141,7 +140,7 @@ public sealed class TaskEditActivity : Screen
         _onceTime = new TimeOnly(s.GetLong("onceTime"));
         int mask = s.GetInt("days");
         for (int i = 0; i < 7; i++) _days[i].Checked = (mask & (1 << i)) != 0;
-        _sound = s.GetBoolean("hasSound") ? SoundChooser.Restore(s, "sound") : null;
+        _sound = SoundChooser.Restore(s, "sound");
     }
 
 

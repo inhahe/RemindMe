@@ -202,7 +202,43 @@ separately (see *Simplification opportunities*).
   and the far one, with no routing table, and a record that changes nothing is not
   forwarded, so loops end.
 - **Remote addresses**: kept in settings, dialled persistently, with a backoff
-  from 5 s up to 60 s.
+  from 5 s up to 60 s. A remote link doesn't redial while a session to its node
+  exists by another path, so a LAN session and a remote link to the same node
+  don't keep replacing each other.
+- **Discovery port vs session port**: discovery always uses UDP 37660 with
+  `ReuseAddress`, and the TCP port each node listens on travels in the
+  announcement. So several instances on one machine, or a node with a custom
+  port, still find each other.
+- **Startup settling (desktop)**: for 6 s after startup, an alarm missed while
+  the app was closed waits before it rings, so a linked device that already
+  marked it done can say so first. Without this, the phone and every other
+  device would ring for something already dealt with.
+- **Code layout** (`AlarmCalendar.Core/Sync/`): `Protocol.cs` (messages,
+  framing, `SyncCrypto`), `Discovery.cs`, `PeerSession.cs` (one connection, its
+  keys and its pairing state), `SyncEngine.cs` (listener, dialling, sessions,
+  replication, pairing). The engine raises its events on pool threads; the apps
+  marshal them to their UI thread.
+- **Identity**: the node ID, device name, group ID and group secret live in
+  `AppSettings`. Pairing raises `IdentityChanged` for the app to persist.
+  `AppHost.ApplySettings` copies the identity fields from the live settings
+  into the copy a settings window edited, because a pairing may have changed
+  them while that window was open. Without that copy, saving the window would
+  silently undo the link.
+
+## Testing
+
+- `AlarmCalendar.Core.Tests`: schedule math, the engine, merging (including a
+  randomized three-device gossip test), persistence, and sync between real
+  engines over loopback TCP (pairing, bridging, a wrong secret, a rejected
+  pairing).
+- The desktop app is driven with UI Automation from PowerShell, in a throwaway
+  `--data-dir` whose `settings.json` sets `autostartInitialized: true` and
+  `startWithWindows: false`, so no `Run` entry is written.
+- **`ALARMCAL_BIND=127.0.0.1`** (an environment variable, for development
+  only) makes the desktop app listen on loopback with no LAN discovery. Two
+  instances on one machine can then be linked through remote addresses
+  (`127.0.0.1:<port>`) without raising a Windows Firewall prompt for the debug
+  build.
 
 ## Desktop app
 

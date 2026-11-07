@@ -46,6 +46,10 @@ public sealed class AlarmCoordinator : IDisposable
             live.Add(id);
             if (!st.Triggered) _forced.Remove(id);
             bool want = st.ShouldAlert || (st.Triggered && _forced.Contains(id));
+            // An alarm missed while the app was closed waits a few seconds after startup, so a
+            // linked device that already dealt with it can say so before it rings here.
+            if (want && !_windows.ContainsKey(id) && st.AlertDue < AppHost.StartedUtc && AppHost.SettlingAfterStart(now))
+                continue;
             if (want)
             {
                 if (_windows.TryGetValue(id, out var w))

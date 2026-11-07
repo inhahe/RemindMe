@@ -3,6 +3,9 @@ using System.Text.Json;
 
 namespace AlarmCalendar;
 
+/// <param name="LastSeenUtc">When a sync session with it was last open.</param>
+public sealed record KnownPeer(string NodeId, string Name, DateTimeOffset LastSeenUtc);
+
 /// <summary>Per-device settings. Not synced: each device keeps its own defaults, and
 /// its own sync identity.</summary>
 public sealed class AppSettings
@@ -47,6 +50,9 @@ public sealed class AppSettings
     public string GroupId { get; set; } = "";
     /// <summary>The group's secret, base64. Never sent in the clear.</summary>
     public string GroupKey { get; set; } = "";
+    /// <summary>Devices of this group this device has synced with, for the Devices screen
+    /// to list while they are away.</summary>
+    public List<KnownPeer> KnownPeers { get; set; } = [];
 
     /// <summary>Loads the settings, creating the node ID and a one-device sync group on
     /// first run.</summary>
@@ -66,6 +72,23 @@ public sealed class AppSettings
     {
         GroupId = Guid.NewGuid().ToString("N");
         GroupKey = Convert.ToBase64String(RandomNumberGenerator.GetBytes(32));
+        KnownPeers = [];
+    }
+
+    /// <summary>Records that the linked devices <paramref name="connected"/> (node ID, name)
+    /// are in sync at <paramref name="now"/>.</summary>
+    /// <returns>True when a device was added or renamed, so the settings are worth saving.</returns>
+    public bool RememberPeers(IEnumerable<(string node, string name)> connected, DateTimeOffset now)
+    {
+        bool added = false;
+        foreach (var (node, name) in connected)
+        {
+            int i = KnownPeers.FindIndex(p => p.NodeId == node);
+            if (i < 0 || KnownPeers[i].Name != name) added = true;
+            if (i >= 0) KnownPeers[i] = new KnownPeer(node, name, now);
+            else KnownPeers.Add(new KnownPeer(node, name, now));
+        }
+        return added;
     }
 
     public void Save(string path, Action<string>? log = null)

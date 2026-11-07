@@ -82,12 +82,14 @@ Suggestions, not requested. S1 is built; the rest wait for a yes:
 - [x] Checked by driving the app with UI Automation (`--data-dir` keeps test data separate): Enter adds a line in the description; a countdown rings; dismissing snoozes, with the popup's reminder interval saved; the list shows the reminder time and "in h:mm"; exiting and relaunching after a reminder was due shows "late by 24 seconds: the app wasn't running"; the log shows the sound played
 
 ### Phase 3: sync (R17, D3)
-- [ ] Networking derived from LanLink.Core: UDP discovery, framed TCP, the lower node ID dials, a fresh hello replaces a stale connection, keep-alive, the external-connection gate, remote addresses
-- [ ] Pairing: ECDH key exchange, a 6-digit confirmation code shown on both devices, and the joining device adopting the group key
-- [ ] Session authentication and AES-GCM encryption under the group key
-- [ ] Replication: digest exchange on connect, change broadcast, gossip forwarding (which gives LAN bridging with no routing table), tombstones
-- [ ] Desktop UI: a Devices window listing discovered, linked and connected devices, with Link, Unlink and Add remote address
-- [ ] Tests: two or three in-process nodes on loopback converge, including concurrent edits and mark-done against trigger
+- [x] Networking derived from LanLink.Core: UDP discovery, framed TCP, the lower node ID dials, a fresh hello replaces a stale connection, keep-alive, the external-connection gate, remote addresses
+- [x] Pairing: ECDH key exchange, a 6-digit confirmation code shown on both devices, and the joining device adopting the group key
+- [x] Session authentication and AES-GCM encryption under the group key
+- [x] Replication: digest exchange on connect, change broadcast, gossip forwarding (which gives LAN bridging with no routing table), tombstones
+- [x] Desktop UI: a Devices window listing nearby, linked and remembered devices, with Link, Leave the sync group, remote addresses, the port and the external-connection gate; a pairing prompt showing the code
+- [x] Tests: in-process engines on loopback (pairing, bridging, a wrong secret, a rejected pairing), plus the merge tests from Phase 1
+- [x] Checked in the real app: two instances (`ALARMCAL_BIND=127.0.0.1`) linked through the Devices window with matching codes, then merged their tasks. A countdown made on one rang on both, and marking it done on one closed the other's popup.
+- [ ] LAN discovery between two real machines. Not testable here without a Windows Firewall prompt; the code is LanLink's, adapted.
 
 ### Phase 4: Android (R2–R17 on the phone, D4)
 - [ ] Project builds to an APK; package `com.inhahe.alarmcalendar`

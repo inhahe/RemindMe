@@ -58,18 +58,18 @@ Suggestions, not requested. S1 is built; the rest wait for a yes:
 
 ### Phase 0: groundwork
 - [x] `ROADMAP.md`, `design.md`, `CLAUDE.md`, git, `.gitignore`
-- [x] Solution layout: `AlarmCalendar.Core` (net10.0), `AlarmCalendar.Core.Tests` (xUnit), `AlarmCalendar.Desktop` (WPF), `AlarmCalendar.Android` (.NET for Android, no MAUI)
+- [x] Solution layout (`AlarmCalendar.slnx`): `AlarmCalendar.Core` (net10.0), `AlarmCalendar.Core.Tests` (xUnit), `AlarmCalendar.Desktop` (WPF), `AlarmCalendar.Android` (.NET for Android, no MAUI). The Android template builds here despite the `&` in the path.
 
 ### Phase 1: Core, shared by both apps (R5–R9, R11–R14, D2)
-- [ ] Model: `AlarmTask` = definition + state, each with its own version (see design.md → *Data model*)
-- [ ] Schedule engine: occurrences for Every N (calendar units in local wall-clock time, fixed-length units in absolute time), weekly, once and countdown. Latest occurrence at or before a time, and the first after it. DST gaps and overlaps.
-- [ ] Alarm evaluation: triggered or not, the pending occurrence, the reminder (snooze) state, the next wake-up time, and which popups should be showing
-- [ ] Actions: mark done (each restart mode), dismiss, change the reminder interval or restart mode from the alarm window, start a countdown
-- [ ] Delay text: "late by 2 days, 3 hours, 5 minutes", from years down to seconds
-- [ ] Sound reference model: default, a system sound or a file, kept per platform, with resolution falling back to the default
-- [ ] Persistence: JSON store, atomic writes, tolerant of a corrupt file (keeps a backup)
-- [ ] Hybrid logical clock and merge rules (design.md → *Sync merge*)
-- [ ] Unit tests for all of the above
+- [x] Model: `AlarmTask` = definition + state, each with its own version (see design.md → *Data model*)
+- [x] Schedule engine: occurrences for Every N (calendar units in local wall-clock time, fixed-length units in absolute time), weekly, once and countdown. Latest occurrence at or before a time, and the first after it. DST gaps and overlaps.
+- [x] Alarm evaluation: triggered or not, the pending occurrence, the reminder (snooze) state, the next wake-up time, and which popups should be showing
+- [x] Actions: mark done (each restart mode), dismiss, change the reminder interval or restart mode from the alarm window (`TaskStore.Edit`), start a countdown
+- [x] Delay text: "late by 2 days, 3 hours, 5 minutes", from years down to seconds
+- [x] Sound reference model: default, a system sound or a file, kept per platform. Falling back to the default when a file is missing is each app's job (Phases 2 and 4).
+- [x] Persistence: JSON store, atomic writes, tolerant of a corrupt file (keeps a backup)
+- [x] Hybrid logical clock and merge rules (design.md → *Sync merge*)
+- [x] Unit tests for all of the above (40 tests, `AlarmCalendar.Core.Tests`)
 
 ### Phase 2: Windows desktop app (R1–R15, D1, D2, D5)
 - [ ] Main window: task list (R15), New / Edit / Delete, double-click to edit, Delete key, context menu (Mark done, Show alarm)

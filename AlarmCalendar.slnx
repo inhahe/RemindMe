@@ -1,0 +1,6 @@
+<Solution>
+  <Project Path="AlarmCalendar.Android/AlarmCalendar.Android.csproj" />
+  <Project Path="AlarmCalendar.Core.Tests/AlarmCalendar.Core.Tests.csproj" />
+  <Project Path="AlarmCalendar.Core/AlarmCalendar.Core.csproj" />
+  <Project Path="AlarmCalendar.Desktop/AlarmCalendar.Desktop.csproj" />
+</Solution>

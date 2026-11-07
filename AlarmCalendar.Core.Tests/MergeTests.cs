@@ -1,0 +1,222 @@
+using static AlarmCalendar.Tests.Zones;
+
+namespace AlarmCalendar.Tests;
+
+public class HlcTests
+{
+    [Fact]
+    public void TicksIncreaseEvenWhenTheWallClockGoesBack()
+    {
+        long now = 1000;
+        var c = new HlcClock("n", () => now, Hlc.Zero);
+        var a = c.Tick();
+        now = 500;
+        var b = c.Tick();
+        Assert.True(b > a);
+    }
+
+    [Fact]
+    public void ObservingARemoteVersionOrdersLaterTicksAfterIt()
+    {
+        long now = 1000;
+        var c = new HlcClock("a", () => now, Hlc.Zero);
+        var remote = new Hlc(5000, 3, "b");
+        c.Observe(remote);
+        Assert.True(c.Tick() > remote);
+    }
+}
+
+public class MergeTests
+{
+    private static (TaskStore a, TaskStore b, FakeClock ca, FakeClock cb) TwoDevices()
+    {
+        var ca = new FakeClock(NY(2026, 6, 1, 9), NewYork);
+        var cb = new FakeClock(NY(2026, 6, 1, 9), NewYork);
+        return (new TaskStore(null, "a", ca), new TaskStore(null, "b", cb), ca, cb);
+    }
+
+    /// <summary>Full two-way sync, as a session start does it.</summary>
+    private static void Sync(TaskStore x, TaskStore y)
+    {
+        var toY = x.NewerThan(y.Digest());
+        var toX = y.NewerThan(x.Digest());
+        y.Merge(toY);
+        x.Merge(toX);
+    }
+
+    private static TaskDefinition Hourly(FakeClock c) => new()
+    {
+        Description = "pills",
+        Kind = ScheduleKind.Interval,
+        Unit = IntervalUnit.Hours,
+        Start = Wall(c.UtcNow),
+        Restart = RestartMode.OnSchedule,
+    };
+
+    [Fact]
+    public void ATaskCreatedOnOneDeviceAppearsOnTheOther()
+    {
+        var (a, b, ca, _) = TwoDevices();
+        var t = a.Save(null, Hourly(ca));
+        Sync(a, b);
+        Assert.Equal(t, b.Get(t.Id));
+        Assert.Empty(a.NewerThan(b.Digest()));
+        Assert.Empty(b.NewerThan(a.Digest()));
+    }
+
+    [Fact]
+    public void DoneOnOneDeviceBeatsTheOtherTriggeringLater()
+    {
+        // The phone (b) was off at 10:00; the PC (a) marked the task done at 10:05.
+        // The phone comes back at 10:30 and, before syncing, sees the task triggered
+        // and the user dismisses it there — a state write with a *newer* version.
+        var (a, b, ca, cb) = TwoDevices();
+        var t = a.Save(null, Hourly(ca));
+        Sync(a, b);
+        ca.UtcNow = NY(2026, 6, 1, 10, 5);
+        a.MarkDone(t.Id);
+        cb.UtcNow = NY(2026, 6, 1, 10, 30);
+        Assert.True(b.Status(t.Id)!.Triggered);
+        b.Dismiss(t.Id);
+
+        Sync(a, b);
+        Assert.False(b.Status(t.Id)!.Triggered);
+        Assert.False(a.Status(t.Id)!.Triggered);
+        Assert.Equal(a.Get(t.Id)!.State, b.Get(t.Id)!.State);
+    }
+
+    [Fact]
+    public void DismissOnOneDeviceSnoozesTheOther()
+    {
+        var (a, b, ca, cb) = TwoDevices();
+        var t = a.Save(null, Hourly(ca));
+        Sync(a, b);
+        ca.UtcNow = cb.UtcNow = NY(2026, 6, 1, 10, 1);
+        Assert.True(b.Status(t.Id)!.ShouldAlert);
+        a.Dismiss(t.Id);
+        Sync(a, b);
+        Assert.False(b.Status(t.Id)!.ShouldAlert);
+        Assert.True(b.Status(t.Id)!.Snoozed);
+    }
+
+    [Fact]
+    public void ConcurrentEditsConvergeOnTheLaterOne()
+    {
+        var (a, b, ca, cb) = TwoDevices();
+        var t = a.Save(null, Hourly(ca));
+        Sync(a, b);
+        ca.Advance(TimeSpan.FromSeconds(1));
+        a.Save(t.Id, t.Def with { Description = "from a" });
+        cb.Advance(TimeSpan.FromSeconds(2));
+        b.Save(t.Id, t.Def with { Description = "from b" });
+        Sync(a, b);
+        Assert.Equal("from b", a.Get(t.Id)!.Def.Description);
+        Assert.Equal(a.Get(t.Id), b.Get(t.Id));
+    }
+
+    [Fact]
+    public void ADeletionSyncs()
+    {
+        var (a, b, ca, _) = TwoDevices();
+        var t = a.Save(null, Hourly(ca));
+        Sync(a, b);
+        b.Delete(t.Id);
+        Sync(a, b);
+        Assert.Empty(a.Live());
+        Assert.True(a.Get(t.Id)!.Def.Deleted);
+    }
+
+    [Fact]
+    public void MergeIsOrderIndependent()
+    {
+        var (a, b, ca, cb) = TwoDevices();
+        var t = a.Save(null, Hourly(ca));
+        Sync(a, b);
+        ca.UtcNow = NY(2026, 6, 1, 10, 5);
+        var x = a.MarkDone(t.Id)!;
+        cb.UtcNow = NY(2026, 6, 1, 10, 30);
+        var y = b.Dismiss(t.Id)!;
+        var m1 = MergeRules.Merge(x, y);
+        var m2 = MergeRules.Merge(y, x);
+        Assert.Equal(m1.State, m2.State);
+        Assert.Equal(m1.StateVersion, m2.StateVersion);
+        Assert.Equal(m1.DefVersion, m2.DefVersion);
+    }
+
+    [Fact]
+    public void ThreeDevicesGossipingConverge()
+    {
+        var clocks = Enumerable.Range(0, 3).Select(_ => new FakeClock(NY(2026, 6, 1, 9), NewYork)).ToArray();
+        var stores = clocks.Select((c, i) => new TaskStore(null, $"n{i}", c)).ToArray();
+        var rng = new Random(42);
+        var ids = new List<Guid>();
+        for (int step = 0; step < 200; step++)
+        {
+            int i = rng.Next(3);
+            foreach (var c in clocks) c.Advance(TimeSpan.FromMinutes(rng.Next(1, 20)));
+            var s = stores[i];
+            var live = s.Live();
+            switch (rng.Next(6))
+            {
+                case 0: ids.Add(s.Save(null, Hourly(clocks[i]) with { Description = $"t{step}" }).Id); break;
+                case 1 when live.Count > 0: s.MarkDone(live[rng.Next(live.Count)].Id); break;
+                case 2 when live.Count > 0: s.Dismiss(live[rng.Next(live.Count)].Id); break;
+                case 3 when live.Count > 0:
+                    var e = live[rng.Next(live.Count)];
+                    s.Save(e.Id, e.Def with { Description = $"edit{step}" }); break;
+                case 4 when live.Count > 0 && rng.Next(4) == 0: s.Delete(live[rng.Next(live.Count)].Id); break;
+                default:
+                    // Only neighbours sync (0–1, 1–2): the 0–2 path exists only through 1, as across a bridge.
+                    int j = rng.Next(2);
+                    Sync(stores[j], stores[j + 1]);
+                    break;
+            }
+        }
+        for (int round = 0; round < 2; round++) { Sync(stores[0], stores[1]); Sync(stores[1], stores[2]); }
+        var expected = stores[0].All().OrderBy(t => t.Id).ToList();
+        foreach (var s in stores.Skip(1))
+            Assert.Equal(expected, s.All().OrderBy(t => t.Id).ToList());
+    }
+}
+
+public class PersistenceTests
+{
+    [Fact]
+    public void ACorruptFileIsKeptAsideAndTheBackupUsed()
+    {
+        var dir = Directory.CreateTempSubdirectory();
+        try
+        {
+            var path = Path.Combine(dir.FullName, "tasks.json");
+            var clock = new FakeClock(NY(2026, 6, 1, 9), NewYork);
+            var s = new TaskStore(path, "a", clock);
+            var t1 = s.Save(null, new TaskDefinition { Description = "one", Kind = ScheduleKind.Once, At = new DateTime(2026, 7, 1, 9, 0, 0) });
+            s.Save(null, new TaskDefinition { Description = "two", Kind = ScheduleKind.Once, At = new DateTime(2026, 7, 2, 9, 0, 0) });
+            File.WriteAllText(path, "{ not json");
+            var logs = new List<string>();
+            var reloaded = new TaskStore(path, "a", clock, logs.Add);
+            Assert.Equal(t1, reloaded.Get(t1.Id));      // the backup held one task
+            Assert.Contains(dir.GetFiles(), f => f.Name.Contains(".corrupt-"));
+            Assert.NotEmpty(logs);
+        }
+        finally { dir.Delete(true); }
+    }
+
+    [Fact]
+    public void SettingsCreateAnIdentityOnFirstRun()
+    {
+        var dir = Directory.CreateTempSubdirectory();
+        try
+        {
+            var path = Path.Combine(dir.FullName, "settings.json");
+            var s = AppSettings.Load(path, "PC");
+            Assert.NotEmpty(s.NodeId);
+            Assert.Equal(32, Convert.FromBase64String(s.GroupKey).Length);
+            var again = AppSettings.Load(path, "other");
+            Assert.Equal(s.NodeId, again.NodeId);
+            Assert.Equal("PC", again.DeviceName);
+            Assert.Equal(new TimeOnly(9, 0), again.DefaultTimeOfDay);
+        }
+        finally { dir.Delete(true); }
+    }
+}

@@ -62,7 +62,7 @@ with its own version (a hybrid logical clock, `Hlc`):
 | `At` | Once: a wall-clock date and time |
 | `Duration` | Countdown: the length |
 | `ReminderMinutes` | How long after a dismissal it reminds again, while not done. 0 means it doesn't. |
-| `Sounds` | A `SoundRef` per platform (`"windows"`, `"android"`). With no entry, the device's default applies (R11). |
+| `WindowsSound`, `AndroidSound` | A `SoundRef` per platform, since a sound picked on one means nothing on the other. `null` means the device's default applies (R11). |
 | `SoundMode` | `Once` or `Repeat`. `null` means the device's default applies. |
 | `ScheduleRevision` | Goes up on every change that affects *when* the task fires |
 | `Deleted` | Tombstone. A deleted task keeps its ID, so a deletion syncs like any other edit. |
@@ -81,7 +81,7 @@ Per-device `AppSettings` (not synced): defaults for the sound, sound mode,
 reminder interval, time of day (09:00) and restart mode; desktop window and
 startup options; sync identity and options.
 
-## Schedule math (`Schedule/Occurrences.cs`)
+## Schedule math (`Occurrences.cs`)
 
 An occurrence is an instant. For each kind:
 
@@ -132,7 +132,8 @@ sync: each device reaches the same answer independently.
   work.
 - **Late warning (R13)**: when a popup first shows for occurrence *o* at time
   *t* with `t − o` over 15 s, the popup says it is late by
-  `DelayFormatter.Format(t − o)`, for example "2 days, 3 hours, 5 minutes", and
+  `TextFormat.LateWarning`, for example "2 days, 3 hours, 5 minutes" (the three
+  largest non-zero calendar units), and
   why: "the app wasn't running" if *o* came before the process started, or "the
   device was asleep or busy" otherwise. A late re-reminder is measured from
   `SnoozeUntil` instead.

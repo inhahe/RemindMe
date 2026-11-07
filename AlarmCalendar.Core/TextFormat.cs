@@ -1,0 +1,173 @@
+using System.Globalization;
+using System.Text;
+
+namespace AlarmCalendar;
+
+/// <summary>The words and numbers both apps show, so the two can't word things differently.</summary>
+public static class TextFormat
+{
+    private static readonly string[] UnitNames = ["year", "month", "week", "day", "hour", "minute", "second"];
+
+    /// <summary>
+    /// "2 days, 3 hours, 5 minutes": the span from <paramref name="from"/> to <paramref name="to"/>
+    /// in calendar units (years and months as on the calendar, not fixed lengths), the
+    /// <paramref name="maxParts"/> largest non-zero ones.
+    /// </summary>
+    public static string Span(DateTime from, DateTime to, int maxParts = 3)
+    {
+        if (to < from) (from, to) = (to, from);
+        var parts = new long[7];
+        var cursor = from;
+        int years = 0;
+        while (years < 10_000 && cursor.AddYears(years + 1) <= to) years++;
+        cursor = cursor.AddYears(years);
+        parts[0] = years;
+        int months = 0;
+        while (months < 12 && cursor.AddMonths(months + 1) <= to) months++;
+        cursor = cursor.AddMonths(months);
+        parts[1] = months;
+        var rest = to - cursor;
+        parts[2] = rest.Days / 7;
+        parts[3] = rest.Days % 7;
+        parts[4] = rest.Hours;
+        parts[5] = rest.Minutes;
+        parts[6] = rest.Seconds;
+
+        var sb = new StringBuilder();
+        int shown = 0;
+        for (int i = 0; i < 7 && shown < maxParts; i++)
+        {
+            if (parts[i] == 0) continue;
+            if (sb.Length > 0) sb.Append(", ");
+            sb.Append(parts[i]).Append(' ').Append(UnitNames[i]);
+            if (parts[i] != 1) sb.Append('s');
+            shown++;
+        }
+        return sb.Length == 0 ? "less than a second" : sb.ToString();
+    }
+
+    /// <summary>The late warning for an alarm window (R13).</summary>
+    /// <param name="due">When the alert should have appeared.</param>
+    /// <param name="shown">When it actually appeared.</param>
+    /// <param name="appStarted">When this process started; a due time before it means
+    /// the app wasn't running.</param>
+    public static string LateWarning(DateTimeOffset due, DateTimeOffset shown, DateTimeOffset appStarted, TimeZoneInfo zone)
+    {
+        var span = Span(TimeMath.ToWall(due, zone), TimeMath.ToWall(shown, zone));
+        var why = due < appStarted ? "the app wasn't running at the time" : "the device was asleep or busy";
+        return $"This reminder is late by {span}: {why}.";
+    }
+
+    /// <summary>"1:25" for a span until something happens: hours (any number) and minutes,
+    /// rounded up so it never says 0:00 for something still in the future.</summary>
+    public static string HoursMinutes(TimeSpan span)
+    {
+        if (span < TimeSpan.Zero) span = TimeSpan.Zero;
+        long minutes = (long)Math.Ceiling(span.TotalMinutes);
+        return $"{minutes / 60}:{minutes % 60:00}";
+    }
+
+    /// <summary>"1:05:09" or "5:09": time left on a countdown, to the second.</summary>
+    public static string Clock(TimeSpan span)
+    {
+        if (span < TimeSpan.Zero) span = TimeSpan.Zero;
+        long secs = (long)Math.Ceiling(span.TotalSeconds);
+        long h = secs / 3600, m = secs / 60 % 60, sec = secs % 60;
+        return h > 0 ? $"{h}:{m:00}:{sec:00}" : $"{m}:{sec:00}";
+    }
+
+    /// <summary>A date and time for a list row or popup: weekday, day, month, the year
+    /// when it isn't this year, and the culture's short time.</summary>
+    public static string When(DateTimeOffset instant, DateTimeOffset now, TimeZoneInfo zone, CultureInfo? culture = null)
+    {
+        culture ??= CultureInfo.CurrentCulture;
+        var w = TimeMath.ToWall(instant, zone);
+        var n = TimeMath.ToWall(now, zone);
+        string date = w.Date == n.Date ? "today"
+            : w.Date == n.Date.AddDays(1) ? "tomorrow"
+            : w.Date == n.Date.AddDays(-1) ? "yesterday"
+            : w.ToString(w.Year == n.Year ? "ddd d MMM" : "ddd d MMM yyyy", culture);
+        string time = w.ToString(w.Second == 0 ? "t" : "T", culture);
+        return $"{date} {time}";
+    }
+
+    public static string WallTime(DateTime wall, CultureInfo? culture = null)
+    {
+        culture ??= CultureInfo.CurrentCulture;
+        return wall.ToString(wall.Second == 0 ? "t" : "T", culture);
+    }
+
+    public static string UnitName(IntervalUnit u, long n)
+    {
+        string s = u.ToString().ToLowerInvariant().TrimEnd('s');
+        return n == 1 ? s : s + "s";
+    }
+
+    /// <summary>A one-line summary of when the task fires, for the list (R15).</summary>
+    public static string Schedule(TaskDefinition d, TaskState s, DateTimeOffset now, TimeZoneInfo zone, CultureInfo? culture = null)
+    {
+        culture ??= CultureInfo.CurrentCulture;
+        switch (d.Kind)
+        {
+            case ScheduleKind.Interval:
+                {
+                    string every = d.IntervalCount == 1 ? $"Every {UnitName(d.Unit, 1)}" : $"Every {d.IntervalCount} {UnitName(d.Unit, d.IntervalCount)}";
+                    string from = When(TimeMath.ToInstant(d.Start, zone), now, zone, culture);
+                    string mode = d.Restart == RestartMode.FromDone ? ", counted from when done" : "";
+                    return $"{every} from {from}{mode}";
+                }
+            case ScheduleKind.Weekly:
+                return $"{Weekdays(d.Days, culture)} at {WallTime(DateTime.Today + d.TimeOfDay.ToTimeSpan(), culture)}";
+            case ScheduleKind.Once:
+                return $"Once, {When(TimeMath.ToInstant(d.At, zone), now, zone, culture)}";
+            case ScheduleKind.Countdown:
+                return $"Countdown {Clock(d.Duration)}";
+            default:
+                return "";
+        }
+    }
+
+    /// <summary>"Mon, Wed, Fri", "Weekdays", "Weekends" or "Every day".</summary>
+    public static string Weekdays(int mask, CultureInfo? culture = null)
+    {
+        culture ??= CultureInfo.CurrentCulture;
+        mask &= 0x7F;
+        if (mask == 0x7F) return "Every day";
+        if (mask == 0b0111110) return "Weekdays";
+        if (mask == 0b1000001) return "Weekends";
+        if (mask == 0) return "No days";
+        var names = culture.DateTimeFormat.AbbreviatedDayNames;
+        var first = culture.DateTimeFormat.FirstDayOfWeek;
+        var list = new List<string>();
+        for (int i = 0; i < 7; i++)
+        {
+            int day = ((int)first + i) % 7;
+            if ((mask & (1 << day)) != 0) list.Add(names[day]);
+        }
+        return string.Join(", ", list);
+    }
+
+    /// <summary>The first line of a description, cut to <paramref name="max"/> characters.</summary>
+    public static string Snippet(string description, int max = 60)
+    {
+        var line = description.Replace("\r", "").Split('\n').FirstOrDefault(l => l.Trim().Length > 0)?.Trim() ?? "";
+        bool more = description.Trim().Contains('\n');
+        if (line.Length > max) return line[..(max - 1)].TrimEnd() + "…";
+        return more ? line + " …" : line;
+    }
+
+    /// <summary>The status column of a list row (R15): ringing, waiting with the next
+    /// reminder, scheduled, or finished.</summary>
+    public static string Status(TaskStatus st, DateTimeOffset now, TimeZoneInfo zone, CultureInfo? culture = null)
+    {
+        if (st.Task.Def.Kind == ScheduleKind.Countdown && !st.Triggered && st.NextOccurrence is { } end)
+            return $"Running, {Clock(end - now)} left";
+        if (st.Finished) return st.Task.Def.Kind == ScheduleKind.Weekly ? "No days chosen" : "Done";
+        if (!st.Triggered) return "Scheduled";
+        string missed = st.PendingCount > 1 ? $" ({st.PendingCount} times)" : "";
+        if (!st.Snoozed) return $"Ringing, waiting to be marked done{missed}";
+        if (st.NextReminder is { } r)
+            return $"Waiting to be marked done{missed}; reminds {When(r, now, zone, culture)} (in {HoursMinutes(r - now)})";
+        return $"Waiting to be marked done{missed}; no further reminders";
+    }
+}

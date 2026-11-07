@@ -326,6 +326,97 @@ public sealed class SyncTests : IDisposable
     }
 
     [Fact]
+    public async Task WhenTheJoiningRequesterDeclinesTheAccepterCanBeAskedAgain()
+    {
+        // A (linked with others) accepts; B, the one that would join, says no, then tries again.
+        var (ea, _) = Node(NewIdentity("A"), 3, null);
+        AutoAccept(ea);
+        var (eb, _) = Node(NewIdentity("B"), 0, null, Addr(ea));
+        int asked = 0;
+        eb.PairRequested += p => { if (Interlocked.Increment(ref asked) == 1) _ = p.RejectAsync(); else _ = p.AcceptAsync(); };
+        var stages = new List<PairProgress>();
+        eb.PairProgressed += p => { lock (stages) stages.Add(p); };
+        await WaitFor(() => eb.Peers().Any(p => p.Connected), "B connected to A");
+        await eb.RequestPairingAsync(ea.Identity.NodeId);
+        await WaitFor(() => { lock (stages) return stages.Any(p => p.Stage == PairStage.Rejected); }, "B declining");
+        await eb.RequestPairingAsync(ea.Identity.NodeId);
+        await WaitFor(() => eb.Identity.GroupId == ea.Identity.GroupId, "the second try linking them");
+        lock (stages) Assert.DoesNotContain(stages, p => p.Message?.Contains("busy") == true);
+    }
+
+    [Fact]
+    public async Task APromptLeftOverFromAnEarlierPairingAnswersNothing()
+    {
+        var (ea, _) = Node(NewIdentity("A"));
+        var (eb, _) = Node(NewIdentity("B"), Addr(ea));
+        var aPrompts = new List<PairPrompt>();
+        ea.PairRequested += p => { lock (aPrompts) aPrompts.Add(p); };
+        PairPrompt? bPrompt = null;
+        eb.PairRequested += p => bPrompt = p;
+        await WaitFor(() => eb.Peers().Any(p => p.Connected), "B connected to A");
+
+        await eb.RequestPairingAsync(ea.Identity.NodeId);
+        await WaitFor(() => { lock (aPrompts) return aPrompts.Count == 1; } , "A asked");
+        await WaitFor(() => bPrompt is not null, "B asked");
+        await bPrompt!.RejectAsync();
+        await WaitFor(() => aPrompts[0].IsWithdrawn, "A's first prompt withdrawn");
+
+        bPrompt = null;
+        await eb.RequestPairingAsync(ea.Identity.NodeId);
+        await WaitFor(() => { lock (aPrompts) return aPrompts.Count == 2; }, "A asked again");
+        await WaitFor(() => bPrompt is not null, "B asked again");
+        await aPrompts[0].AcceptAsync();   // the stale one
+        await bPrompt!.AcceptAsync();
+        await Task.Delay(700);
+        Assert.NotEqual(ea.Identity.GroupId, eb.Identity.GroupId);
+        await aPrompts[1].AcceptAsync();   // the real one
+        await WaitFor(() => ea.Identity.GroupId == eb.Identity.GroupId, "linked on the real answer");
+    }
+
+    [Fact]
+    public async Task ADeviceThatLeftTheGroupCanLinkAgain()
+    {
+        // A still remembers B as linked; B has left (another group) and asks to link again.
+        var b = NewIdentity("B");
+        var store = new TaskStore(null, Guid.NewGuid().ToString("N"), SystemClock.Instance);
+        var a = NewIdentity("A");
+        var ea = new SyncEngine(store, a, new SyncOptions
+        {
+            Port = 0, BindAddress = IPAddress.Loopback, EnableDiscovery = false,
+            IsLinkedPeer = node => node == b.NodeId,
+        });
+        ea.Start();
+        _engines.Add(ea);
+        PairPrompt? prompt = null;
+        ea.PairRequested += p => prompt = p;
+        var (eb, _) = Node(b, Addr(ea));
+        AutoAccept(eb);
+        await WaitFor(() => eb.Peers().Any(p => p.Connected), "B connected to A");
+        Assert.DoesNotContain(ea.Peers(), p => p.NodeId == b.NodeId);   // never shown "not linked"
+        await eb.RequestPairingAsync(a.NodeId);
+        await WaitFor(() => prompt is not null, "A asked");
+        await prompt!.AcceptAsync();
+        await WaitFor(() => eb.Identity.GroupId == a.GroupId, "B linked again");
+    }
+
+    [Fact]
+    public void AFloodOfStrangersDoesNotCrowdOutOurOwnGroup()
+    {
+        var a = NewIdentity("A");
+        var (ea, _) = Node(a);
+        for (int i = 0; i < 300; i++)
+            ea.OnAnnounced(new SyncMessage
+            {
+                Type = MessageTypes.Announce, App = Protocol.App, Node = Guid.NewGuid().ToString("N"),
+                Group = Guid.NewGuid().ToString("N"), Port = 9,
+            }, IPAddress.Loopback);
+        var mine = Guid.NewGuid().ToString("N");
+        ea.OnAnnounced(new SyncMessage { Type = MessageTypes.Announce, App = Protocol.App, Node = mine, Group = a.GroupId, Port = 9 },
+            IPAddress.Loopback);
+        Assert.Contains(ea.Peers(), p => p.NodeId == mine && p.Linked);
+    }
+
+    [Fact]
     public async Task AnotherProtocolVersionIsRefused()
     {
         var (ea, _) = Node(NewIdentity("A"));

@@ -222,6 +222,18 @@ public class EngineTests
     }
 
     [Fact]
+    public void AnAlarmThatStartedTheProcessIsNotMissed()
+    {
+        var t = EveryHourFromNow(RestartMode.FromDone);
+        _clock.UtcNow = NY(2026, 6, 1, 10, 0, 1);
+        var st = Status(t.Id);
+        // On Android the alarm starts the process a moment after it is due: on time.
+        Assert.False(AlarmEngine.MissedWhileNotRunning(st, NY(2026, 6, 1, 10, 0, 0) + TimeSpan.FromMilliseconds(400)));
+        // Due well before the process started: missed while it wasn't running.
+        Assert.True(AlarmEngine.MissedWhileNotRunning(st, NY(2026, 6, 1, 10, 5)));
+    }
+
+    [Fact]
     public void NextWakeUpIsTheEarliestThingDue()
     {
         var a = EveryHourFromNow(RestartMode.FromDone);

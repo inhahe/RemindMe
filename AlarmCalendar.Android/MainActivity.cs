@@ -12,7 +12,7 @@ namespace AlarmCalendar.Droid;
 
 /// <summary>The task list (R1, R15): tap to edit, long-press for more, + to add.</summary>
 [Activity(Label = "@string/app_name", MainLauncher = true, Exported = true, LaunchMode = LaunchMode.SingleTop)]
-public sealed class MainActivity : AppCompatActivity
+public sealed class MainActivity : Screen
 {
     private static bool _permissionsAsked;
     private readonly Handler _handler = new(Looper.MainLooper!);
@@ -41,7 +41,7 @@ public sealed class MainActivity : AppCompatActivity
         Tick();
         AskForPermissionsOnce();
         // The app is in the foreground, so the ringing service may start from here.
-        if (AlarmScheduler.RingingNow(AppState.Clock.UtcNow, out _).Count > 0) RingingService.Start(this);
+        if (AlarmScheduler.RingingNow(AppState.Clock.UtcNow, out _).Count > 0 && !RingingService.IsRunning) RingingService.TryStart(this);
         if (AppState.Settings.SyncEnabled && AppState.Sync is null) SyncService.Start(this);
     }
 
@@ -97,7 +97,7 @@ public sealed class MainActivity : AppCompatActivity
             {
                 case 1: StartActivity(TaskEditActivity.IntentFor(this, id)); break;
                 case 2: AppState.Store.MarkDone(id); break;
-                case 3: StartActivity(AlarmActivity.IntentFor(this, id)); break;
+                case 3: StartActivity(AlarmActivity.IntentFor(this, id, onRequest: true)); break;
                 case 4:
                     if (AppState.Store.Get(id) is { } t) AppState.Store.Save(id, t.Def, restartCountdown: true);
                     break;

@@ -1,6 +1,7 @@
 using Android.App;
 using Android.Content;
 using Android.Media;
+using Android.OS;
 using AlertDialog = AndroidX.AppCompat.App.AlertDialog;
 
 namespace AlarmCalendar.Droid;
@@ -11,14 +12,16 @@ namespace AlarmCalendar.Droid;
 /// persistent read grant so it still plays after a reboot), or "default". The owning
 /// activity forwards <c>OnActivityResult</c> to <see cref="HandleResult"/>.
 /// </summary>
-public sealed class SoundChooser(Activity activity)
+/// <param name="chosen">Receives the choice (null for "default"). Fixed at construction,
+/// not per pick: the picker's result can arrive in a recreated activity (after a rotation,
+/// or with the process restarted), whose chooser must still know where the result goes.</param>
+public sealed class SoundChooser(Activity activity, Action<SoundRef?> chosen)
 {
     private const int RingtoneRequest = 7001, FileRequest = 7002;
-    private Action<SoundRef?>? _pending;
 
     /// <param name="allowDefault">Offer "default" (choosing for a task); the default itself
     /// offers the system alarm sound in its place.</param>
-    public void Show(SoundRef? current, bool allowDefault, Action<SoundRef?> chosen)
+    public void Show(SoundRef? current, bool allowDefault)
     {
         var defaultName = allowDefault
             ? $"Default ({AppState.Settings.DefaultSound?.Name ?? "the phone's alarm sound"})"
@@ -30,15 +33,14 @@ public sealed class SoundChooser(Activity activity)
                 switch (e.Which)
                 {
                     case 0: chosen(null); break;
-                    case 1: PickRingtone(current, chosen); break;
-                    case 2: PickFile(chosen); break;
+                    case 1: PickRingtone(current); break;
+                    case 2: PickFile(); break;
                 }
             })!.Show();
     }
 
-    private void PickRingtone(SoundRef? current, Action<SoundRef?> chosen)
+    private void PickRingtone(SoundRef? current)
     {
-        _pending = chosen;
         var i = new Intent(RingtoneManager.ActionRingtonePicker)
             .PutExtra(RingtoneManager.ExtraRingtoneType, (int)RingtoneType.All)
             .PutExtra(RingtoneManager.ExtraRingtoneShowDefault, false)
@@ -49,9 +51,8 @@ public sealed class SoundChooser(Activity activity)
         activity.StartActivityForResult(i, RingtoneRequest);
     }
 
-    private void PickFile(Action<SoundRef?> chosen)
+    private void PickFile()
     {
-        _pending = chosen;
         var i = new Intent(Intent.ActionOpenDocument).AddCategory(Intent.CategoryOpenable).SetType("audio/*");
         activity.StartActivityForResult(i, FileRequest);
     }
@@ -60,9 +61,7 @@ public sealed class SoundChooser(Activity activity)
     public bool HandleResult(int requestCode, Result resultCode, Intent? data)
     {
         if (requestCode is not (RingtoneRequest or FileRequest)) return false;
-        var chosen = _pending;
-        _pending = null;
-        if (resultCode != Result.Ok || data is null || chosen is null) return true;
+        if (resultCode != Result.Ok || data is null) return true;
         if (requestCode == RingtoneRequest)
         {
             var uri = OperatingSystem.IsAndroidVersionAtLeast(33)
@@ -100,4 +99,16 @@ public sealed class SoundChooser(Activity activity)
     /// <summary>The name of the sound a task plays, for its button.</summary>
     public static string Describe(SoundRef? taskSound) =>
         taskSound?.Name ?? $"Default ({AppState.Settings.DefaultSound?.Name ?? "phone's alarm"})";
+
+    /// <summary>Keeps a choice across the activity being recreated.</summary>
+    public static void Save(Bundle state, string key, SoundRef? sound)
+    {
+        if (sound is null) return;
+        state.PutStringArray(key, [sound.Source.ToString(), sound.Value, sound.Name]);
+    }
+
+    /// <summary>The choice <see cref="Save"/> kept; null when there was none (or it was "default").</summary>
+    public static SoundRef? Restore(Bundle state, string key) =>
+        state.GetStringArray(key) is [var src, var value, var name] && Enum.TryParse<SoundSource>(src, out var s)
+            ? new SoundRef(s, value, name) : null;
 }

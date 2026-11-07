@@ -361,25 +361,61 @@ it runs on Android 10 (API 29) and up. The root namespace is
   never a direct service start**. Starting a foreground service from an exact
   alarm is always allowed, whereas a boot receiver may not start a
   media-playback service at all (Android 15), and nor may `App.OnCreate` when a
-  broadcast woke the process (measured: "mAllowStartForeground false").
+  broadcast woke the process (measured: "mAllowStartForeground false"). Only an
+  alert not yet posted re-arms that one-second alarm; otherwise a refusal would
+  repeat every second.
 - `AlarmReceiver` → `RingingService` (a `mediaPlayback` foreground service). It
   re-evaluates every second, posts one notification per ringing task (full-screen
   intent to `AlarmActivity`, with Mark done and Remind me later handled by
   `AlarmActionReceiver`), plays the sound, vibrates, and stops itself when
   nothing rings. So done or dismissed anywhere, another device included, stops
-  it.
+  it. It is sticky, so a ringing alarm survives the process being killed. Three
+  notification rules, each found the hard way:
+  - **The service's own foreground notification has a fixed ID, on its own
+    low-importance channel.** Moving a foreground notification to another ID
+    makes Android remove the old one, and it won't cancel the current one, so
+    tying it to a task's alarm lost alarms when two rang at once. On the alarm
+    channel it counted as a second alerting notification, and Android grouped it
+    with the alarm.
+  - **Each alarm notification has an explicit group of its own.** Android
+    auto-groups an app's ungrouped alerting notifications, and an auto-grouped
+    alarm's full-screen intent never opened the alarm screen (measured on API
+    36: the screen stayed off).
+  - The service's notification is re-posted only when the count changes.
+  Silence stops a task's vibration as well as its sound; vibration repeats while
+  some unsilenced alert repeats.
+- **The safety net**: if Android refuses to start `RingingService` (a battery
+  manager, or an inexact alarm on Android 12 without exact-alarm access), the
+  receiver posts each alert itself as an insistent notification on
+  `alarms_fallback`, a channel that carries the phone's alarm sound. Android
+  repeats that sound until the notification is touched. `AlarmActivity` then
+  plays the task's own sound.
 - `AlarmSound`: `MediaPlayer` on the alarm stream, one sound at a time, like the
   desktop's. It tries the chosen sound, then the phone's alarm, ringtone and
   notification defaults, then the first installed alarm sound. An emulator, or
   a phone, can have no default set, and checking whether a default's address
   can be opened is no test: the settings-provider address fails that check yet
   plays. Only a failure of the user's own choice is reported.
-- `AlarmActivity`: `showWhenLocked` and `turnScreenOn`. Back counts as Close,
-  remind me later, and only reminder and restart fields the user changed are
-  written back.
-- `BootReceiver` (boot, time or time-zone change, package replaced): clears the
-  time-zone cache and reschedules, so missed alarms ring with the late warning.
-  It also starts `SyncService`.
+- `AlarmActivity`: `showWhenLocked` and `turnScreenOn`, one ringing task at a
+  time. When its task stops ringing for any reason (answered here, through a
+  notification button, or on another device), it moves on to the next ringing
+  task, or closes. Opened from "Show alarm", it stays up while its task is
+  merely waiting. Back counts as Close, remind me later, and only reminder and
+  restart fields the user changed are written back.
+- **Direct boot**: the app is `directBootAware`, and its files live in
+  device-protected storage. The locked-boot receiver can then set alarms before
+  the first unlock after a restart, so a phone that rebooted overnight for an
+  update still rings at 07:00. That is what Android's own clock app does. The
+  cost: those files are protected by the device key only, not the user's PIN.
+  Files from the credential-protected directory move over once, on the first
+  start while the phone is unlocked.
+- **Startup settling** holds only alarms genuinely missed, those due more than a
+  minute before the process started (`AlarmEngine.MissedWhileNotRunning`). On
+  Android the alarm usually starts the process itself, a moment after it is due,
+  and that alarm is on time.
+- `BootReceiver` (locked boot, boot, time or time-zone change, package
+  replaced): clears the time-zone cache and reschedules, so missed alarms ring
+  with the late warning. It also starts `SyncService`.
 - `SyncService`: a `connectedDevice` foreground service that keeps the process,
   and with it the engine in `AppState`, alive in the background. It is
   `connectedDevice` rather than `dataSync` because Android 15 caps `dataSync` at
@@ -387,13 +423,18 @@ it runs on Android 10 (API 29) and up. The root namespace is
   Android restarts it, and sync, after killing the process.
 - `SoundChooser`: Android's ringtone picker (alarms, ringtones, notifications),
   or the document picker for a file, taking a persistable read grant so the file
-  still plays after a reboot.
+  still plays after a reboot. Its callback is fixed when it is created, so a
+  pick that returns to a recreated activity still lands. The editor and Settings
+  save their picked dates, times, sound and weekday boxes across recreation
+  (rotation, dark mode).
+- `Screen`: the base class of every activity, which holds what each would
+  otherwise repeat.
 - `Permissions`: notifications (API 33+), exact alarms (API 31–32), full-screen
   intents (API 34+). The list asks once per run; Settings shows each one's state
   with a Fix button, plus a note about battery optimization.
-- Release builds trim. Core is rooted (`TrimmerRootAssembly`, `RootMode="All"`)
-  and reflection-based System.Text.Json is kept on, because the store, the
-  settings and the sync messages are deserialized by reflection.
+- Release builds trim fully, with trim warnings as errors. Core serializes
+  through a source-generated `JsonSerializerContext` (`CoreJson`), so nothing
+  depends on reflection.
 
 ## Simplification opportunities
 

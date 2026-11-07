@@ -2,7 +2,7 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
   <application android:allowBackup="true" android:icon="@mipmap/appicon" android:label="@string/app_name"
                android:roundIcon="@mipmap/appicon_round" android:supportsRtl="true"
-               android:theme="@style/AppTheme">
+               android:theme="@style/AppTheme" android:directBootAware="true">
   </application>
 
   <!-- Sync (R17): LAN discovery and sessions. CHANGE_WIFI_MULTICAST_STATE is also what

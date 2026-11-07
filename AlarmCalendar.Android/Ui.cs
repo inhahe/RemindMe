@@ -7,6 +7,13 @@ using AlertDialog = AndroidX.AppCompat.App.AlertDialog;
 
 namespace AlarmCalendar.Droid;
 
+/// <summary>The app's screens: one place for what each would otherwise repeat.</summary>
+public abstract class Screen : AppCompatActivity
+{
+    protected T Find<[System.Diagnostics.CodeAnalysis.DynamicallyAccessedMembers(Ui.ViewCtors)] T>(int id) where T : View =>
+        FindViewById<T>(id)!;
+}
+
 /// <summary>Small helpers the screens share.</summary>
 public static class Ui
 {
@@ -53,8 +60,6 @@ public static class Ui
 
     public static void PickDate(Context c, DateTime current, Action<DateTime> picked) =>
         new DatePickerDialog(c, (_, e) => picked(new DateTime(e.Year, e.Month + 1, e.DayOfMonth)), current.Year, current.Month - 1, current.Day).Show();
-
-    public static int IntOf(EditText e) => int.TryParse(e.Text, out var v) ? v : 0;
 
     public static void Toast(Context c, string text) => Android.Widget.Toast.MakeText(c, text, ToastLength.Short)!.Show();
 

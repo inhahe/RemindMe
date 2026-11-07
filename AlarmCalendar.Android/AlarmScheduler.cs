@@ -25,7 +25,7 @@ public static class AlarmScheduler
         {
             var st = AlarmEngine.Evaluate(t, now, zone);
             if (!st.ShouldAlert) continue;
-            if (st.AlertDue < AppState.StartedUtc && AppState.SettlingAfterStart(now) && !RingingService.IsShowing(t.Id))
+            if (AlarmEngine.MissedWhileNotRunning(st, AppState.StartedUtc) && AppState.SettlingAfterStart(now) && !RingingService.HasAlerted(st))
             {
                 settleUntil = AppState.StartedUtc + AppState.SettleLimit;
                 continue;
@@ -36,16 +36,17 @@ public static class AlarmScheduler
     }
 
     /// <summary>Sets (or clears) the single alarm for the next moment anything is due. If
-    /// something is due already and the ringing service isn't handling it, the alarm is set
-    /// a second from now: starting the foreground service from an exact alarm is always
+    /// something is due already and hasn't been put in front of the user, the alarm is set a
+    /// second from now: starting the foreground service from an exact alarm is always
     /// allowed, whereas a boot receiver may not start a media-playback service at all
-    /// (Android 15).</summary>
+    /// (Android 15). An alert already posted (by the service, or by the fallback when the
+    /// service couldn't start) doesn't re-arm it, or a refusal would repeat every second.</summary>
     public static void Reschedule(Context context)
     {
         var now = AppState.Clock.UtcNow;
         var ringing = RingingNow(now, out var settleUntil);
         DateTimeOffset? when = AlarmEngine.NextWakeUp(AppState.Store.Live(), now, AppState.Clock.Zone);
-        if (ringing.Count > 0 && !RingingService.IsRunning) when = now + TimeSpan.FromSeconds(1);
+        if (ringing.Any(st => !RingingService.HasAlerted(st))) when = now + TimeSpan.FromSeconds(1);
         if (settleUntil is { } s && (when is null || s < when)) when = s;
 
         var am = (AlarmManager)context.GetSystemService(Context.AlarmService)!;
@@ -80,16 +81,19 @@ public sealed class AlarmReceiver : BroadcastReceiver
     {
         if (context is null) return;
         var ringing = AlarmScheduler.RingingNow(AppState.Clock.UtcNow, out _);
-        if (ringing.Count > 0) RingingService.Start(context);
+        if (ringing.Count > 0 && !RingingService.IsRunning && !RingingService.TryStart(context))
+            RingingService.NotifyWithoutService(context, ringing);
         AlarmScheduler.Reschedule(context);
     }
 }
 
 /// <summary>After a reboot, an app update, or a change of clock or time zone, alarms must
 /// be set again: AlarmManager forgets them on reboot, and the next wake-up moves with the
-/// clock. Missed alarms then ring, marked late (R13).</summary>
-[BroadcastReceiver(Enabled = true, Exported = true)]
-[IntentFilter([Intent.ActionBootCompleted, Intent.ActionTimeChanged, Intent.ActionTimezoneChanged,
+/// clock. Missed alarms then ring, marked late (R13). The locked-boot event arrives before
+/// the first unlock (the app is direct-boot aware), so an alarm due while a phone that
+/// restarted overnight still waits for its PIN rings on time.</summary>
+[BroadcastReceiver(Enabled = true, Exported = true, DirectBootAware = true)]
+[IntentFilter([Intent.ActionLockedBootCompleted, Intent.ActionBootCompleted, Intent.ActionTimeChanged, Intent.ActionTimezoneChanged,
     Intent.ActionMyPackageReplaced, "android.intent.action.QUICKBOOT_POWERON"])]
 public sealed class BootReceiver : BroadcastReceiver
 {
@@ -98,7 +102,8 @@ public sealed class BootReceiver : BroadcastReceiver
         if (context is null) return;
         TimeZoneInfo.ClearCachedData();
         AlarmScheduler.Reschedule(context);
-        if (intent?.Action is Intent.ActionBootCompleted or Intent.ActionMyPackageReplaced && AppState.Settings.SyncEnabled)
+        if (intent?.Action is Intent.ActionLockedBootCompleted or Intent.ActionBootCompleted or Intent.ActionMyPackageReplaced
+            && AppState.Settings.SyncEnabled)
             SyncService.Start(context);
     }
 }

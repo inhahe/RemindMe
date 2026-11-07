@@ -11,7 +11,7 @@ namespace AlarmCalendar.Droid;
 /// <summary>Sync (R17, D3): devices in reach and in the group, linking, and the sync
 /// settings, as the desktop's Devices window. It also answers pairing requests.</summary>
 [Activity(Label = "Devices and sync", Exported = false, LaunchMode = Android.Content.PM.LaunchMode.SingleTop)]
-public sealed class DevicesActivity : AppCompatActivity
+public sealed class DevicesActivity : Screen
 {
     private readonly Handler _handler = new(Looper.MainLooper!);
 
@@ -38,7 +38,7 @@ public sealed class DevicesActivity : AppCompatActivity
         AppState.SyncChanged += Refresh;
         AppState.PairProgressed += OnPairProgress;
         AppState.PairRequested += Ask;
-        if (AppState.PendingPrompt is { } p) Ask(p);
+        if (AppState.PendingPrompt is { IsWithdrawn: false } p) Ask(p);
         Tick();
     }
 
@@ -48,7 +48,18 @@ public sealed class DevicesActivity : AppCompatActivity
         AppState.PairProgressed -= OnPairProgress;
         AppState.PairRequested -= Ask;
         _handler.RemoveCallbacksAndMessages(null);
+        // The dialog belongs to this window; the question itself (PendingPrompt) stays until
+        // answered, and is asked again by whichever Devices screen resumes next.
+        CloseDialog();
         base.OnPause();
+    }
+
+    private AlertDialog? _dialog;
+
+    private void CloseDialog()
+    {
+        if (_dialog is { IsShowing: true } d && !IsDestroyed) d.Dismiss();
+        _dialog = null;
     }
 
     private void Tick()
@@ -57,7 +68,6 @@ public sealed class DevicesActivity : AppCompatActivity
         _handler.PostDelayed(Tick, 3000);
     }
 
-    private T Find<[System.Diagnostics.CodeAnalysis.DynamicallyAccessedMembers(Ui.ViewCtors)] T>(int id) where T : View => FindViewById<T>(id)!;
 
     private void Refresh()
     {
@@ -99,19 +109,26 @@ public sealed class DevicesActivity : AppCompatActivity
     /// <summary>Asks whether to link (D3); on either device, both users must accept.</summary>
     private void Ask(PairPrompt p)
     {
-        AppState.PendingPrompt = null;
+        if (p.IsWithdrawn) return;
+        CloseDialog();
         Notifications.Cancel(this, Notifications.PairId);
-        var dialog = new AlertDialog.Builder(this)
+        void Answer(bool yes)
+        {
+            if (AppState.PendingPrompt == p) AppState.PendingPrompt = null;
+            _ = yes ? p.AcceptAsync() : p.RejectAsync();
+        }
+        _dialog = new AlertDialog.Builder(this)
             .SetTitle("Link a device?")!
             .SetMessage($"{PairText.Question(p)}\n\n"
                 + $"Both devices should be showing this code:\n\n{p.Code[..3]} {p.Code[3..]}\n\n"
                 + "Accept only if the codes match.")!
-            .SetPositiveButton("Link", (_, _) => _ = p.AcceptAsync())!
-            .SetNegativeButton("Don't link", (_, _) => _ = p.RejectAsync())!
+            .SetPositiveButton("Link", (_, _) => Answer(true))!
+            .SetNegativeButton("Don't link", (_, _) => Answer(false))!
             .SetCancelable(false)!
             .Show()!;
         // The other device said no or went away: nothing left to answer.
-        p.Withdrawn += () => AppState.OnMain(() => { if (dialog.IsShowing) dialog.Dismiss(); });
+        var shown = _dialog;
+        p.Withdrawn += () => AppState.OnMain(() => { if (_dialog == shown) CloseDialog(); });
     }
 
     private void Apply()

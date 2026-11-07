@@ -10,6 +10,13 @@ namespace AlarmCalendar.Droid;
 public static class Notifications
 {
     public const string AlarmChannel = "alarms";
+    /// <summary>Alarms posted when the ringing service couldn't start: this channel carries
+    /// the phone's alarm sound itself.</summary>
+    public const string FallbackChannel = "alarms_fallback";
+    /// <summary>The ringing service's own notification. Low importance, deliberately: on the
+    /// alarm channel it counted as a second alerting notification, Android grouped it with
+    /// the alarm, and a grouped alarm's full-screen intent never opened the alarm screen.</summary>
+    public const string ServiceChannel = "ringing_service";
     public const string SyncChannel = "sync";
     public const string PairChannel = "pairing";
     public const int SyncId = 2;
@@ -28,6 +35,19 @@ public static class Notifications
         alarms.SetSound(null, null);
         alarms.EnableVibration(false);
         nm.CreateNotificationChannel(alarms);
+        var fallback = new NotificationChannel(FallbackChannel, "Alarms (when the app can't play its own sound)", NotificationImportance.High)
+        {
+            Description = "Used only if Android or the phone's battery manager stops the app's alarm sound",
+            LockscreenVisibility = NotificationVisibility.Public,
+        };
+        fallback.SetSound(Android.Media.RingtoneManager.GetDefaultUri(Android.Media.RingtoneType.Alarm),
+            new Android.Media.AudioAttributes.Builder().SetUsage(Android.Media.AudioUsageKind.Alarm)!.Build());
+        fallback.EnableVibration(true);
+        nm.CreateNotificationChannel(fallback);
+        nm.CreateNotificationChannel(new NotificationChannel(ServiceChannel, "Alarm in progress", NotificationImportance.Low)
+        {
+            Description = "Shown while an alarm rings, so Android lets the sound keep playing",
+        });
         nm.CreateNotificationChannel(new NotificationChannel(SyncChannel, "Sync", NotificationImportance.Low)
         {
             Description = "Shown while the app keeps your devices in sync",
@@ -43,18 +63,22 @@ public static class Notifications
 
     /// <summary>The ringing notification of one task: it opens the alarm screen full-screen
     /// when the phone is locked, and offers Mark done and Remind me later.</summary>
-    public static Notification Alarm(Context context, TaskStatus st)
+    /// <param name="fallback">Posted without the ringing service, on the channel that sounds.</param>
+    public static Notification Alarm(Context context, TaskStatus st, bool fallback)
     {
         var d = st.Task.Def;
         var open = AlarmActivity.IntentFor(context, st.Task.Id);
         var openPi = PendingIntent.GetActivity(context, AlarmId(st.Task.Id), open,
             PendingIntentFlags.Immutable | PendingIntentFlags.UpdateCurrent);
-        string title = d.Kind == ScheduleKind.Countdown ? "Countdown finished" : st.IsReminder ? "Reminder" : "Alarm";
+        string title = AlarmEngine.AlertTitle(st);
         var text = TextFormat.Snippet(d.Description, 80);
         // The builder returns itself from every call; statements rather than a chain,
         // because the bindings annotate each return as nullable.
-        var b = new NotificationCompat.Builder(context, AlarmChannel);
+        var b = new NotificationCompat.Builder(context, fallback ? FallbackChannel : AlarmChannel);
         b.SetSmallIcon(Resource.Drawable.ic_stat_alarm);
+        // A group of its own: Android auto-groups an app's ungrouped notifications, and an
+        // auto-grouped alarm's full-screen intent doesn't open the alarm screen.
+        b.SetGroup($"alarm-{st.Task.Id:N}");
         b.SetContentTitle(text.Length > 0 ? text : title);
         b.SetContentText($"{title} · {TextFormat.Schedule(d, st.Task.State, AppState.Clock.UtcNow, AppState.Clock.Zone)}");
         b.SetCategory(NotificationCompat.CategoryAlarm);
@@ -66,6 +90,23 @@ public static class Notifications
         b.SetVisibility(NotificationCompat.VisibilityPublic);
         b.AddAction(0, "Mark done", AlarmActionReceiver.IntentFor(context, st.Task.Id, AlarmActionReceiver.Done));
         b.AddAction(0, "Remind me later", AlarmActionReceiver.IntentFor(context, st.Task.Id, AlarmActionReceiver.Later));
+        return b.Build()!;
+    }
+
+    /// <summary>The ringing service's own notification, which Android requires of a
+    /// foreground service; the tasks' alarms are separate notifications.</summary>
+    public static Notification Ringing(Context context, int count)
+    {
+        var open = PendingIntent.GetActivity(context, 0, new Intent(context, typeof(MainActivity)),
+            PendingIntentFlags.Immutable | PendingIntentFlags.UpdateCurrent);
+        var b = new NotificationCompat.Builder(context, ServiceChannel);
+        b.SetSmallIcon(Resource.Drawable.ic_stat_alarm);
+        b.SetGroup("ringing-service");
+        b.SetContentTitle(count == 1 ? "An alarm is ringing" : $"{count} alarms are ringing");
+        b.SetContentIntent(open);
+        b.SetOngoing(true);
+        b.SetSilent(true);
+        b.SetPriority(NotificationCompat.PriorityLow);
         return b.Build()!;
     }
 
@@ -91,8 +132,8 @@ public static class Notifications
             PendingIntentFlags.Immutable | PendingIntentFlags.UpdateCurrent);
         var b = new NotificationCompat.Builder(context, PairChannel);
         b.SetSmallIcon(Resource.Drawable.ic_stat_alarm);
-        b.SetContentTitle($"\"{p.PeerName}\" wants to link");
-        b.SetContentText($"Tap to answer. Its code should be {p.Code[..3]} {p.Code[3..]}.");
+        b.SetContentTitle(p.IsRequester ? $"Linking with \"{p.PeerName}\"" : $"\"{p.PeerName}\" wants to link");
+        b.SetContentText($"Tap to compare the codes and answer ({p.Code[..3]} {p.Code[3..]}).");
         b.SetAutoCancel(true);
         b.SetContentIntent(open);
         b.SetPriority(NotificationCompat.PriorityHigh);

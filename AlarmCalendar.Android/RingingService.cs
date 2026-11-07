@@ -8,44 +8,95 @@ namespace AlarmCalendar.Droid;
 
 /// <summary>
 /// Runs while any task is ringing: posts each one's alarm notification (whose full-screen
-/// intent opens <see cref="AlarmActivity"/> over the lock screen), plays the sound, and
-/// re-evaluates every second, so an alarm marked done or dismissed anywhere (another
-/// screen, a notification button, another device) stops here too. A foreground service,
-/// so the sound keeps playing with the app in the background (D4).
+/// intent opens <see cref="AlarmActivity"/> over the lock screen), plays the sound,
+/// vibrates, and re-evaluates every second, so an alarm marked done or dismissed anywhere
+/// (another screen, a notification button, another device) stops here too. A foreground
+/// service, so the sound keeps playing with the app in the background (D4).
+/// <para>The service's own foreground notification has a fixed ID, separate from the
+/// tasks' notifications: Android removes a foreground notification whose ID the service
+/// moves away from, and won't cancel the current one, so sharing IDs lost alarms.</para>
 /// </summary>
 [Service(Exported = false, ForegroundServiceType = ForegroundService.TypeMediaPlayback)]
 public sealed class RingingService : Service
 {
     /// <summary>What the alarm screen needs to know about a ringing task's current alert.</summary>
-    public sealed record AlertInfo(DateTimeOffset? Due, string? LateText, string? SoundProblem);
+    /// <param name="Repeat">Its sound (and vibration) repeats until it is answered.</param>
+    public sealed record AlertInfo(DateTimeOffset? Due, string? LateText, string? SoundProblem, bool Repeat);
 
+    private const int ServiceNotificationId = 1;
     private static RingingService? _instance;
+    /// <summary>The alerts posted so far, by task, on the main thread only. Shared with the
+    /// fallback path (<see cref="NotifyWithoutService"/>), so an alert is posted once.</summary>
     private static readonly Dictionary<Guid, AlertInfo> Alerts = new();
+    private static readonly HashSet<Guid> Silenced = new();
     private readonly Handler _handler = new(Looper.MainLooper!);
     private AlarmSound? _sound;
     private Vibrator? _vibrator;
-    private bool _foreground;
+    private bool _vibrating;
+    /// <summary>The count the service's notification shows; it is re-posted only when this changes.</summary>
+    private int _shownCount = -1;
 
     public static bool IsRunning => _instance is not null;
-    public static bool IsShowing(Guid task) => Alerts.ContainsKey(task);
     public static AlertInfo? InfoFor(Guid task) => Alerts.GetValueOrDefault(task);
 
-    public static void Start(Context context)
+    /// <summary>True when the current alert of <paramref name="st"/> has been posted.</summary>
+    public static bool HasAlerted(TaskStatus st) => Alerts.TryGetValue(st.Task.Id, out var a) && a.Due == st.AlertDue;
+
+    /// <returns>False when Android refused to start it from here.</returns>
+    public static bool TryStart(Context context)
     {
-        try { context.StartForegroundService(new Intent(context, typeof(RingingService))); }
+        try
+        {
+            context.StartForegroundService(new Intent(context, typeof(RingingService)));
+            return true;
+        }
         catch (Exception e) when (e is Java.Lang.IllegalStateException or ForegroundServiceStartNotAllowedException)
         {
-            // Not allowed from here (the app in the background without an exemption); the
-            // scheduler's next alarm, a second away, starts it instead.
-            AppState.Log($"Couldn't start the alarm service now: {e.Message}");
+            AppState.Log($"Couldn't start the ringing service: {e.Message}");
+            return false;
         }
+    }
+
+    /// <summary>
+    /// The safety net when the service can't start (a phone maker's battery manager, or an
+    /// inexact alarm on Android 12 without exact-alarm access): each alert goes out as an
+    /// insistent notification on a channel with the phone's alarm sound, which Android plays
+    /// over and over until the user touches it. The task's own sound isn't used, but it rings.
+    /// </summary>
+    public static void NotifyWithoutService(Context context, IEnumerable<TaskStatus> ringing)
+    {
+        var now = AppState.Clock.UtcNow;
+        foreach (var st in ringing)
+        {
+            if (HasAlerted(st)) continue;
+            Alerts[st.Task.Id] = NewAlert(st, now, soundProblem: "The alarm couldn't start its own sound, so the phone's alarm sound plays.");
+            var n = Notifications.Alarm(context, st, fallback: true);
+            n.Flags |= NotificationFlags.Insistent;
+            Notifications.Post(context, Notifications.AlarmId(st.Task.Id), n);
+            AppState.Log($"Ringing without the service: {TextFormat.Snippet(st.Task.Def.Description, 40)}");
+        }
+    }
+
+    private static AlertInfo NewAlert(TaskStatus st, DateTimeOffset now, string? soundProblem)
+    {
+        string? late = AlarmEngine.Lateness(st, now) is not null && st.AlertDue is { } due
+            ? TextFormat.LateWarning(due, now, AppState.StartedUtc, AppState.Clock.Zone) : null;
+        return new AlertInfo(st.AlertDue, late, soundProblem, AppState.Settings.SoundModeFor(st.Task.Def) == SoundMode.Repeat);
     }
 
     /// <summary>Re-evaluates at once (after a task changed).</summary>
     public static void Poke() => _instance?.Evaluate();
 
-    /// <summary>Stops the sound of one task without dismissing it (the Silence button).</summary>
-    public static void Silence(Guid task) => _instance?._sound?.Stop(task);
+    /// <summary>Stops the sound, and the vibration, of one task without dismissing it.</summary>
+    public static void Silence(Guid task)
+    {
+        Silenced.Add(task);
+        if (_instance is { } s)
+        {
+            s._sound?.Stop(task);
+            s.UpdateVibration(newAlert: false);
+        }
+    }
 
     public override IBinder? OnBind(Intent? intent) => null;
 
@@ -63,17 +114,12 @@ public sealed class RingingService : Service
 
     public override StartCommandResult OnStartCommand(Intent? intent, StartCommandFlags flags, int startId)
     {
-        // A foreground service must call StartForeground promptly whatever happens next.
-        if (!_foreground)
-        {
-            var b = new AndroidX.Core.App.NotificationCompat.Builder(this, Notifications.AlarmChannel);
-            b.SetSmallIcon(Resource.Drawable.ic_stat_alarm);
-            b.SetContentTitle("Alarm");
-            Foreground(1, b.Build()!);
-            _foreground = true;
-        }
+        // A foreground service must call StartForeground promptly, whatever happens next.
+        StartForeground(ServiceNotificationId, Notifications.Ringing(this, Alerts.Count), ForegroundService.TypeMediaPlayback);
         Evaluate();
-        return StartCommandResult.NotSticky;
+        // Sticky: if Android kills the process mid-alarm, it restarts the service, which
+        // finds the alarm still due and rings it again.
+        return StartCommandResult.Sticky;
     }
 
     private void Evaluate()
@@ -86,53 +132,72 @@ public sealed class RingingService : Service
         foreach (var gone in Alerts.Keys.Where(k => !ids.Contains(k)).ToList())
         {
             Alerts.Remove(gone);
+            Silenced.Remove(gone);
             _sound!.Stop(gone);
             Notifications.Cancel(this, Notifications.AlarmId(gone));
         }
 
+        bool newAlert = false;
         foreach (var st in ringing)
         {
             var id = st.Task.Id;
-            if (Alerts.TryGetValue(id, out var info) && info.Due == st.AlertDue) continue;
-            // A new alert: a task just came due, or its reminder did, or another occurrence.
-            string? late = AlarmEngine.Lateness(st, now) is not null && st.AlertDue is { } due
-                ? TextFormat.LateWarning(due, now, AppState.StartedUtc, AppState.Clock.Zone) : null;
-            var mode = AppState.Settings.SoundModeFor(st.Task.Def);
-            var problem = _sound!.Play(id, AppState.Settings.SoundFor(st.Task.Def, Platforms.Android), mode == SoundMode.Repeat);
-            Alerts[id] = new AlertInfo(st.AlertDue, late, problem);
-            Vibrate(mode == SoundMode.Repeat);
-            var n = Notifications.Alarm(this, st);
-            Notifications.Post(this, Notifications.AlarmId(id), n);
-            Foreground(Notifications.AlarmId(id), n);
+            // Posted already, by this service with its sound running: nothing new. (One
+            // posted by the fallback is taken over: re-posted quietly, with its own sound.)
+            if (HasAlerted(st) && (_sound!.IsPlayingOrPlayed(id) || Silenced.Contains(id))) continue;
+            Silenced.Remove(id);
+            var problem = _sound!.Play(id, AppState.Settings.SoundFor(st.Task.Def, Platforms.Android),
+                AppState.Settings.SoundModeFor(st.Task.Def) == SoundMode.Repeat);
+            Alerts[id] = NewAlert(st, now, problem);
+            Notifications.Post(this, Notifications.AlarmId(id), Notifications.Alarm(this, st, fallback: false));
+            newAlert = true;
             AppState.Log($"Ringing: {TextFormat.Snippet(st.Task.Def.Description, 40)}");
         }
 
         if (ringing.Count == 0)
         {
-            _vibrator?.Cancel();
+            StopVibration();
             StopForeground(StopForegroundFlags.Remove);
-            _foreground = false;
             StopSelf();
             return;
         }
+        if (ringing.Count != _shownCount)
+        {
+            _shownCount = ringing.Count;
+            Notifications.Post(this, ServiceNotificationId, Notifications.Ringing(this, ringing.Count));
+        }
+        UpdateVibration(newAlert);
         _handler.PostDelayed(Evaluate, 1000);
     }
 
-    private void Foreground(int id, Notification n)
+    /// <summary>Vibrates for a new alert, keeps vibrating while some unsilenced alert
+    /// repeats, and stops once none does.</summary>
+    private void UpdateVibration(bool newAlert)
     {
-        StartForeground(id, n, ForegroundService.TypeMediaPlayback);
+        if (_vibrator is not { HasVibrator: true }) return;
+        bool repeat = Alerts.Any(kv => kv.Value.Repeat && !Silenced.Contains(kv.Key));
+        if (newAlert)
+        {
+            Vibrate(repeat);
+            _vibrating = repeat;
+        }
+        else if (_vibrating && !repeat) StopVibration();
+    }
+
+    private void StopVibration()
+    {
+        _vibrator?.Cancel();
+        _vibrating = false;
     }
 
     private void Vibrate(bool repeat)
     {
-        if (_vibrator is not { HasVibrator: true }) return;
         long[] pattern = [0, 600, 400, 600, 1400];
         var effect = VibrationEffect.CreateWaveform(pattern, repeat ? 0 : -1)!;
         if (OperatingSystem.IsAndroidVersionAtLeast(33))
-            _vibrator.Vibrate(effect, VibrationAttributes.CreateForUsage((int)VibrationAttributesUsageType.Alarm));
+            _vibrator!.Vibrate(effect, VibrationAttributes.CreateForUsage((int)VibrationAttributesUsageType.Alarm));
         else
 #pragma warning disable CA1422 // the old overload, for Android 12 and below only
-            _vibrator.Vibrate(effect, new AudioAttributes.Builder().SetUsage(AudioUsageKind.Alarm)!.Build()!);
+            _vibrator!.Vibrate(effect, new AudioAttributes.Builder().SetUsage(AudioUsageKind.Alarm)!.Build()!);
 #pragma warning restore CA1422
     }
 
@@ -140,9 +205,7 @@ public sealed class RingingService : Service
     {
         _handler.RemoveCallbacksAndMessages(null);
         _sound?.StopAll();
-        _vibrator?.Cancel();
-        foreach (var id in Alerts.Keys) Notifications.Cancel(this, Notifications.AlarmId(id));
-        Alerts.Clear();
+        StopVibration();
         _instance = null;
         base.OnDestroy();
         AlarmScheduler.Reschedule(this);
@@ -158,6 +221,7 @@ public sealed class AlarmSound(Context context)
     private sealed record Entry(Guid Owner, global::Android.Net.Uri Uri, bool Loop);
 
     private readonly List<Entry> _active = [];
+    private readonly HashSet<Guid> _started = [];
     private MediaPlayer? _player;
     private Entry? _playing;
 
@@ -180,6 +244,9 @@ public sealed class AlarmSound(Context context)
         if (first is not null) yield return first;
     }
 
+    /// <summary>This owner's sound was started (it may have finished, if it plays once).</summary>
+    public bool IsPlayingOrPlayed(Guid owner) => _started.Contains(owner);
+
     /// <summary>Plays the task's sound (R10, R11: <paramref name="sound"/> is the task's
     /// choice or the default in Settings; null means the phone's alarm sound), falling back
     /// through the phone's own sounds if it can't be played.</summary>
@@ -188,6 +255,7 @@ public sealed class AlarmSound(Context context)
     public string? Play(Guid owner, SoundRef? sound, bool loop)
     {
         _active.RemoveAll(e => e.Owner == owner);
+        _started.Add(owner);
         var candidates = new List<global::Android.Net.Uri>();
         if (sound is not null) candidates.Add(global::Android.Net.Uri.Parse(sound.Value)!);
         candidates.AddRange(SystemSounds());
@@ -206,12 +274,14 @@ public sealed class AlarmSound(Context context)
     public void Stop(Guid owner)
     {
         _active.RemoveAll(e => e.Owner == owner);
+        _started.Remove(owner);
         if (_playing?.Owner == owner) StartNewest();
     }
 
     public void StopAll()
     {
         _active.Clear();
+        _started.Clear();
         Release();
     }
 

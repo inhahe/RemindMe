@@ -11,7 +11,7 @@ namespace AlarmCalendar.Droid;
 /// <summary>The defaults for tasks (R6, R11, R14), and the state of the permissions alarms
 /// depend on, each with a way to fix it.</summary>
 [Activity(Label = "Settings", Exported = false)]
-public sealed class SettingsActivity : AppCompatActivity
+public sealed class SettingsActivity : Screen
 {
     private SoundChooser _chooser = null!;
     private SoundRef? _sound;
@@ -22,7 +22,7 @@ public sealed class SettingsActivity : AppCompatActivity
         base.OnCreate(savedInstanceState);
         SetContentView(Resource.Layout.activity_settings);
         Ui.SetupToolbar(this, "Settings", back: true);
-        _chooser = new SoundChooser(this);
+        _chooser = new SoundChooser(this, v => { _sound = v; Show(); });
         var s = AppState.Settings;
         _sound = s.DefaultSound;
         _timeOfDay = s.DefaultTimeOfDay;
@@ -32,11 +32,25 @@ public sealed class SettingsActivity : AppCompatActivity
         Find<EditText>(Resource.Id.rem_minutes).Text = (s.DefaultReminderMinutes % 60).ToString(CultureInfo.CurrentCulture);
         Find<RadioButton>(Resource.Id.restart_from_done).Checked = s.DefaultRestartMode == RestartMode.FromDone;
         Find<RadioButton>(Resource.Id.restart_on_schedule).Checked = s.DefaultRestartMode == RestartMode.OnSchedule;
-        Find<Button>(Resource.Id.sound).Click += (_, _) => _chooser.Show(_sound, allowDefault: false, v => { _sound = v; Show(); });
+        Find<Button>(Resource.Id.sound).Click += (_, _) => _chooser.Show(_sound, allowDefault: false);
         Find<Button>(Resource.Id.time_of_day).Click += (_, _) => Ui.PickTime(this, _timeOfDay, v => { _timeOfDay = v; Show(); });
         Find<Button>(Resource.Id.cancel).Click += (_, _) => Finish();
         Find<Button>(Resource.Id.save).Click += (_, _) => Save();
+        if (savedInstanceState is { } saved)
+        {
+            _timeOfDay = new TimeOnly(saved.GetLong("timeOfDay"));
+            _sound = saved.GetBoolean("hasSound") ? SoundChooser.Restore(saved, "sound") : null;
+        }
         Show();
+    }
+
+    /// <summary>Keeps the picked sound and time across the activity being recreated.</summary>
+    protected override void OnSaveInstanceState(Bundle outState)
+    {
+        base.OnSaveInstanceState(outState);
+        outState.PutLong("timeOfDay", _timeOfDay.Ticks);
+        outState.PutBoolean("hasSound", _sound is not null);
+        SoundChooser.Save(outState, "sound", _sound);
     }
 
     protected override void OnResume()
@@ -45,7 +59,6 @@ public sealed class SettingsActivity : AppCompatActivity
         ShowPermissions();   // the user may be back from a system settings screen
     }
 
-    private T Find<[System.Diagnostics.CodeAnalysis.DynamicallyAccessedMembers(Ui.ViewCtors)] T>(int id) where T : View => FindViewById<T>(id)!;
 
     private void Show()
     {

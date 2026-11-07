@@ -118,6 +118,16 @@ public static class AlarmEngine
         return best;
     }
 
+    /// <summary>The alert came due while the app wasn't running: well before the process
+    /// started. On Android an alarm usually starts the process itself, a moment after it
+    /// is due; that one is on time, not missed.</summary>
+    public static bool MissedWhileNotRunning(TaskStatus st, DateTimeOffset processStarted) =>
+        st.AlertDue is { } due && due < processStarted - TimeSpan.FromMinutes(1);
+
+    /// <summary>"Alarm", "Reminder" or "Countdown finished": what the current alert is.</summary>
+    public static string AlertTitle(TaskStatus st) =>
+        st.Task.Def.Kind == ScheduleKind.Countdown ? "Countdown finished" : st.IsReminder ? "Reminder" : "Alarm";
+
     /// <summary>How late the current alert of <paramref name="st"/> is if shown at
     /// <paramref name="shownAt"/>; null when within <see cref="LateThreshold"/>.</summary>
     public static TimeSpan? Lateness(TaskStatus st, DateTimeOffset shownAt)

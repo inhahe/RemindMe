@@ -77,11 +77,15 @@ public sealed class AppSettings
 
     /// <summary>Records that the linked device <paramref name="node"/> was in sync at
     /// <paramref name="now"/> (when its session proved the key, and again when it closed).</summary>
+    /// <remarks>Copy-on-write: the sync engine reads <see cref="KnownPeers"/> from its own
+    /// threads, so the list is replaced, never changed in place.</remarks>
     public void RememberPeer(string node, string name, DateTimeOffset now)
     {
-        int i = KnownPeers.FindIndex(p => p.NodeId == node);
-        if (i >= 0) KnownPeers[i] = new KnownPeer(node, name, now);
-        else KnownPeers.Add(new KnownPeer(node, name, now));
+        var list = new List<KnownPeer>(KnownPeers);
+        int i = list.FindIndex(p => p.NodeId == node);
+        if (i >= 0) list[i] = new KnownPeer(node, name, now);
+        else list.Add(new KnownPeer(node, name, now));
+        KnownPeers = list;
     }
 
     public void Save(string path, Action<string>? log = null)

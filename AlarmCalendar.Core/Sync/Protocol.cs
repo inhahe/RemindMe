@@ -64,7 +64,10 @@ public sealed class SyncMessage
 public static class Protocol
 {
     public const string App = "AlarmCalendar";
-    public const int Version = 1;
+    /// <summary>Raise on every incompatible change, so mismatched builds refuse each other
+    /// with a clear message instead of failing obscurely. 2: the "ready" frame, two-sided
+    /// pairing acceptance, member counts in the commitment.</summary>
+    public const int Version = 2;
     public const int DefaultPort = 37660;
     /// <summary>Discovery always uses this UDP port, whatever TCP port a node listens on,
     /// so several instances on one machine (or a custom port) still find each other.</summary>
@@ -143,6 +146,33 @@ public static class Protocol
         var b = ip.GetAddressBytes();
         return b[0] == 10 || (b[0] == 172 && b[1] >= 16 && b[1] <= 31) || (b[0] == 192 && b[1] == 168)
             || (b[0] == 169 && b[1] == 254) || b[0] == 127;
+    }
+
+    /// <summary>True for an address on the local network: private, link-local or loopback
+    /// (<see cref="IsPrivateOrLan"/>), or inside the subnet of one of this machine's own
+    /// interfaces, which covers LAN peers reaching it over a global IPv6 address.</summary>
+    public static bool IsLanAddress(IPAddress ip)
+    {
+        if (ip.IsIPv4MappedToIPv6) ip = ip.MapToIPv4();
+        if (IsPrivateOrLan(ip)) return true;
+        try
+        {
+            foreach (var iface in System.Net.NetworkInformation.NetworkInterface.GetAllNetworkInterfaces())
+                foreach (var u in iface.GetIPProperties().UnicastAddresses)
+                    if (u.Address.AddressFamily == ip.AddressFamily && SamePrefix(u.Address, ip, u.PrefixLength))
+                        return true;
+        }
+        catch (System.Net.NetworkInformation.NetworkInformationException) { }
+        return false;
+    }
+
+    private static bool SamePrefix(IPAddress a, IPAddress b, int bits)
+    {
+        byte[] x = a.GetAddressBytes(), y = b.GetAddressBytes();
+        if (bits <= 0 || bits > x.Length * 8) return false;
+        for (int i = 0; i < bits / 8; i++) if (x[i] != y[i]) return false;
+        int rest = bits % 8;
+        return rest == 0 || ((x[bits / 8] ^ y[bits / 8]) & (0xFF << (8 - rest)) & 0xFF) == 0;
     }
 
     /// <summary>Splits "host" or "host:port" (or "[v6]:port").</summary>

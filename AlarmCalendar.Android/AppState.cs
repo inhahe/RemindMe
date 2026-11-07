@@ -45,7 +45,7 @@ public static class AppState
     public static void Initialize(Context context)
     {
         Context = context;
-        DataDir = context.FilesDir!.AbsolutePath;
+        DataDir = DataDirectory(context);
         Settings = AppSettings.Load(SettingsPath, DefaultDeviceName(), Log);
         Store = new TaskStore(Path.Combine(DataDir, "tasks.json"), Settings.NodeId, Clock, Log);
         Store.Changed += _ => OnMain(() =>
@@ -54,6 +54,31 @@ public static class AppState
             RingingService.Poke();
             TasksChanged?.Invoke();
         });
+    }
+
+    /// <summary>
+    /// Device-protected storage, readable before the first unlock after a restart, so the
+    /// locked-boot receiver can set the alarms of a phone that restarted overnight (as
+    /// Android's own clock app does). The cost: those files are protected by the device key
+    /// only, not the user's PIN. Files from the credential-protected directory of earlier
+    /// versions move over once, the first time the phone is unlocked.
+    /// </summary>
+    private static string DataDirectory(Context context)
+    {
+        var dp = context.CreateDeviceProtectedStorageContext()!;
+        var dir = dp.FilesDir!.AbsolutePath;
+        var um = (Android.OS.UserManager?)context.GetSystemService(Context.UserService);
+        if (um?.IsUserUnlocked == true && context.FilesDir is { } old && old.AbsolutePath != dir)
+        {
+            foreach (var name in new[] { "tasks.json", "tasks.json.bak", "settings.json", "settings.json.bak", "app.log" })
+            {
+                var from = Path.Combine(old.AbsolutePath, name);
+                var to = Path.Combine(dir, name);
+                try { if (File.Exists(from) && !File.Exists(to)) File.Move(from, to); }
+                catch (IOException e) { global::Android.Util.Log.Warn("AlarmCalendar", $"Couldn't move {name}: {e.Message}"); }
+            }
+        }
+        return dir;
     }
 
     private static string DefaultDeviceName()
@@ -118,6 +143,7 @@ public static class AppState
         });
         engine.PairRequested += p => OnMain(() =>
         {
+            if (p.IsWithdrawn) return;   // over before this ran
             p.Withdrawn += () => OnMain(() =>
             {
                 if (PendingPrompt != p) return;

@@ -41,6 +41,9 @@ internal sealed class PeerSession : IDisposable
 
     // Pairing (a session between different groups); see SyncEngine's pairing section.
     public bool PairStarted { get; set; }
+    public DateTimeOffset PairStartedAt { get; set; }
+    /// <summary>The requester is finishing the pairing (set once, under the session's lock).</summary>
+    public bool PairFinishing { get; set; }
     /// <summary>This device's user accepted, after comparing the codes.</summary>
     public bool LocalAccepted { get; set; }
     /// <summary>The other device's user accepted (it sent <c>pair_accept</c>).</summary>
@@ -73,7 +76,7 @@ internal sealed class PeerSession : IDisposable
     {
         PairKey?.Dispose();
         PairKey = null;
-        PairStarted = PairInitiator = LocalAccepted = PeerAccepted = false;
+        PairStarted = PairInitiator = LocalAccepted = PeerAccepted = PairFinishing = false;
         PairPublic = PairCommit = PairPeerPublic = PairSecret = null;
         PairCode = PeerSealedGroup = null;
         Prompt = null;

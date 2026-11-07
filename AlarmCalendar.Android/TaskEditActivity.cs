@@ -14,7 +14,7 @@ namespace AlarmCalendar.Droid;
 /// Back and Cancel leave without saving; only Save saves.
 /// </summary>
 [Activity(Label = "Task", Exported = false, WindowSoftInputMode = SoftInput.AdjustResize)]
-public sealed class TaskEditActivity : AppCompatActivity
+public sealed class TaskEditActivity : Screen
 {
     private static readonly IntervalUnit[] UnitOrder =
         [IntervalUnit.Years, IntervalUnit.Months, IntervalUnit.Weeks, IntervalUnit.Days,
@@ -39,7 +39,7 @@ public sealed class TaskEditActivity : AppCompatActivity
     {
         base.OnCreate(savedInstanceState);
         SetContentView(Resource.Layout.activity_edit);
-        _chooser = new SoundChooser(this);
+        _chooser = new SoundChooser(this, v => { _sound = v; ShowSound(); });
         var existing = Guid.TryParse(Intent?.GetStringExtra("task"), out var g) ? AppState.Store.Get(g) : null;
         _id = existing?.Id;
         Ui.SetupToolbar(this, existing is null ? "New task" : "Edit task", back: true);
@@ -102,18 +102,48 @@ public sealed class TaskEditActivity : AppCompatActivity
         Find<Button>(Resource.Id.weekly_time).Click += (_, _) => Ui.PickTime(this, _weeklyTime, v => { _weeklyTime = v; ShowTimes(); });
         Find<Button>(Resource.Id.once_date).Click += (_, _) => Ui.PickDate(this, _onceDate, v => { _onceDate = v; ShowTimes(); });
         Find<Button>(Resource.Id.once_time).Click += (_, _) => Ui.PickTime(this, _onceTime, v => { _onceTime = v; ShowTimes(); });
-        Find<Button>(Resource.Id.sound).Click += (_, _) => _chooser.Show(_sound, allowDefault: true, v => { _sound = v; ShowSound(); });
+        Find<Button>(Resource.Id.sound).Click += (_, _) => _chooser.Show(_sound, allowDefault: true);
         Find<Button>(Resource.Id.save).Click += (_, _) => Save();
         Find<Button>(Resource.Id.cancel).Click += (_, _) => Finish();
         foreach (var id in new[] { Resource.Id.scheduled, Resource.Id.countdown, Resource.Id.interval, Resource.Id.weekly, Resource.Id.once })
             Find<RadioButton>(id).CheckedChange += (_, _) => UpdatePanes();
 
+        if (savedInstanceState is { } saved) Restore(saved);
         ShowTimes();
         ShowSound();
         UpdatePanes();
     }
 
-    private T Find<[System.Diagnostics.CodeAnalysis.DynamicallyAccessedMembers(Ui.ViewCtors)] T>(int id) where T : View => FindViewById<T>(id)!;
+    // Recreating the activity (rotation, dark mode, the process restarted behind a picker)
+    // restores fields with IDs by itself; the picked dates, times and sound, and the weekday
+    // boxes (made in code, without IDs), are kept here.
+    protected override void OnSaveInstanceState(Bundle outState)
+    {
+        base.OnSaveInstanceState(outState);
+        outState.PutLong("startDate", _startDate.Ticks);
+        outState.PutLong("startTime", _startTime.Ticks);
+        outState.PutLong("weeklyTime", _weeklyTime.Ticks);
+        outState.PutLong("onceDate", _onceDate.Ticks);
+        outState.PutLong("onceTime", _onceTime.Ticks);
+        int mask = 0;
+        for (int i = 0; i < 7; i++) if (_days[i].Checked) mask |= 1 << i;
+        outState.PutInt("days", mask);
+        outState.PutBoolean("hasSound", _sound is not null);
+        SoundChooser.Save(outState, "sound", _sound);
+    }
+
+    private void Restore(Bundle s)
+    {
+        _startDate = new DateTime(s.GetLong("startDate"));
+        _startTime = new TimeOnly(s.GetLong("startTime"));
+        _weeklyTime = new TimeOnly(s.GetLong("weeklyTime"));
+        _onceDate = new DateTime(s.GetLong("onceDate"));
+        _onceTime = new TimeOnly(s.GetLong("onceTime"));
+        int mask = s.GetInt("days");
+        for (int i = 0; i < 7; i++) _days[i].Checked = (mask & (1 << i)) != 0;
+        _sound = s.GetBoolean("hasSound") ? SoundChooser.Restore(s, "sound") : null;
+    }
+
 
     private void BuildDays(TaskDefinition d)
     {

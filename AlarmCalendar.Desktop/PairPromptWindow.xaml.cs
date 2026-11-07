@@ -20,6 +20,8 @@ public partial class PairPromptWindow : Window
         // The other device said no or went away: nothing left to answer.
         prompt.Withdrawn += OnWithdrawn;
         Closed += (_, _) => prompt.Withdrawn -= OnWithdrawn;
+        // Withdrawn before this window existed: close as soon as it is shown.
+        if (prompt.IsWithdrawn) Loaded += (_, _) => OnWithdrawn();
     }
 
     private void OnWithdrawn() => AppHost.OnUi(() =>

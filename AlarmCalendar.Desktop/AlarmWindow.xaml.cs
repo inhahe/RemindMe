@@ -101,7 +101,7 @@ public partial class AlarmWindow : Window
         if ((d.ReminderMinutes != _shownMinutes || d.Restart != _shownRestart) && !ChoicesEdited()) ShowChoices(d);
         var now = AppHost.Clock.UtcNow;
         var zone = AppHost.Clock.Zone;
-        string what = d.Kind == ScheduleKind.Countdown ? "Countdown finished" : st.IsReminder ? "Reminder" : "Alarm";
+        string what = AlarmEngine.AlertTitle(st);
         Title = $"{what}: {TextFormat.Snippet(d.Description, 40)}";
         string when = st.Latest is { } l ? TextFormat.When(l, now, zone) : "";
         Heading.Text = $"⏰ {what} · {when} · {TextFormat.Schedule(d, st.Task.State, now, zone)}";

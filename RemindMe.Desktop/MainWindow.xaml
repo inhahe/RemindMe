@@ -10,6 +10,8 @@
         <Style x:Key="RowStyle" TargetType="ListViewItem"
                BasedOn="{StaticResource {x:Static GridView.GridViewItemContainerStyleKey}}">
             <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+            <!-- What a screen reader says for the row, which would otherwise be its type's name. -->
+            <Setter Property="AutomationProperties.Name" Value="{Binding Description}" />
             <EventSetter Event="MouseDoubleClick" Handler="Row_DoubleClick" />
             <Style.Triggers>
                 <DataTrigger Binding="{Binding Ringing}" Value="True">

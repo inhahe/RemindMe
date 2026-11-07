@@ -21,6 +21,13 @@
                 <Border Style="{StaticResource Pane}" Padding="2,4" Margin="0,0,0,0">
                     <ListView x:Name="DeviceList" Height="170" SelectionMode="Single" BorderThickness="0"
                               Background="Transparent" SelectionChanged="DeviceList_SelectionChanged">
+                        <!-- A screen reader names a row by its device, not by its record's text. -->
+                        <ListView.ItemContainerStyle>
+                            <Style TargetType="ListViewItem"
+                                   BasedOn="{StaticResource {x:Static GridView.GridViewItemContainerStyleKey}}">
+                                <Setter Property="AutomationProperties.Name" Value="{Binding Name}" />
+                            </Style>
+                        </ListView.ItemContainerStyle>
                         <ListView.View>
                             <GridView>
                                 <GridViewColumn Header="Name" Width="170" DisplayMemberBinding="{Binding Name}" />

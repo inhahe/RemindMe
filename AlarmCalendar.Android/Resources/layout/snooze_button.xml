@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- One "remind me in" preset on the alarm screen; inflated once per preset, so that it is
+     a Material button styled by the theme (a Button made in code isn't). -->
+<Button xmlns:android="http://schemas.android.com/apk/res/android"
+    style="@style/Widget.Material3.Button.OutlinedButton"
+    android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1"
+    android:layout_marginHorizontal="3dp" android:minWidth="0dp" android:paddingHorizontal="4dp" />

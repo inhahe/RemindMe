@@ -382,7 +382,8 @@ public sealed class AlarmSound(Context context)
             p.Start();
             _player = p;
             if (level < e.Volume) _fade.PostDelayed(Fade, 200);
-            AppState.Log($"Playing {e.Uri} ({(e.Loop ? "looping" : "once")})");
+            AppState.Log($"Playing {e.Uri} ({(e.Loop ? "looping" : "once")}, volume {e.Volume:P0}"
+                + (e.FadeIn > TimeSpan.Zero ? $", fading in over {e.FadeIn.TotalSeconds:0} s)" : ")"));
             return true;
         }
         catch (Exception ex) when (ex is Java.Lang.Exception or IOException)

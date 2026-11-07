@@ -115,9 +115,18 @@ public sealed class CalendarActivity : Screen
         return cell;
     }
 
-    /// <summary>A cell's line, as short as a phone's cell needs: "9:00a", "6:00p", or "15 min"
-    /// for a repeating task.</summary>
-    private static string ShortText(CalendarEntry e) => e.Repeating ? e.Text.Replace("every ", "") : e.Text.Replace(" AM", "a").Replace(" PM", "p");
+    /// <summary>A cell's line, as short as a phone's cell needs: "9:00a", "6:00p" (or "18:00",
+    /// as the phone's clock setting says), "~" before an estimate, or "15 min" for a
+    /// repeating task. Formatted here rather than trimmed from the full text, whose spacing
+    /// before AM/PM differs between Android versions.</summary>
+    private string ShortText(CalendarEntry e)
+    {
+        if (e.Repeating) return e.Text.Replace("every ", "");
+        var t = TimeMath.ToWall(e.At, AppState.Clock.Zone);
+        string time = Ui.Is24Hour(this) ? $"{t.Hour}:{t.Minute:00}"
+            : $"{(t.Hour % 12 == 0 ? 12 : t.Hour % 12)}:{t.Minute:00}{(t.Hour < 12 ? "a" : "p")}";
+        return (e.Estimated ? "~" : "") + time;
+    }
 
     private void ShowDay()
     {

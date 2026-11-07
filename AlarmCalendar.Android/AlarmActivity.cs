@@ -56,11 +56,10 @@ public sealed class AlarmActivity : Screen
         var snooze = Find<LinearLayout>(Resource.Id.snooze_row);
         foreach (var preset in AlarmEngine.SnoozePresets)
         {
-            var b = new Button(this, null, 0, Resource.Style.Widget_Material3_Button_TonalButton) { Text = TextFormat.Short(preset) };
+            var b = (Button)LayoutInflater.Inflate(Resource.Layout.snooze_button, snooze, false)!;
+            b.Text = TextFormat.Short(preset);
             b.Click += (_, _) => Leave(done: false, remindIn: preset);
-            var lp = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WrapContent, 1);
-            lp.SetMargins(4, 0, 4, 0);
-            snooze.AddView(b, lp);
+            snooze.AddView(b);
         }
         OnBackPressedDispatcher.AddCallback(this, new BackCallback(() => Leave(done: false)));
         AppState.TasksChanged += Refresh;

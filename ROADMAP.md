@@ -92,12 +92,13 @@ Suggestions, not requested. S1 is built; the rest wait for a yes:
 - [ ] LAN discovery between two real machines. Not testable here without a Windows Firewall prompt; the code is LanLink's, adapted.
 
 ### Phase 4: Android (R2–R17 on the phone, D4)
-- [ ] Project builds to an APK; package `com.inhahe.alarmcalendar`
-- [ ] Main list, task editor, settings and sound picker (ringtones, alarms, notifications, a file), devices screen
-- [ ] AlarmManager `setAlarmClock` for the next wake-up; receiver → evaluation → alarm service (media playback, full-screen-intent notification) → alarm activity over the lock screen
-- [ ] Boot, time-change and package-replaced receivers reschedule; missed alarms show with the late warning
-- [ ] Sync foreground service (`connectedDevice`) for staying linked in the background
-- [ ] Checked on the emulator (`inkdown_test`): screenshots, an alarm ringing with the screen locked, sync with the desktop app
+- [x] Project builds to an APK; package `com.inhahe.alarmcalendar`; Android 10 (API 29) and up; Release trims, with Core rooted for its JSON
+- [x] Main list, task editor, settings and sound picker (ringtones, alarms, notifications, a file), devices screen
+- [x] AlarmManager `setAlarmClock` for the next wake-up; receiver → evaluation → `RingingService` (media playback, full-screen-intent notification with Mark done and Remind me later) → `AlarmActivity` over the lock screen
+- [x] Boot, time-change and package-replaced receivers reschedule; missed alarms show with the late warning
+- [x] Sync foreground service (`connectedDevice`) for staying linked in the background
+- [x] Checked on the emulator (`inkdown_test`, API 36): every screen; a countdown ringing over the lock screen; Remind me later from the notification (sound stops, reminder set); ringing resumes after an app update. Linked to the desktop app through `10.0.2.2` with matching codes (722 135); tasks merged both ways; done on the PC showed on the phone; a countdown made on the PC rang on the phone, and dismissing it on the PC stopped the phone ringing.
+- [ ] On a real phone: lock-screen alarm on Samsung's One UI, background sync with the screen off, LAN discovery
 
 ### Phase 5: polish and docs
 - [ ] `README.md` (the user-facing document): features, settings, how to link devices

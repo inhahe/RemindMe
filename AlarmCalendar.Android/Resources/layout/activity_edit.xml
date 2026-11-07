@@ -1,0 +1,139 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent" android:layout_height="match_parent"
+    android:orientation="vertical" android:fitsSystemWindows="true">
+
+    <com.google.android.material.appbar.MaterialToolbar
+        android:id="@+id/toolbar" android:layout_width="match_parent" android:layout_height="?attr/actionBarSize" />
+
+    <ScrollView android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1">
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:orientation="vertical" android:padding="12dp">
+
+            <!-- R2: multi-line; Enter adds a line, only Save saves. -->
+            <com.google.android.material.textfield.TextInputLayout
+                android:layout_width="match_parent" android:layout_height="wrap_content" android:hint="Description"
+                style="@style/Widget.Material3.TextInputLayout.OutlinedBox">
+                <com.google.android.material.textfield.TextInputEditText
+                    android:id="@+id/description" android:layout_width="match_parent" android:layout_height="wrap_content"
+                    android:inputType="textMultiLine|textCapSentences" android:minLines="3" android:gravity="top" />
+            </com.google.android.material.textfield.TextInputLayout>
+
+            <!-- R3: Scheduled vs Countdown, each with its own rounded pane. -->
+            <RadioGroup android:id="@+id/kind_group" android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:orientation="vertical" android:layout_marginTop="8dp">
+
+                <RadioButton android:id="@+id/scheduled" style="@style/PaneRadio" android:text="Scheduled" />
+                <com.google.android.material.card.MaterialCardView android:id="@+id/scheduled_pane" style="@style/Pane">
+                    <!-- R4: the nested choice, each option with a nested rounded pane. -->
+                    <RadioGroup android:id="@+id/schedule_group" android:layout_width="match_parent"
+                        android:layout_height="wrap_content" android:orientation="vertical" android:padding="8dp">
+
+                        <RadioButton android:id="@+id/interval" style="@style/PaneRadio" android:text="Every N years, months, weeks, days, hours, minutes or seconds" />
+                        <com.google.android.material.card.MaterialCardView android:id="@+id/interval_pane" style="@style/Pane">
+                            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+                                android:orientation="vertical" android:padding="10dp">
+                                <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center_vertical">
+                                    <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Every " />
+                                    <EditText android:id="@+id/interval_count" style="@style/NumberField" />
+                                    <Spinner android:id="@+id/interval_unit" android:layout_width="wrap_content" android:layout_height="wrap_content" />
+                                </LinearLayout>
+                                <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center_vertical">
+                                    <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Starting " />
+                                    <Button android:id="@+id/start_date" style="@style/Widget.Material3.Button.TextButton" android:layout_width="wrap_content" android:layout_height="wrap_content" />
+                                    <Button android:id="@+id/start_time" style="@style/Widget.Material3.Button.TextButton" android:layout_width="wrap_content" android:layout_height="wrap_content" />
+                                    <Button android:id="@+id/start_now" style="@style/Widget.Material3.Button.TextButton" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Now" />
+                                </LinearLayout>
+                                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+                                    android:text="When it's marked done, the next time comes up:" android:layout_marginTop="4dp" />
+                                <RadioGroup android:id="@+id/restart_group" android:layout_width="match_parent" android:layout_height="wrap_content">
+                                    <RadioButton android:id="@+id/from_done" android:layout_width="wrap_content" android:layout_height="wrap_content"
+                                        android:text="N after it's marked done (the timer restarts then)" />
+                                    <RadioButton android:id="@+id/on_schedule" android:layout_width="wrap_content" android:layout_height="wrap_content"
+                                        android:text="on the original schedule, as soon as the time comes up" />
+                                </RadioGroup>
+                            </LinearLayout>
+                        </com.google.android.material.card.MaterialCardView>
+
+                        <RadioButton android:id="@+id/weekly" style="@style/PaneRadio" android:text="On these days of the week" />
+                        <com.google.android.material.card.MaterialCardView android:id="@+id/weekly_pane" style="@style/Pane">
+                            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+                                android:orientation="vertical" android:padding="10dp">
+                                <GridLayout android:id="@+id/days" android:layout_width="match_parent" android:layout_height="wrap_content"
+                                    android:columnCount="4" />
+                                <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center_vertical">
+                                    <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="At " />
+                                    <Button android:id="@+id/weekly_time" style="@style/Widget.Material3.Button.TextButton" android:layout_width="wrap_content" android:layout_height="wrap_content" />
+                                </LinearLayout>
+                            </LinearLayout>
+                        </com.google.android.material.card.MaterialCardView>
+
+                        <RadioButton android:id="@+id/once" style="@style/PaneRadio" android:text="Once" />
+                        <com.google.android.material.card.MaterialCardView android:id="@+id/once_pane" style="@style/Pane">
+                            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+                                android:gravity="center_vertical" android:padding="10dp">
+                                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="On " />
+                                <Button android:id="@+id/once_date" style="@style/Widget.Material3.Button.TextButton" android:layout_width="wrap_content" android:layout_height="wrap_content" />
+                                <Button android:id="@+id/once_time" style="@style/Widget.Material3.Button.TextButton" android:layout_width="wrap_content" android:layout_height="wrap_content" />
+                            </LinearLayout>
+                        </com.google.android.material.card.MaterialCardView>
+                    </RadioGroup>
+                </com.google.android.material.card.MaterialCardView>
+
+                <RadioButton android:id="@+id/countdown" style="@style/PaneRadio" android:text="Countdown timer (one-shot)" />
+                <com.google.android.material.card.MaterialCardView android:id="@+id/countdown_pane" style="@style/Pane">
+                    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+                        android:orientation="vertical" android:padding="10dp">
+                        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center_vertical">
+                            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="After " />
+                            <EditText android:id="@+id/cd_hours" style="@style/NumberField" android:layout_width="56dp" />
+                            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text=" h " />
+                            <EditText android:id="@+id/cd_minutes" style="@style/NumberField" android:layout_width="56dp" />
+                            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text=" min " />
+                            <EditText android:id="@+id/cd_seconds" style="@style/NumberField" android:layout_width="56dp" />
+                            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text=" s" />
+                        </LinearLayout>
+                        <TextView android:id="@+id/cd_status" android:layout_width="match_parent" android:layout_height="wrap_content" style="@style/Hint" />
+                        <CheckBox android:id="@+id/cd_restart" android:layout_width="wrap_content" android:layout_height="wrap_content"
+                            android:text="Start the countdown again from now when I save" />
+                    </LinearLayout>
+                </com.google.android.material.card.MaterialCardView>
+            </RadioGroup>
+
+            <com.google.android.material.card.MaterialCardView style="@style/Pane">
+                <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+                    android:orientation="vertical" android:padding="10dp">
+                    <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+                        android:text="If the alarm is closed without being marked done, remind again after" />
+                    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center_vertical">
+                        <EditText android:id="@+id/rem_hours" style="@style/NumberField" />
+                        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text=" h " />
+                        <EditText android:id="@+id/rem_minutes" style="@style/NumberField" />
+                        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text=" min" />
+                    </LinearLayout>
+                    <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" style="@style/Hint"
+                        android:text="0 h 0 min: no more reminders until the next time it comes up." />
+                    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+                        android:gravity="center_vertical" android:layout_marginTop="8dp">
+                        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Sound: " />
+                        <Button android:id="@+id/sound" style="@style/Widget.Material3.Button.OutlinedButton"
+                            android:layout_width="wrap_content" android:layout_height="wrap_content" />
+                    </LinearLayout>
+                    <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Play it" android:layout_marginTop="4dp" />
+                    <Spinner android:id="@+id/sound_mode" android:layout_width="match_parent" android:layout_height="wrap_content" />
+                </LinearLayout>
+            </com.google.android.material.card.MaterialCardView>
+
+            <TextView android:id="@+id/error" android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:textColor="@color/error" />
+        </LinearLayout>
+    </ScrollView>
+
+    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:gravity="end" android:padding="8dp">
+        <Button android:id="@+id/cancel" style="@style/Widget.Material3.Button.TextButton"
+            android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Cancel" />
+        <Button android:id="@+id/save" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Save" />
+    </LinearLayout>
+</LinearLayout>

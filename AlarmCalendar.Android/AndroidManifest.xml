@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+  <application android:allowBackup="true" android:icon="@mipmap/appicon" android:label="@string/app_name"
+               android:roundIcon="@mipmap/appicon_round" android:supportsRtl="true"
+               android:theme="@style/AppTheme">
+  </application>
+
+  <!-- Sync (R17): LAN discovery and sessions. CHANGE_WIFI_MULTICAST_STATE is also what
+       qualifies the sync service for the connectedDevice foreground-service type. -->
+  <uses-permission android:name="android.permission.INTERNET" />
+  <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+  <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+  <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" />
+
+  <!-- Alarms (D4): exact alarms (USE_EXACT_ALARM is granted at install to alarm and
+       calendar apps on Android 13+; SCHEDULE_EXACT_ALARM covers 12 and below), rescheduling
+       after a reboot, the alarm screen over the lock screen, and the ringing service. -->
+  <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
+  <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" android:maxSdkVersion="32" />
+  <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+  <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+  <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
+  <uses-permission android:name="android.permission.WAKE_LOCK" />
+  <uses-permission android:name="android.permission.VIBRATE" />
+  <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+  <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
+  <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
+</manifest>

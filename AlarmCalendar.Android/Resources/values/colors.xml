@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="brand">#1976D2</color>
+    <color name="ringing_bg">#33E53935</color>
+    <color name="waiting_bg">#33FFB300</color>
+    <color name="late_bg">#FFFFF4E5</color>
+    <color name="late_border">#FFFFB74D</color>
+    <color name="hint">#FF6B7680</color>
+    <color name="error">#FFB00020</color>
+</resources>

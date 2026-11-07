@@ -112,7 +112,30 @@ Tasks and settings live in `%LOCALAPPDATA%\AlarmCalendar` (`tasks.json`,
 
 ## Android
 
-The Android app has the same features. It is being built; see `ROADMAP.md`.
+The phone app has the same tasks, schedules, alarm screen, settings and sync,
+laid out for a phone:
+
+- **The list**: tap a task to edit it, long-press for Mark done, Show alarm,
+  Restart countdown and Delete, and tap **+** for a new task. The ⋮ menu has
+  **Devices and sync** and **Settings**.
+- **The editor**: as on Windows. **Back** or **Cancel** leaves without saving.
+- **When a task comes up**: with the phone locked, the alarm screen opens over
+  the lock screen; otherwise it appears as a notification with **Mark done** and
+  **Remind me later** (tap it for the full alarm screen). Back on the alarm screen
+  is the same as **Close, remind me later**. Alarms play at the alarm volume, so Do
+  Not Disturb lets them through unless it is set to block alarms. They also
+  vibrate, and they are set again after a restart. Ones missed while the phone
+  was off ring when it starts, marked late.
+- **Sounds**: pick one of the phone's alarm, ringtone or notification sounds, or
+  a sound file.
+- **Settings** also shows whether notifications, exact alarms and full-screen
+  alarms are allowed, with a button to fix each. Background sync is most reliable
+  with battery optimization off for the app.
+- **Sync**: while sync is on, a quiet "Keeping your devices in sync" notification
+  stays up; that is what lets your other devices reach the phone in the
+  background. Link the phone in **Devices and sync** as on Windows.
+
+Needs Android 10 or later. The APK is installed by hand (it isn't in an app store).
 
 ## Building
 
@@ -121,4 +144,9 @@ Needs the .NET 10 SDK (with the Android workload for the phone app).
 ```
 dotnet build AlarmCalendar.slnx
 dotnet test AlarmCalendar.Core.Tests
+dotnet publish AlarmCalendar.Android -c Release -f net10.0-android
 ```
+
+The APK lands in `AlarmCalendar.Android/bin/Release/net10.0-android/publish/`
+(`com.inhahe.alarmcalendar-Signed.apk`). It is signed with the debug key, which
+is fine for installing by hand.

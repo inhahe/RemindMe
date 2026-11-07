@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="AppTheme" parent="Theme.Material3.DayNight.NoActionBar">
+        <item name="colorPrimary">@color/brand</item>
+        <!-- Edge to edge (enforced from Android 15): the light background shows behind the
+             system bars, so their icons must be dark. values-night turns this off. -->
+        <item name="android:windowLightStatusBar">true</item>
+        <item name="android:windowLightNavigationBar">true</item>
+    </style>
+    <!-- The alarm screen: shown over the lock screen, so it must not look like a dialog. -->
+    <style name="AlarmTheme" parent="AppTheme" />
+    <style name="Pane">
+        <item name="android:layout_width">match_parent</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:layout_marginBottom">8dp</item>
+        <item name="cardCornerRadius">12dp</item>
+        <item name="strokeWidth">1dp</item>
+        <item name="cardElevation">0dp</item>
+    </style>
+    <style name="PaneRadio">
+        <item name="android:textStyle">bold</item>
+        <item name="android:layout_width">wrap_content</item>
+        <item name="android:layout_height">wrap_content</item>
+    </style>
+    <style name="Hint">
+        <item name="android:textColor">@color/hint</item>
+        <item name="android:textSize">13sp</item>
+    </style>
+    <style name="NumberField">
+        <item name="android:layout_width">64dp</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:inputType">number</item>
+        <item name="android:gravity">end</item>
+        <item name="android:selectAllOnFocus">true</item>
+    </style>
+</resources>

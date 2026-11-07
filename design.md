@@ -288,19 +288,63 @@ separately (see *Simplification opportunities*).
 
 ## Android app
 
-- `MainActivity`: the list. `TaskEditActivity`, `SettingsActivity`,
-  `DevicesActivity`: the other screens.
-- `AlarmScheduler`: puts the engine's next wake-up into
-  `AlarmManager.SetAlarmClock`. It needs `USE_EXACT_ALARM` (API 33+), or
-  `SCHEDULE_EXACT_ALARM` below that.
-- `AlarmReceiver` → evaluation → `AlarmService` (a `mediaPlayback` foreground
-  service that plays the sound and posts a full-screen-intent notification) →
-  `AlarmActivity`, shown over the lock screen.
-- `BootReceiver` (boot, time or time zone change, package replaced):
-  reschedules, then evaluates, so missed alarms fire with the late warning.
-- `SyncService`: a `connectedDevice` foreground service that keeps sync running
-  in the background. It is a `connectedDevice` service rather than `dataSync`,
-  because Android 15 caps `dataSync` at 6 hours a day.
+Plain .NET for Android (`net10.0-android`) with AndroidX views and XML layouts;
+it runs on Android 10 (API 29) and up. The root namespace is
+`AlarmCalendar.Droid`, because inside a namespace called `AlarmCalendar.Android`,
+`Android.App` would resolve to `AlarmCalendar.Android.App`.
+
+- `AppState` (with `App`, the `Application` class, which initializes it before
+  any component runs) is the counterpart of the desktop's `AppHost`: settings,
+  store, sync engine, `UpdateSettings(edit)`. Any store change reschedules the
+  alarm and pokes the ringing service.
+- `MainActivity`: the list, refreshed every second. A row is redrawn only when
+  its text changes. Redrawing every row every second kept the UI from ever
+  being idle, which costs battery, and stops `uiautomator` from dumping the
+  screen. `TaskEditActivity`, `SettingsActivity` and `DevicesActivity` are the
+  other screens. Inside an activity, the bare name `AlarmService` means
+  `Context.AlarmService` (a string), which is why the ringing service is
+  called `RingingService`, and why the static intent helpers are named
+  `IntentFor`, not `Intent`.
+- `AlarmScheduler`: one `AlarmManager.SetAlarmClock` alarm for the engine's
+  next wake-up. It needs `USE_EXACT_ALARM` (API 33+, granted at install to alarm
+  apps), or `SCHEDULE_EXACT_ALARM` below that, and falls back to an inexact alarm
+  without it. **Anything due now goes through an alarm set one second ahead,
+  never a direct service start**. Starting a foreground service from an exact
+  alarm is always allowed, whereas a boot receiver may not start a
+  media-playback service at all (Android 15), and nor may `App.OnCreate` when a
+  broadcast woke the process (measured: "mAllowStartForeground false").
+- `AlarmReceiver` → `RingingService` (a `mediaPlayback` foreground service). It
+  re-evaluates every second, posts one notification per ringing task (full-screen
+  intent to `AlarmActivity`, with Mark done and Remind me later handled by
+  `AlarmActionReceiver`), plays the sound, vibrates, and stops itself when
+  nothing rings. So done or dismissed anywhere, another device included, stops
+  it.
+- `AlarmSound`: `MediaPlayer` on the alarm stream, one sound at a time, like the
+  desktop's. It tries the chosen sound, then the phone's alarm, ringtone and
+  notification defaults, then the first installed alarm sound. An emulator, or
+  a phone, can have no default set, and checking whether a default's address
+  can be opened is no test: the settings-provider address fails that check yet
+  plays. Only a failure of the user's own choice is reported.
+- `AlarmActivity`: `showWhenLocked` and `turnScreenOn`. Back counts as Close,
+  remind me later, and only reminder and restart fields the user changed are
+  written back.
+- `BootReceiver` (boot, time or time-zone change, package replaced): clears the
+  time-zone cache and reschedules, so missed alarms ring with the late warning.
+  It also starts `SyncService`.
+- `SyncService`: a `connectedDevice` foreground service that keeps the process,
+  and with it the engine in `AppState`, alive in the background. It is
+  `connectedDevice` rather than `dataSync` because Android 15 caps `dataSync` at
+  6 hours a day; `CHANGE_WIFI_MULTICAST_STATE` qualifies it. It is sticky, so
+  Android restarts it, and sync, after killing the process.
+- `SoundChooser`: Android's ringtone picker (alarms, ringtones, notifications),
+  or the document picker for a file, taking a persistable read grant so the file
+  still plays after a reboot.
+- `Permissions`: notifications (API 33+), exact alarms (API 31–32), full-screen
+  intents (API 34+). The list asks once per run; Settings shows each one's state
+  with a Fix button, plus a note about battery optimization.
+- Release builds trim. Core is rooted (`TrimmerRootAssembly`, `RootMode="All"`)
+  and reflection-based System.Text.Json is kept on, because the store, the
+  settings and the sync messages are deserialized by reflection.
 
 ## Simplification opportunities
 

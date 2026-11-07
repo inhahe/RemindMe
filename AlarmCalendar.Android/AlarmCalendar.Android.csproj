@@ -1,0 +1,39 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0-android</TargetFramework>
+    <!-- Android 10: typed foreground services, showing over the lock screen, notification
+         channels and adaptive icons all exist from here. -->
+    <SupportedOSPlatformVersion>29</SupportedOSPlatformVersion>
+    <OutputType>Exe</OutputType>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <!-- Not AlarmCalendar.Android: inside that namespace, "Android.App" would resolve to
+         AlarmCalendar.Android.App rather than the platform's. -->
+    <RootNamespace>AlarmCalendar.Droid</RootNamespace>
+    <AssemblyName>AlarmCalendar.Android</AssemblyName>
+    <ApplicationId>com.inhahe.alarmcalendar</ApplicationId>
+    <ApplicationTitle>Alarm &amp; Calendar</ApplicationTitle>
+    <ApplicationVersion>1</ApplicationVersion>
+    <ApplicationDisplayVersion>0.1.0</ApplicationDisplayVersion>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <TrimMode>full</TrimMode>
+    <!-- The store, settings and sync messages use reflection-based System.Text.Json;
+         keep it enabled under trimming, and keep every Core type it reads. -->
+    <JsonSerializerIsReflectionEnabledByDefault>true</JsonSerializerIsReflectionEnabledByDefault>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <TrimmerRootAssembly Include="AlarmCalendar.Core" RootMode="All" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\AlarmCalendar.Core\AlarmCalendar.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Xamarin.AndroidX.AppCompat" Version="1.8.0" />
+    <PackageReference Include="Xamarin.AndroidX.Core" Version="1.19.1" />
+    <PackageReference Include="Xamarin.AndroidX.RecyclerView" Version="1.4.0.6" />
+    <PackageReference Include="Xamarin.Google.Android.Material" Version="1.14.0.6" />
+  </ItemGroup>
+</Project>

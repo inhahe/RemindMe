@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent" android:layout_height="match_parent"
+    android:orientation="vertical" android:fitsSystemWindows="true">
+
+    <com.google.android.material.appbar.MaterialToolbar
+        android:id="@+id/toolbar" android:layout_width="match_parent" android:layout_height="?attr/actionBarSize" />
+
+    <ScrollView android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1">
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:orientation="vertical" android:padding="12dp">
+
+            <com.google.android.material.materialswitch.MaterialSwitch android:id="@+id/sync_enabled"
+                android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:text="Sync tasks with my other devices" android:textStyle="bold" />
+            <TextView android:id="@+id/status" android:layout_width="match_parent" android:layout_height="wrap_content" style="@style/Hint" />
+
+            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+                android:text="Devices" android:textStyle="bold" android:layout_marginTop="12dp" />
+            <LinearLayout android:id="@+id/device_list" android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:orientation="vertical" />
+            <TextView android:id="@+id/pair_text" android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:textStyle="bold" android:layout_marginTop="4dp" />
+            <TextView android:layout_width="match_parent" android:layout_height="wrap_content" style="@style/Hint"
+                android:layout_marginTop="4dp"
+                android:text="Devices on this network appear by themselves. Tap Link next to one, then accept on that device, after checking that both show the same code." />
+
+            <com.google.android.material.card.MaterialCardView style="@style/Pane" android:layout_marginTop="12dp">
+                <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+                    android:orientation="vertical" android:padding="10dp">
+                    <com.google.android.material.textfield.TextInputLayout android:layout_width="match_parent"
+                        android:layout_height="wrap_content" android:hint="This device's name">
+                        <com.google.android.material.textfield.TextInputEditText android:id="@+id/device_name"
+                            android:layout_width="match_parent" android:layout_height="wrap_content" android:inputType="text" />
+                    </com.google.android.material.textfield.TextInputLayout>
+                    <com.google.android.material.textfield.TextInputLayout android:layout_width="match_parent"
+                        android:layout_height="wrap_content" android:layout_marginTop="8dp"
+                        android:hint="Devices elsewhere: host or host:port, one per line">
+                        <com.google.android.material.textfield.TextInputEditText android:id="@+id/remotes"
+                            android:layout_width="match_parent" android:layout_height="wrap_content"
+                            android:inputType="textMultiLine|textUri" android:minLines="2" />
+                    </com.google.android.material.textfield.TextInputLayout>
+                    <com.google.android.material.materialswitch.MaterialSwitch android:id="@+id/accept_external"
+                        android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="8dp"
+                        android:text="Accept connections from outside the local network" />
+                    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center_vertical">
+                        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Port: " />
+                        <EditText android:id="@+id/port" style="@style/NumberField" android:layout_width="96dp" />
+                    </LinearLayout>
+                </LinearLayout>
+            </com.google.android.material.card.MaterialCardView>
+            <TextView android:id="@+id/error" android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:textColor="@color/error" />
+            <Button android:id="@+id/leave" style="@style/Widget.Material3.Button.TextButton"
+                android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Leave the sync group…" />
+        </LinearLayout>
+    </ScrollView>
+
+    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="end" android:padding="8dp">
+        <Button android:id="@+id/apply" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Apply" />
+    </LinearLayout>
+</LinearLayout>

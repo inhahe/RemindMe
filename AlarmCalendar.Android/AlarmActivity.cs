@@ -53,6 +53,15 @@ public sealed class AlarmActivity : Screen
             _silencedAlert = AppState.Store.Status(_id)?.AlertDue;
             Find<Button>(Resource.Id.silence).Enabled = false;
         };
+        var snooze = Find<LinearLayout>(Resource.Id.snooze_row);
+        foreach (var preset in AlarmEngine.SnoozePresets)
+        {
+            var b = new Button(this, null, 0, Resource.Style.Widget_Material3_Button_TonalButton) { Text = TextFormat.Short(preset) };
+            b.Click += (_, _) => Leave(done: false, remindIn: preset);
+            var lp = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WrapContent, 1);
+            lp.SetMargins(4, 0, 4, 0);
+            snooze.AddView(b, lp);
+        }
         OnBackPressedDispatcher.AddCallback(this, new BackCallback(() => Leave(done: false)));
         AppState.TasksChanged += Refresh;
         Load(Intent);
@@ -173,7 +182,8 @@ public sealed class AlarmActivity : Screen
         Show(next.Task, onRequest: false);
     }
 
-    private void Leave(bool done)
+    /// <param name="remindIn">A snooze preset (S5), overriding the task's reminder interval this once.</param>
+    private void Leave(bool done, TimeSpan? remindIn = null)
     {
         if (!FieldParsing.TryHoursMinutes(Find<EditText>(Resource.Id.rem_hours).Text ?? "",
                 Find<EditText>(Resource.Id.rem_minutes).Text ?? "", out int minutes, out var error))
@@ -191,7 +201,7 @@ public sealed class AlarmActivity : Screen
             });
         _leaving = true;
         if (done) AppState.Store.MarkDone(_id);
-        else AppState.Store.Dismiss(_id);
+        else AppState.Store.Dismiss(_id, remindIn);
         NextOrFinish();
     }
 

@@ -44,6 +44,10 @@
 
     <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
         android:orientation="vertical" android:padding="12dp">
+        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" style="@style/Hint"
+            android:text="Remind me in" android:layout_marginStart="4dp" />
+        <LinearLayout android:id="@+id/snooze_row" android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:layout_marginBottom="6dp" />
         <Button android:id="@+id/done" android:layout_width="match_parent" android:layout_height="64dp"
             android:text="Mark done" android:textSize="18sp" />
         <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content">

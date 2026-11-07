@@ -121,7 +121,10 @@ sync: each device reaches the same answer independently.
   N after that. Otherwise `DoneThrough = now`, which covers every pending
   occurrence.
 - **Dismiss**: `SnoozeOccurrence = latest`, and `SnoozeUntil = now + reminder`,
-  or "never" when the reminder interval is 0.
+  or "never" when the reminder interval is 0. A **snooze preset** (S5: 5, 10 or
+  30 minutes or an hour, `AlarmEngine.SnoozePresets`, on both alarm screens)
+  sets `SnoozeUntil = now + preset` instead, leaving the task's reminder
+  interval as it is.
 - **Saving a schedule change**: `ScheduleRevision++`, a fresh state with
   `DoneThrough = save time`, and `Anchor` cleared. Only occurrences after the save
   fire. A start of "now", the editor's default, therefore means the first alarm

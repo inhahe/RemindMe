@@ -6,8 +6,9 @@ namespace AlarmCalendar.Desktop;
 /// <summary>
 /// The popup for one triggered task. Closing it any way the user can (the close button,
 /// Esc, the title-bar X) dismisses it: the task stays triggered and reminds again after
-/// its reminder interval (R8). The restart mode (R7) and the reminder interval can be
-/// changed here; they are saved to the task when the window closes either way.
+/// its reminder interval (R8), or after a snooze preset chosen here (S5). The restart mode
+/// (R7) and the reminder interval can be changed here; they are saved to the task when the
+/// window closes either way.
 /// </summary>
 public partial class AlarmWindow : Window
 {
@@ -15,6 +16,8 @@ public partial class AlarmWindow : Window
     private readonly Guid _id;
     private bool _closingQuietly;
     private bool _markedDone;
+    /// <summary>The snooze preset chosen, if the window is closing by one.</summary>
+    private TimeSpan? _remindIn;
 
     // The task's values when the fields were last filled: only fields the user changed
     // are written back, so an edit made elsewhere meanwhile isn't reverted.
@@ -39,6 +42,16 @@ public partial class AlarmWindow : Window
         LatePanel.Visibility = Visibility.Collapsed;
         SoundProblem.Visibility = Visibility.Collapsed;
         SilenceButton.IsEnabled = false;
+        foreach (var preset in AlarmEngine.SnoozePresets)
+        {
+            var b = new System.Windows.Controls.Button
+            {
+                Content = TextFormat.Short(preset), Padding = new Thickness(8, 1, 8, 1), Margin = new Thickness(0, 0, 6, 0),
+                ToolTip = $"Close this and remind me again in {TextFormat.Short(preset)}, this once",
+            };
+            b.Click += (_, _) => { _remindIn = preset; Close(); };
+            SnoozePanel.Children.Add(b);
+        }
         Refresh(st);
         _owner.Sounds.Problem += OnSoundProblem;
         Closed += (_, _) => _owner.Sounds.Problem -= OnSoundProblem;
@@ -141,10 +154,10 @@ public partial class AlarmWindow : Window
         base.OnClosing(e);
         if (_closingQuietly) return;
         if (AppHost.Exiting) { _owner.Sounds.Stop(this); return; }
-        if (!_markedDone && !SaveChoices()) { e.Cancel = true; return; }
+        if (!_markedDone && !SaveChoices()) { e.Cancel = true; _remindIn = null; return; }
         _owner.Sounds.Stop(this);
         if (_markedDone) _owner.UserMarkedDone(_id);
-        else _owner.UserDismissed(_id);
+        else _owner.UserDismissed(_id, _remindIn);
     }
 
     /// <summary>Writes the restart mode and reminder interval back to the task.</summary>

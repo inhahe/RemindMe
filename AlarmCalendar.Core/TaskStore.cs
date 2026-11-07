@@ -175,7 +175,9 @@ public sealed class TaskStore
 
     public AlarmTask? MarkDone(Guid id) => ChangeState(id, t => AlarmEngine.MarkDone(t, _clock.UtcNow, _clock.Zone));
 
-    public AlarmTask? Dismiss(Guid id) => ChangeState(id, t => AlarmEngine.Dismiss(t, _clock.UtcNow, _clock.Zone));
+    /// <param name="remindIn">Remind after this, for this once, instead of the task's reminder interval.</param>
+    public AlarmTask? Dismiss(Guid id, TimeSpan? remindIn = null) =>
+        ChangeState(id, t => AlarmEngine.Dismiss(t, _clock.UtcNow, _clock.Zone, remindIn));
 
     public AlarmTask? Pause(Guid id) => ChangeState(id, t => AlarmEngine.Pause(t, _clock.UtcNow));
 

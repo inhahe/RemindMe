@@ -137,6 +137,19 @@ public class EngineTests
     }
 
     [Fact]
+    public void ASnoozePresetRemindsAfterItsTimeForThisOnce()
+    {
+        var t = EveryHourFromNow(RestartMode.OnSchedule, reminderMinutes: 0);   // "no further reminders"
+        _clock.UtcNow = NY(2026, 6, 1, 10, 0, 0);
+        _store.Dismiss(t.Id, TimeSpan.FromMinutes(5));
+        var st = Status(t.Id);
+        Assert.True(st.Snoozed);
+        Assert.Equal(NY(2026, 6, 1, 10, 5), st.NextReminder);
+        Assert.Equal(0, _store.Get(t.Id)!.Def.ReminderMinutes);   // the task's own interval is untouched
+        Assert.Equal(["5 min", "10 min", "30 min", "1 h"], AlarmEngine.SnoozePresets.Select(TextFormat.Short));
+    }
+
+    [Fact]
     public void APausedTaskStopsRingingAndPassesOverWhatCameUpMeanwhile()
     {
         var t = EveryHourFromNow(RestartMode.OnSchedule);

@@ -102,6 +102,14 @@ public static class TextFormat
         return $"{minutes / 60}:{minutes % 60:00}";
     }
 
+    /// <summary>"5 min", "1 h" or "1 h 30 min": a snooze preset's label.</summary>
+    public static string Short(TimeSpan span)
+    {
+        long minutes = (long)span.TotalMinutes;
+        long h = minutes / 60, m = minutes % 60;
+        return h == 0 ? $"{m} min" : m == 0 ? $"{h} h" : $"{h} h {m} min";
+    }
+
     /// <summary>"1:05:09" or "5:09": time left on a countdown, to the second.</summary>
     public static string Clock(TimeSpan span)
     {

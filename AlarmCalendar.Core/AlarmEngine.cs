@@ -171,19 +171,24 @@ public static class AlarmEngine
     }
 
     /// <summary>The state after the user closes the alarm window without marking the task
-    /// done: it reminds again after the task's reminder interval.</summary>
-    public static TaskState Dismiss(AlarmTask task, DateTimeOffset now, TimeZoneInfo zone)
+    /// done: it reminds again after the task's reminder interval, or after
+    /// <paramref name="remindIn"/> (a snooze preset) for this once.</summary>
+    public static TaskState Dismiss(AlarmTask task, DateTimeOffset now, TimeZoneInfo zone, TimeSpan? remindIn = null)
     {
         var st = Evaluate(task, now, zone);
         if (!st.Triggered) return task.State;
         return task.State with
         {
             SnoozeOccurrenceUtc = st.Latest,
-            SnoozeUntilUtc = task.Def.ReminderMinutes > 0
-                ? now + TimeSpan.FromMinutes(task.Def.ReminderMinutes)
+            SnoozeUntilUtc = remindIn is { } r && r > TimeSpan.Zero ? now + r
+                : task.Def.ReminderMinutes > 0 ? now + TimeSpan.FromMinutes(task.Def.ReminderMinutes)
                 : DateTimeOffset.MaxValue,
         };
     }
+
+    /// <summary>The "remind me in" choices of both alarm screens (S5).</summary>
+    public static readonly IReadOnlyList<TimeSpan> SnoozePresets =
+        [TimeSpan.FromMinutes(5), TimeSpan.FromMinutes(10), TimeSpan.FromMinutes(30), TimeSpan.FromHours(1)];
 
     /// <summary>The state after the user pauses the task: it stops ringing, and rings no
     /// more until resumed.</summary>

@@ -36,6 +36,8 @@ task's sound:
   be marked done, and the alarm comes back after the task's **reminder interval**
   (hours and minutes; 0 h 0 min means not until the next time it comes up).
 - **Silence**: stops the sound but keeps the window open.
+- **Remind me in 5 min, 10 min, 30 min or 1 h**: closes the alarm and brings it
+  back after that long, this once, whatever the task's reminder interval is.
 
 You can change the reminder interval and the restart choice right there in the
 alarm window.

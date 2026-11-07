@@ -92,11 +92,12 @@ public sealed class AlarmCoordinator : IDisposable
     }
 
     /// <summary>Called by an alarm window the user closed without marking the task done.</summary>
-    internal void UserDismissed(Guid id)
+    /// <param name="remindIn">A snooze preset, overriding the task's reminder interval this once.</param>
+    internal void UserDismissed(Guid id, TimeSpan? remindIn)
     {
         _forced.Remove(id);
         _windows.Remove(id);
-        _store.Dismiss(id);
+        _store.Dismiss(id, remindIn);
     }
 
     /// <summary>Called by an alarm window whose task the user marked done.</summary>

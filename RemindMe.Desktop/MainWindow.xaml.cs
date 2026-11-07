@@ -91,18 +91,10 @@ public partial class MainWindow : Window
     {
         var now = AppHost.Clock.UtcNow;
         var zone = AppHost.Clock.Zone;
-        var byId = _rows.ToDictionary(r => r.Id);
         var ordered = statuses.OrderBy(AlarmEngine.ListRank).ThenBy(st => st.NextReminder ?? st.NextOccurrence ?? DateTimeOffset.MaxValue)
-            .ThenBy(st => st.Task.Def.Description, StringComparer.CurrentCultureIgnoreCase).ToList();
-
-        for (int i = 0; i < ordered.Count; i++)
+            .ThenBy(st => st.Task.Def.Description, StringComparer.CurrentCultureIgnoreCase);
+        Rows.Reconcile(_rows, ordered, st => st.Task.Id, r => r.Id, st => new TaskRow { Id = st.Task.Id }, (row, st) =>
         {
-            var st = ordered[i];
-            if (!byId.TryGetValue(st.Task.Id, out var row))
-            {
-                row = new TaskRow { Id = st.Task.Id };
-                _rows.Insert(Math.Min(i, _rows.Count), row);
-            }
             row.Latest = st;
             row.Description = TextFormat.Snippet(st.Task.Def.Description) is { Length: > 0 } s ? s : "(no description)";
             row.Schedule = TextFormat.Schedule(st.Task.Def, st.Task.State, now, zone);
@@ -112,15 +104,10 @@ public partial class MainWindow : Window
             row.Waiting = st.Snoozed;
             row.Finished = st.Finished;
             row.Paused = st.Paused;
-            int at = _rows.IndexOf(row);
-            if (at != i) _rows.Move(at, i);   // Move keeps the selection, unlike remove + insert
-        }
-        var keep = ordered.Select(st => st.Task.Id).ToHashSet();
-        for (int i = _rows.Count - 1; i >= 0; i--)
-            if (!keep.Contains(_rows[i].Id)) _rows.RemoveAt(i);
+        });
 
         int ringing = statuses.Count(s => s.ShouldAlert), waiting = statuses.Count(s => s.Snoozed);
-        StatusText.Text = $"{statuses.Count} task{(statuses.Count == 1 ? "" : "s")}"
+        StatusText.Text = TextFormat.Tasks(statuses.Count)
             + (ringing > 0 ? $" · {ringing} ringing" : "") + (waiting > 0 ? $" · {waiting} waiting to be marked done" : "");
         EmptyHint.Visibility = statuses.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
         var tip = "RemindMe" + (ringing > 0 ? $" — {ringing} ringing" : waiting > 0 ? $" — {waiting} waiting" : "");

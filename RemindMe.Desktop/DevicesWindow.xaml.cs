@@ -12,17 +12,17 @@ public partial class DevicesWindow : Window
     /// place by <see cref="Refresh"/>.</summary>
     public sealed class DeviceRow(string nodeId) : Observable
     {
-        private string _name = "", _status = "", _address = "", _spokenStatus = "";
-        private bool _canLink;
+        private string _name = "", _status = "", _address = "";
 
         public string NodeId { get; } = nodeId;
         public string Name { get => _name; set => Set(ref _name, value); }
-        public string Status { get => _status; set => Set(ref _status, value); }
-        public string Address { get => _address; set => Set(ref _address, value); }
-        public bool CanLink { get => _canLink; set => Set(ref _canLink, value); }
+        public string Status { get => _status; set { if (Set(ref _status, value)) Changed(nameof(SpokenStatus)); } }
+        public string Address { get => _address; set { if (Set(ref _address, value)) Changed(nameof(SpokenStatus)); } }
+        /// <summary>Whether Link can ask it to join this device's group (it isn't linked).</summary>
+        public bool CanLink { get; set; }
         /// <summary>What a screen reader says after the name: the status, and the address
         /// if there is one, so two devices of one name differ.</summary>
-        public string SpokenStatus { get => _spokenStatus; set => Set(ref _spokenStatus, value); }
+        public string SpokenStatus => Address.Length > 0 ? $"{Status}, {Address}" : Status;
 
         /// <summary>The device's name: what a screen reader says for its row, and the text
         /// typing in the list finds it by.</summary>
@@ -67,20 +67,14 @@ public partial class DevicesWindow : Window
         foreach (var k in AppHost.Settings.KnownPeers.Where(k => shown.All(r => r.NodeId != k.NodeId)))
             shown.Add((k.NodeId, k.Name, RemindMe.PairText.LastInSync(k, now, AppHost.Clock.Zone), "", false));
 
-        for (int i = 0; i < shown.Count; i++)
+        // A device listed twice (as settings.json can hold it) shows once.
+        Rows.Reconcile(_rows, shown, d => d.NodeId, r => r.NodeId, d => new DeviceRow(d.NodeId), (row, d) =>
         {
-            var d = shown[i];
-            var row = _rows.FirstOrDefault(r => r.NodeId == d.NodeId);
-            if (row is null) _rows.Insert(i, row = new DeviceRow(d.NodeId));
-            else if (_rows.IndexOf(row) is var at && at != i) _rows.Move(at, i);   // Move keeps the selection
             row.Name = d.Name;
             row.Status = d.Status;
             row.Address = d.Address;
             row.CanLink = d.CanLink;
-            row.SpokenStatus = d.Address.Length > 0 ? $"{d.Status}, {d.Address}" : d.Status;
-        }
-        // The first shown.Count rows are the devices shown, in order; any after went away.
-        while (_rows.Count > shown.Count) _rows.RemoveAt(_rows.Count - 1);
+        });
         LinkButton.IsEnabled = CanLink();
     }
 

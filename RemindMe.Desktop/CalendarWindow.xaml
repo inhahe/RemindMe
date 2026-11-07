@@ -79,9 +79,19 @@
                     <TextBlock x:Name="DayTitle" DockPanel.Dock="Top" FontSize="15" FontWeight="SemiBold" TextWrapping="Wrap" />
                     <TextBlock DockPanel.Dock="Bottom" Style="{StaticResource Hint}" Margin="0,6,0,0" TextWrapping="Wrap"
                                Text="Double-click a task, or press Enter, to edit it." />
+                    <TextBlock x:Name="NothingText" DockPanel.Dock="Top" Margin="2,10,0,0" Style="{StaticResource Hint}"
+                               Text="Nothing comes up." />
+                    <!-- A row (DayEntry) for each time the day's tasks come up; a screen reader
+                         reads its ToString. -->
                     <ListBox x:Name="DayList" Margin="0,8,0,0" BorderThickness="0" Background="Transparent"
                              MouseDoubleClick="DayList_DoubleClick" KeyDown="DayList_KeyDown"
-                             ScrollViewer.HorizontalScrollBarVisibility="Disabled" />
+                             ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                        <ListBox.ItemTemplate>
+                            <DataTemplate>
+                                <TextBlock TextWrapping="Wrap"><Run Text="{Binding Time, Mode=OneWay}" FontWeight="SemiBold" /><Run Text="  " /><Run Text="{Binding Title, Mode=OneWay}" /><Run Text="{Binding WaitingNote, Mode=OneWay}" Foreground="{DynamicResource SystemFillColorCriticalBrush}" /><LineBreak /><Run Text="{Binding Schedule, Mode=OneWay}" FontSize="11" Foreground="{DynamicResource TextFillColorSecondaryBrush}" /></TextBlock>
+                            </DataTemplate>
+                        </ListBox.ItemTemplate>
+                    </ListBox>
                 </DockPanel>
             </Border>
         </Grid>

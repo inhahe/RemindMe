@@ -102,7 +102,8 @@ public static class TextFormat
         return $"{minutes / 60}:{minutes % 60:00}";
     }
 
-    private static string Tasks(int n) => $"{n} task{(n == 1 ? "" : "s")}";
+    /// <summary>"1 task", "3 tasks": a count of tasks.</summary>
+    public static string Tasks(int n) => $"{n} task{(n == 1 ? "" : "s")}";
 
     /// <summary>"Exported 3 tasks." or "Exported 3 tasks to C:\…\file.json.": what an export did.</summary>
     /// <param name="count">How many tasks the file holds.</param>

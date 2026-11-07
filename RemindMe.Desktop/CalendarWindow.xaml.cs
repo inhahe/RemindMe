@@ -1,10 +1,10 @@
+using System.Collections.ObjectModel;
 using System.Globalization;
 using System.Windows;
 using System.Windows.Automation;
 using System.Windows.Controls;
 using System.Windows.Documents;
 using System.Windows.Input;
-using System.Windows.Media;
 using System.Windows.Threading;
 
 namespace RemindMe.Desktop;
@@ -14,6 +14,11 @@ namespace RemindMe.Desktop;
 /// the chosen day's list beside it, where a task opens in the editor. It follows every
 /// change to the tasks, the date, and the times it shows coming up.
 /// </summary>
+/// <remarks>
+/// The 42 day buttons and the list's rows are made once and updated in place, never
+/// rebuilt: the keyboard focus and the selection stay where they are through every
+/// update, and a screen reader isn't sent back to the start.
+/// </remarks>
 public partial class CalendarWindow : Window
 {
     private const int LinesPerCell = 4;
@@ -32,18 +37,32 @@ public partial class CalendarWindow : Window
         return element;
     }
 
-    /// <summary>The same for a run of text.</summary>
-    private static Run Ink(Run run, string key)
+    /// <summary>One time a task comes up on the chosen day, as the day's list shows it.</summary>
+    public sealed class DayEntry(Guid taskId, int nth) : Observable
     {
-        run.SetResourceReference(TextElement.ForegroundProperty, key);
-        return run;
+        private string _time = "", _title = "", _waitingNote = "", _schedule = "";
+
+        public Guid TaskId { get; } = taskId;
+        /// <summary>Which of the task's times on the day this is (0 for its first): with the
+        /// task, what keeps the row from one update to the next, as the time itself can move.</summary>
+        public int Nth { get; } = nth;
+        public string Time { get => _time; set => Set(ref _time, value); }
+        public string Title { get => _title; set => Set(ref _title, value); }
+        /// <summary>" · waiting to be marked done", or nothing.</summary>
+        public string WaitingNote { get => _waitingNote; set => Set(ref _waitingNote, value); }
+        public string Schedule { get => _schedule; set => Set(ref _schedule, value); }
+
+        /// <summary>What a screen reader says for the row.</summary>
+        public override string ToString() =>
+            $"{Time} {Title}{(WaitingNote.Length > 0 ? ", waiting to be marked done" : "")}, {Schedule}";
     }
 
     private readonly MainWindow _main;
     /// <summary>The styles of a day in the grid, and of the chosen one (CalendarWindow.xaml).</summary>
     private readonly Style _cell, _chosenCell;
-    /// <summary>The grid's day buttons, by date, as last built.</summary>
-    private readonly Dictionary<DateOnly, Button> _cells = new();
+    /// <summary>The grid's 42 day buttons, in order; each one's Tag is the date it shows.</summary>
+    private readonly Button[] _cells = new Button[42];
+    private readonly ObservableCollection<DayEntry> _entries = [];
     /// <summary>Wakes at the next time shown coming up, and at least once a minute for the date.</summary>
     private readonly DispatcherTimer _clock = new();
     private DateTime _month;
@@ -51,6 +70,9 @@ public partial class CalendarWindow : Window
     private DateTime _builtOn;
     private DateTimeOffset? _nextChange;
     private bool _closed;
+    /// <summary>1 while a rebuild for store changes is queued: changes arriving together
+    /// rebuild once.</summary>
+    private int _buildQueued;
     private IReadOnlyList<CalendarDay> _days = [];
 
     public CalendarWindow(MainWindow main)
@@ -59,6 +81,8 @@ public partial class CalendarWindow : Window
         _main = main;
         _cell = (Style)FindResource("DayCell");
         _chosenCell = (Style)FindResource("ChosenDayCell");
+        MakeGrid();
+        DayList.ItemsSource = _entries;
         var today = TimeMath.ToWall(AppHost.Clock.UtcNow, AppHost.Clock.Zone).Date;
         _month = new DateTime(today.Year, today.Month, 1);
         _chosen = DateOnly.FromDateTime(today);
@@ -72,6 +96,40 @@ public partial class CalendarWindow : Window
         Build();
     }
 
+    /// <summary>The weekday names and the 42 day buttons, which <see cref="Build"/> fills.</summary>
+    private void MakeGrid()
+    {
+        var format = CultureInfo.CurrentCulture.DateTimeFormat;
+        for (int c = 0; c < 7; c++) MonthGrid.ColumnDefinitions.Add(new ColumnDefinition());
+        MonthGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        for (int r = 0; r < 6; r++) MonthGrid.RowDefinitions.Add(new RowDefinition());
+        for (int c = 0; c < 7; c++)
+        {
+            var head = Ink(new TextBlock
+            {
+                Text = format.AbbreviatedDayNames[((int)format.FirstDayOfWeek + c) % 7],
+                Margin = new Thickness(8, 0, 0, 4),
+            }, Quiet);
+            Grid.SetColumn(head, c);
+            MonthGrid.Children.Add(head);
+        }
+        for (int i = 0; i < _cells.Length; i++)
+        {
+            var cell = new Button { Style = _cell, IsTabStop = false };
+            // A day with the focus is the chosen one, so the arrow keys choose as they move.
+            cell.Click += (_, _) => Choose(DateOf(cell));
+            cell.GotKeyboardFocus += (_, _) => Choose(DateOf(cell));
+            Grid.SetRow(cell, 1 + i / 7);
+            Grid.SetColumn(cell, i % 7);
+            MonthGrid.Children.Add(cell);
+            _cells[i] = cell;
+        }
+    }
+
+    private static DateOnly DateOf(Button cell) => (DateOnly)cell.Tag;
+
+    private Button? CellOf(DateOnly date) => _cells.FirstOrDefault(c => c.Tag is DateOnly d && d == date);
+
     private void ScheduleTick()
     {
         if (_closed) return;   // a store change queued before closing still builds once
@@ -82,7 +140,17 @@ public partial class CalendarWindow : Window
 
     private static DateTime Today() => TimeMath.ToWall(AppHost.Clock.UtcNow, AppHost.Clock.Zone).Date;
 
-    private void OnStoreChanged(StoreChange _) => Dispatcher.BeginInvoke(Build);
+    /// <summary>Rebuilds once for changes that come together (several tasks marked done at
+    /// once, a sync), from whichever thread they come.</summary>
+    private void OnStoreChanged(StoreChange _)
+    {
+        if (Interlocked.Exchange(ref _buildQueued, 1) == 1) return;
+        Dispatcher.BeginInvoke(() =>
+        {
+            Volatile.Write(ref _buildQueued, 0);   // a change from here on rebuilds again
+            Build();
+        });
+    }
 
     private void Prev_Click(object sender, RoutedEventArgs e) => ShowMonth(_month.AddMonths(-1));
 
@@ -94,97 +162,70 @@ public partial class CalendarWindow : Window
         ShowMonth(new DateTime(_chosen.Year, _chosen.Month, 1));
     }
 
+    /// <summary>Shows <paramref name="month"/>, keeping the chosen day if it is in it, and
+    /// otherwise choosing the 1st. A keyboard focus in the grid goes to the chosen day.</summary>
     private void ShowMonth(DateTime month)
     {
         _month = month;
-        // Keep the chosen day if it is still in view; otherwise the 1st.
         if (_chosen.Year != month.Year || _chosen.Month != month.Month) _chosen = DateOnly.FromDateTime(month);
+        bool inGrid = MonthGrid.IsKeyboardFocusWithin;
         Build();
+        if (inGrid) CellOf(_chosen)?.Focus();
     }
 
-    /// <summary>Builds the month and the chosen day's list. The keyboard focus, if it was on
-    /// a day, goes to the rebuilt <paramref name="focus"/>, or to the rebuilt same day.</summary>
-    private void Build() => Build(null);
-
-    private void Build(DateOnly? focus)
+    /// <summary>Fills the grid with <see cref="_month"/>'s six weeks, and the list with the
+    /// chosen day's tasks, as they are now.</summary>
+    private void Build()
     {
         var culture = CultureInfo.CurrentCulture;
         _builtOn = Today();
         var now = AppHost.Clock.UtcNow;
         _days = CalendarMonth.Build(AppHost.Store.Live(), _month.Year, _month.Month, now, AppHost.Clock.Zone, culture);
+        if (_days.Count != _cells.Length) throw new InvalidOperationException($"A month came as {_days.Count} days, not {_cells.Length}.");
         _nextChange = CalendarMonth.NextChange(_days, now);
         ScheduleTick();
         MonthTitle.Text = _month.ToString("MMMM yyyy", culture);
-
-        // The day with the focus, to give it back to the rebuilt day: the old one goes.
-        var focusedDay = focus ?? (FocusedIn(MonthGrid) is Button { Tag: DateOnly date } ? date : null);
-        MonthGrid.Children.Clear();
-        _cells.Clear();
-        MonthGrid.RowDefinitions.Clear();
-        MonthGrid.ColumnDefinitions.Clear();
-        for (int c = 0; c < 7; c++) MonthGrid.ColumnDefinitions.Add(new ColumnDefinition());
-        MonthGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-        for (int r = 0; r < 6; r++) MonthGrid.RowDefinitions.Add(new RowDefinition());
-
-        var names = culture.DateTimeFormat.AbbreviatedDayNames;
-        int firstDay = (int)culture.DateTimeFormat.FirstDayOfWeek;
-        for (int c = 0; c < 7; c++)
-        {
-            var head = Ink(new TextBlock { Text = names[(firstDay + c) % 7], Margin = new Thickness(8, 0, 0, 4) }, Quiet);
-            Grid.SetColumn(head, c);
-            MonthGrid.Children.Add(head);
-        }
-        for (int i = 0; i < _days.Count; i++)
-        {
-            var cell = Cell(_days[i]);
-            Grid.SetRow(cell, 1 + i / 7);
-            Grid.SetColumn(cell, i % 7);
-            MonthGrid.Children.Add(cell);
-            _cells[_days[i].Date] = cell;
-        }
+        for (int i = 0; i < _cells.Length; i++) Fill(_cells[i], _days[i]);
         ShowDay();
-        if (focusedDay is { } day && _cells.TryGetValue(day, out var again)) FocusSoon(again);
     }
 
     /// <summary>The arrow keys move between days: a day left or right, a week up or down,
-    /// choosing each (a day with the focus is the chosen one). Past the six weeks shown,
-    /// they turn the month.</summary>
+    /// choosing each. Past the six weeks shown, they turn the month.</summary>
     private void MonthGrid_PreviewKeyDown(object sender, KeyEventArgs e)
     {
         int step = e.Key switch { Key.Left => -1, Key.Right => 1, Key.Up => -7, Key.Down => 7, _ => 0 };
-        if (step == 0 || FocusedIn(MonthGrid) is not Button { Tag: DateOnly from }) return;
+        if (step == 0 || Keyboard.FocusedElement is not Button { Tag: DateOnly from }) return;
         e.Handled = true;
         var to = from.AddDays(step);
-        if (_cells.TryGetValue(to, out var cell)) { cell.Focus(); return; }
+        if (CellOf(to) is { } cell) { cell.Focus(); return; }
         _chosen = to;
-        _month = new DateTime(to.Year, to.Month, 1);
-        Build(to);
+        ShowMonth(new DateTime(to.Year, to.Month, 1));
     }
 
     /// <summary>Makes <paramref name="date"/> the chosen day, and shows its tasks.</summary>
     private void Choose(DateOnly date)
     {
         if (date == _chosen) return;
-        if (_cells.TryGetValue(_chosen, out var old)) { old.Style = _cell; old.IsTabStop = false; }
         _chosen = date;
-        if (_cells.TryGetValue(date, out var cell)) { cell.Style = _chosenCell; cell.IsTabStop = true; }
+        foreach (var cell in _cells) MarkChosen(cell);
         ShowDay();
     }
 
-    /// <summary>The element within <paramref name="scope"/> that has this window's focus
-    /// (logical focus, so also while another window is active), or null.</summary>
-    private DependencyObject? FocusedIn(Visual scope) =>
-        FocusManager.GetFocusedElement(this) is DependencyObject f && scope.IsAncestorOf(f) ? f : null;
-
-    /// <summary>Focuses <paramref name="element"/> once it is laid out: a new element can't
-    /// take the focus before then.</summary>
-    private void FocusSoon(UIElement element) =>
-        Dispatcher.BeginInvoke(DispatcherPriority.Loaded, () => element.Focus());
+    /// <summary>Outlines the button if it is the chosen day's, the only one that is a tab
+    /// stop: Tab enters the grid there, and the arrow keys move on.</summary>
+    private void MarkChosen(Button cell)
+    {
+        bool chosen = DateOf(cell) == _chosen;
+        cell.Style = chosen ? _chosenCell : _cell;
+        cell.IsTabStop = chosen;
+    }
 
     private static string LongDate(DateOnly date) =>
         date.ToDateTime(TimeOnly.MinValue).ToString("dddd d MMMM yyyy", CultureInfo.CurrentCulture);
 
-    private Button Cell(CalendarDay day)
+    /// <summary>Shows <paramref name="day"/> on <paramref name="cell"/>: its number and up
+    /// to four of its times.</summary>
+    private void Fill(Button cell, CalendarDay day)
     {
         var panel = new StackPanel();
         var number = Ink(new TextBlock
@@ -216,55 +257,67 @@ public partial class CalendarWindow : Window
         if (day.Entries.Count > LinesPerCell)
             panel.Children.Add(Ink(new TextBlock { Text = $"+{day.Entries.Count - (LinesPerCell - 1)} more", FontSize = 11 }, Quiet));
 
-        bool chosen = day.Date == _chosen;
-        // Only the chosen day is a tab stop: Tab enters the grid there, and arrows move on.
-        var cell = new Button { Content = panel, Tag = day.Date, Style = chosen ? _chosenCell : _cell, IsTabStop = chosen };
-        // A day with the focus is the chosen one, so the arrow keys choose as they move.
-        cell.Click += (_, _) => Choose(day.Date);
-        cell.GotKeyboardFocus += (_, _) => Choose(day.Date);
+        cell.Content = panel;
+        cell.Tag = day.Date;
+        MarkChosen(cell);
         int count = day.Entries.Count;
         AutomationProperties.SetName(cell, LongDate(day.Date) + (day.IsToday ? ", today" : "")
-            + (count == 0 ? ", nothing comes up" : count == 1 ? ", 1 task" : $", {count} tasks"));
-        return cell;
+            + ", " + (count == 0 ? "nothing comes up" : TextFormat.Tasks(count)));
     }
 
-    /// <summary>The chosen day's tasks, in full, beside the grid. A task selected before,
-    /// and the focus if it was on one, stay on that task.</summary>
+    /// <summary>The chosen day's tasks, in full, beside the grid.</summary>
     private void ShowDay()
     {
         var culture = CultureInfo.CurrentCulture;
-        var day = _days.FirstOrDefault(d => d.Date == _chosen);
-        DayTitle.Text = LongDate(_chosen);
-        var selected = (DayList.SelectedItem as ListBoxItem)?.Tag;
-        bool focused = FocusedIn(DayList) is not null;
-        DayList.Items.Clear();
-        if (day is null || day.Entries.Count == 0)
-        {
-            DayList.Items.Add(new ListBoxItem { Content = "Nothing comes up.", IsEnabled = false });
-            return;
-        }
         var now = AppHost.Clock.UtcNow;
         var zone = AppHost.Clock.Zone;
-        foreach (var e in day.Entries)
+        DayTitle.Text = LongDate(_chosen);
+        var entries = (_days.FirstOrDefault(d => d.Date == _chosen)?.Entries ?? [])
+            .Select(e => (Entry: e, Task: AppHost.Store.Get(e.TaskId)))
+            .Where(x => x.Task is not null)
+            .ToList();
+        // The key of a row: its task, and which of the task's times on the day it is.
+        var seen = new Dictionary<Guid, int>();
+        var keyed = entries.Select(x =>
         {
-            if (AppHost.Store.Get(e.TaskId) is not { } t) continue;
-            var text = new TextBlock { TextWrapping = TextWrapping.Wrap };
-            text.Inlines.Add(new Run($"{e.Text}  ") { FontWeight = FontWeights.SemiBold });
-            text.Inlines.Add(new Run(e.Title));
-            if (e.Waiting) text.Inlines.Add(Ink(new Run(" · waiting to be marked done"), Waiting));
-            text.Inlines.Add(new LineBreak());
-            text.Inlines.Add(Ink(new Run(TextFormat.Schedule(t.Def, t.State, now, zone, culture)) { FontSize = 11 }, Quiet));
-            DayList.Items.Add(new ListBoxItem { Content = text, Tag = e.TaskId });
-        }
-        if (selected is null) return;
-        if (DayList.Items.OfType<ListBoxItem>().FirstOrDefault(i => Equals(i.Tag, selected)) is not { } again) return;
-        DayList.SelectedItem = again;
-        if (focused) FocusSoon(again);
+            int nth = seen.TryGetValue(x.Entry.TaskId, out var n) ? n + 1 : 0;
+            seen[x.Entry.TaskId] = nth;
+            return (x.Entry, Task: x.Task!, Nth: nth);
+        }).ToList();
+
+        // If the row with the focus goes (its task deleted or moved), the focus goes to the
+        // row now in its place, or to the chosen day if the list is left empty.
+        int focusedAt = DayList.IsKeyboardFocusWithin ? FocusedRow() : -1;
+        Rows.Reconcile(_entries, keyed, x => (x.Entry.TaskId, x.Nth), r => (r.TaskId, r.Nth),
+            x => new DayEntry(x.Entry.TaskId, x.Nth), (row, x) =>
+            {
+                row.Time = x.Entry.Text;
+                row.Title = x.Entry.Title;
+                row.WaitingNote = x.Entry.Waiting ? " · waiting to be marked done" : "";
+                row.Schedule = TextFormat.Schedule(x.Task.Def, x.Task.State, now, zone, culture);
+            });
+        bool empty = _entries.Count == 0;
+        DayList.Visibility = empty ? Visibility.Collapsed : Visibility.Visible;
+        NothingText.Visibility = empty ? Visibility.Visible : Visibility.Collapsed;
+        if (focusedAt < 0 || DayList.IsKeyboardFocusWithin) return;
+        if (empty) { CellOf(_chosen)?.Focus(); return; }
+        int at = Math.Min(focusedAt, _entries.Count - 1);
+        // Its row may not be made yet: after the next layout.
+        Dispatcher.BeginInvoke(DispatcherPriority.Loaded, () =>
+            (DayList.ItemContainerGenerator.ContainerFromIndex(at) as ListBoxItem)?.Focus());
+    }
+
+    /// <summary>The index of the day list's row with the keyboard focus, or -1.</summary>
+    private int FocusedRow()
+    {
+        for (int i = 0; i < DayList.Items.Count; i++)
+            if (DayList.ItemContainerGenerator.ContainerFromIndex(i) is ListBoxItem { IsKeyboardFocusWithin: true }) return i;
+        return -1;
     }
 
     private void OpenChosen()
     {
-        if (DayList.SelectedItem is ListBoxItem { Tag: Guid id }) _main.OpenEditor(id);
+        if (DayList.SelectedItem is DayEntry entry) _main.OpenEditor(entry.TaskId);
     }
 
     private void DayList_DoubleClick(object sender, MouseButtonEventArgs e) => OpenChosen();

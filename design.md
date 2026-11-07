@@ -196,9 +196,14 @@ otherwise also give.
   directional navigation, tried first, didn't move between these buttons) move
   a day or a week, choosing as they go, and turn the month past the six weeks
   shown.
-  Choosing a day restyles two buttons and refills the list, without rebuilding
-  the grid. A rebuild puts the focus back on its day, and the list's selection
-  and focus back on their task.
+  The 42 buttons are made once and filled anew on each update (a task
+  changing, a time coming up, the month turning), and the list's rows
+  (`DayEntry`, kept by their task and which of its times on the day they are)
+  are updated in place: the focus and the selection stay where they are, and a
+  screen reader isn't sent back to the start. Store changes arriving together
+  rebuild once. Turning the month with the focus in the grid moves it to the
+  chosen day; a list row with the focus that goes passes it to the row now in
+  its place, or to the chosen day.
 - **Android** (`CalendarActivity`, from the ⋮ menu) shows each day's first
   time, in short ("9:00a", "~6:30p", or "18:30" with a 24-hour clock), and
   "+N", with the chosen day's list below it.
@@ -532,9 +537,10 @@ separately (see *Simplification opportunities*).
   selection), the toolbar, and the tray icon. The close button hides it to the
   tray.
 - `DevicesWindow`'s list is refreshed every 3 seconds and on every sync change.
-  Like the task list, its rows (`Observable`, as `TaskRow` is) stay while their
-  device is listed and are updated in place, so the selection and the keyboard
-  focus aren't thrown off a row at each refresh.
+  Its rows, the task list's and the calendar day list's are `Observable`, kept
+  by a key and updated in place by `Rows.Reconcile` (which shows a key given
+  twice once), so the selection and the keyboard focus aren't thrown off a row
+  at each refresh.
 - `TaskEditorWindow`, `SettingsWindow`, `DevicesWindow` and
   `SoundPickerWindow` are all **non-modal**. WPF's `ShowDialog` disables every
   other window of the thread, ringing alarm windows included, and an alarm must

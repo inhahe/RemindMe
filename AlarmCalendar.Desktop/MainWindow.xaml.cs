@@ -266,6 +266,7 @@ public partial class MainWindow : Window
     {
         if (_exiting) return;
         _exiting = true;
+        AppHost.BeginExit();
         SavePlacement();
         _tray.Visible = false;
         _tray.Dispose();

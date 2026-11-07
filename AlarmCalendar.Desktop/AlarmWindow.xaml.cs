@@ -16,9 +16,17 @@ public partial class AlarmWindow : Window
     private bool _closingQuietly;
     private bool _markedDone;
 
+    // The task's values when the fields were last filled: only fields the user changed
+    // are written back, so an edit made elsewhere meanwhile isn't reverted.
+    private int _shownMinutes;
+    private RestartMode _shownRestart;
+
     /// <summary>The due time of the alert this window is showing; a different one from the
     /// engine means a new alert has begun.</summary>
     public DateTimeOffset? AlertDue { get; private set; }
+
+    /// <summary>The window has sounded an alert (one opened by "Show alarm" hasn't).</summary>
+    public bool Alerting { get; private set; }
 
     public AlarmWindow(AlarmCoordinator owner, TaskStatus st)
     {
@@ -27,18 +35,45 @@ public partial class AlarmWindow : Window
         _id = st.Task.Id;
         var d = st.Task.Def;
         RestartPanel.Visibility = d.Kind == ScheduleKind.Interval ? Visibility.Visible : Visibility.Collapsed;
+        ShowChoices(d);
+        LatePanel.Visibility = Visibility.Collapsed;
+        SoundProblem.Visibility = Visibility.Collapsed;
+        SilenceButton.IsEnabled = false;
+        Refresh(st);
+        _owner.Sounds.Problem += OnSoundProblem;
+        Closed += (_, _) => _owner.Sounds.Problem -= OnSoundProblem;
+    }
+
+    private void OnSoundProblem(object who, string message)
+    {
+        if (who != this) return;
+        SoundProblem.Text = message;
+        SoundProblem.Visibility = Visibility.Visible;
+    }
+
+    private void ShowChoices(TaskDefinition d)
+    {
+        _shownMinutes = d.ReminderMinutes;
+        _shownRestart = d.Restart;
         FromDoneRadio.IsChecked = d.Restart == RestartMode.FromDone;
         OnScheduleRadio.IsChecked = d.Restart == RestartMode.OnSchedule;
         ReminderHours.Text = (d.ReminderMinutes / 60).ToString();
         ReminderMinutes.Text = (d.ReminderMinutes % 60).ToString();
-        Refresh(st);
     }
+
+    /// <summary>True when the user has changed the reminder or restart fields.</summary>
+    private bool ChoicesEdited() =>
+        !Fields.TryHoursMinutes(ReminderHours.Text, ReminderMinutes.Text, out int m, out _)
+        || m != _shownMinutes || CurrentRestart() != _shownRestart;
+
+    private RestartMode CurrentRestart() => OnScheduleRadio.IsChecked == true ? RestartMode.OnSchedule : RestartMode.FromDone;
 
     /// <summary>Starts a new alert: updates the text, works out whether it is late (R13),
     /// and sounds it.</summary>
     public void Alert(TaskStatus st, DateTimeOffset now)
     {
         AlertDue = st.AlertDue;
+        Alerting = true;
         Refresh(st);
         var zone = AppHost.Clock.Zone;
         if (AlarmEngine.Lateness(st, now) is not null && st.AlertDue is { } due)
@@ -61,6 +96,9 @@ public partial class AlarmWindow : Window
     public void Refresh(TaskStatus st)
     {
         var d = st.Task.Def;
+        // Follow edits made elsewhere (the editor, another device) unless the user has
+        // started changing these fields here.
+        if ((d.ReminderMinutes != _shownMinutes || d.Restart != _shownRestart) && !ChoicesEdited()) ShowChoices(d);
         var now = AppHost.Clock.UtcNow;
         var zone = AppHost.Clock.Zone;
         string what = d.Kind == ScheduleKind.Countdown ? "Countdown finished" : st.IsReminder ? "Reminder" : "Alarm";
@@ -102,6 +140,7 @@ public partial class AlarmWindow : Window
     {
         base.OnClosing(e);
         if (_closingQuietly) return;
+        if (AppHost.Exiting) { _owner.Sounds.Stop(this); return; }
         if (!_markedDone && !SaveChoices()) { e.Cancel = true; return; }
         _owner.Sounds.Stop(this);
         if (_markedDone) _owner.UserMarkedDone(_id);
@@ -118,12 +157,14 @@ public partial class AlarmWindow : Window
             ReminderHours.Focus();
             return false;
         }
-        var restart = OnScheduleRadio.IsChecked == true ? RestartMode.OnSchedule : RestartMode.FromDone;
-        AppHost.Store.Edit(_id, d => d with
-        {
-            ReminderMinutes = minutes,
-            Restart = d.Kind == ScheduleKind.Interval ? restart : d.Restart,
-        });
+        var restart = CurrentRestart();
+        bool minutesEdited = minutes != _shownMinutes, restartEdited = restart != _shownRestart;
+        if (minutesEdited || restartEdited)
+            AppHost.Store.Edit(_id, d => d with
+            {
+                ReminderMinutes = minutesEdited ? minutes : d.ReminderMinutes,
+                Restart = restartEdited && d.Kind == ScheduleKind.Interval ? restart : d.Restart,
+            });
         return true;
     }
 

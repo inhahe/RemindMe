@@ -36,6 +36,7 @@ public sealed class AlarmCoordinator : IDisposable
 
     public void Evaluate()
     {
+        if (_disposed) return;
         var now = AppHost.Clock.UtcNow;
         var zone = AppHost.Clock.Zone;
         var statuses = _store.Live().Select(t => AlarmEngine.Evaluate(t, now, zone)).ToList();
@@ -54,16 +55,17 @@ public sealed class AlarmCoordinator : IDisposable
             {
                 if (_windows.TryGetValue(id, out var w))
                 {
-                    // A new alert (another occurrence, or the reminder coming due while a
-                    // forced window is open) refreshes the window and sounds again.
-                    if (w.AlertDue != st.AlertDue && st.ShouldAlert) w.Alert(st, now);
+                    // A new alert sounds again: another occurrence, or the reminder coming due
+                    // while a window opened with "Show alarm" (which didn't sound) is open.
+                    if (st.ShouldAlert && (w.AlertDue != st.AlertDue || !w.Alerting)) w.Alert(st, now);
                     else w.Refresh(st);
                 }
                 else
                 {
                     w = new AlarmWindow(this, st);
                     _windows[id] = w;
-                    w.Alert(st, now);
+                    // "Show alarm" on a snoozed task opens its window without ringing.
+                    if (st.ShouldAlert) w.Alert(st, now);
                     w.Show();
                     w.Activate();
                 }
@@ -111,8 +113,12 @@ public sealed class AlarmCoordinator : IDisposable
         w.CloseQuietly();
     }
 
+    private bool _disposed;
+
     public void Dispose()
     {
+        if (_disposed) return;
+        _disposed = true;
         _timer.Stop();
         foreach (var w in _windows.Values.ToList()) w.CloseQuietly();
         _windows.Clear();

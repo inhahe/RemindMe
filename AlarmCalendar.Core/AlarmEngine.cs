@@ -137,7 +137,12 @@ public static class AlarmEngine
         var nowS = TimeMath.TruncateToSecond(now);
         var done = TimeMath.Max(s.DoneThroughUtc, now);
         if (d.Kind == ScheduleKind.Interval && d.Restart == RestartMode.FromDone)
-            return s with { Anchor = TimeMath.ToWall(nowS, zone), DoneThroughUtc = done, SnoozeUntilUtc = null, SnoozeOccurrenceUtc = null };
+            return s with
+            {
+                Anchor = TimeMath.ToWall(nowS, zone),
+                AnchorUtc = nowS.ToUniversalTime(),
+                DoneThroughUtc = done, SnoozeUntilUtc = null, SnoozeOccurrenceUtc = null,
+            };
         return s with { DoneThroughUtc = done, SnoozeUntilUtc = null, SnoozeOccurrenceUtc = null };
     }
 
@@ -160,10 +165,12 @@ public static class AlarmEngine
     /// <paramref name="now"/> fire, and a countdown starts.</summary>
     /// <param name="old">The task's previous state, or null for a new task.</param>
     /// <param name="def">The saved definition, carrying its new ScheduleRevision.</param>
+    /// <remarks>DoneThrough is set to <paramref name="now"/>, not raised to it: this is the
+    /// one way a DoneThrough left in the future by a wrong clock gets lowered again.</remarks>
     public static TaskState FreshState(TaskState? old, TaskDefinition def, DateTimeOffset now) => new()
     {
         Revision = def.ScheduleRevision,
-        DoneThroughUtc = old is null ? now : TimeMath.Max(old.DoneThroughUtc, now),
+        DoneThroughUtc = now,
         CountdownEndsUtc = def.Kind == ScheduleKind.Countdown ? TimeMath.TruncateToSecond(now) + def.Duration : null,
     };
 }

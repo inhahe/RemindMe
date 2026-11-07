@@ -163,6 +163,65 @@ public class EngineTests
     }
 
     [Fact]
+    public void ADoneThroughLeftInTheFutureByAWrongClockIsClearedBySavingTheSchedule()
+    {
+        _clock.UtcNow = NY(2026, 7, 1, 9);   // the clock is a month ahead
+        var t = EveryHourFromNow(RestartMode.OnSchedule);
+        _clock.UtcNow = NY(2026, 6, 1, 9);   // fixed
+        _store.Save(t.Id, _store.Get(t.Id)!.Def with { Start = Wall(_clock.UtcNow) });
+        Assert.Equal(NY(2026, 6, 1, 10), Status(t.Id).NextOccurrence);
+
+        // A peer still holding the old revision's future DoneThrough doesn't bring it back.
+        var stale = t;
+        var merged = MergeRules.Merge(_store.Get(t.Id)!, stale);
+        Assert.Equal(_store.Get(t.Id)!.State, merged.State);
+    }
+
+    [Fact]
+    public void SwitchingToTheOriginalScheduleCountsFromTheStartAgain()
+    {
+        var t = _store.Save(null, new TaskDefinition
+        {
+            Kind = ScheduleKind.Interval, Unit = IntervalUnit.Days, Start = new DateTime(2026, 6, 1, 9, 0, 0),
+            Restart = RestartMode.FromDone,
+        });
+        _clock.UtcNow = NY(2026, 6, 2, 14, 37);
+        _store.MarkDone(t.Id);
+        Assert.Equal(NY(2026, 6, 3, 14, 37), Status(t.Id).NextOccurrence);
+        _store.Edit(t.Id, d => d with { Restart = RestartMode.OnSchedule });
+        Assert.Equal(NY(2026, 6, 3, 9), Status(t.Id).NextOccurrence);
+    }
+
+    [Fact]
+    public void MarkingDoneInTheRepeatedHourCountsFromTheRightInstant()
+    {
+        // 2026-11-01 01:30 happens twice in New York; mark done during the second (EST).
+        var secondPass = new DateTimeOffset(2026, 11, 1, 1, 30, 0, TimeSpan.FromHours(-5));
+        _clock.UtcNow = secondPass - TimeSpan.FromHours(3);
+        var t = _store.Save(null, new TaskDefinition
+        {
+            Kind = ScheduleKind.Interval, IntervalCount = 2, Unit = IntervalUnit.Hours,
+            Start = Wall(_clock.UtcNow), Restart = RestartMode.FromDone,
+        });
+        _clock.UtcNow = secondPass;
+        _store.MarkDone(t.Id);
+        Assert.Equal(secondPass + TimeSpan.FromHours(2), Status(t.Id).NextOccurrence);
+    }
+
+    [Fact]
+    public void ANewScheduleOutranksAStateFromAHigherRevisionThanItsDefinition()
+    {
+        var t = EveryHourFromNow(RestartMode.FromDone);
+        // As after a merge that kept an older definition but a newer state.
+        var skewed = t with { State = t.State with { Revision = 5 } };
+        var store = new TaskStore(null, "b", _clock);
+        store.Merge([skewed]);
+        var saved = store.Save(t.Id, t.Def with { IntervalCount = 3 });
+        Assert.Equal(6, saved.Def.ScheduleRevision);
+        Assert.Equal(6, saved.State.Revision);
+    }
+
+    [Fact]
     public void NextWakeUpIsTheEarliestThingDue()
     {
         var a = EveryHourFromNow(RestartMode.FromDone);
@@ -199,6 +258,42 @@ public class TextFormatTests
         Assert.Equal("Mon, Wed", TextFormat.Weekdays((1 << 1) | (1 << 3), c));
         Assert.Equal("Weekends", TextFormat.Weekdays(1 | (1 << 6), c));
         Assert.Equal("Sun, Tue", TextFormat.Weekdays(1 | (1 << 2), c));
+    }
+
+    [Theory]
+    [InlineData("en-US", "9:30 PM", 21, 30)]
+    [InlineData("en-US", "9", 9, 0)]
+    [InlineData("en-US", "21.15", 21, 15)]
+    [InlineData("en-CA", "9:00 a.m.", 9, 0)]
+    [InlineData("de-DE", "07:45", 7, 45)]
+    [InlineData("ja-JP", "９:３０", 9, 30)]
+    public void TimesReadInEachCulture(string culture, string text, int h, int m)
+    {
+        Assert.True(FieldParsing.TryTime(text, out var t, System.Globalization.CultureInfo.GetCultureInfo(culture)));
+        Assert.Equal(new TimeOnly(h, m), t);
+    }
+
+    [Theory]
+    [InlineData("en-CA")]
+    [InlineData("ko-KR")]
+    [InlineData("zh-TW")]
+    [InlineData("ar-SA")]
+    public void AFormattedTimeReadsBack(string culture)
+    {
+        var c = System.Globalization.CultureInfo.GetCultureInfo(culture);
+        var t = new TimeOnly(21, 5);
+        Assert.True(FieldParsing.TryTime(FieldParsing.FormatTime(t, c), out var back, c));
+        Assert.Equal(t, back);
+    }
+
+    [Fact]
+    public void BadTimesAreRefused()
+    {
+        var c = System.Globalization.CultureInfo.GetCultureInfo("en-US");
+        Assert.False(FieldParsing.TryTime("25:00", out _, c));
+        Assert.False(FieldParsing.TryTime("13 pm", out _, c));
+        Assert.False(FieldParsing.TryTime("1/2/2026", out _, c));
+        Assert.False(FieldParsing.TryTime("soon", out _, c));
     }
 
     [Fact]

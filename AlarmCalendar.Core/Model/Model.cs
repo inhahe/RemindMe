@@ -149,6 +149,11 @@ public sealed record TaskState
     /// FromDone task is marked done.</summary>
     public DateTime? Anchor { get; init; }
 
+    /// <summary>The instant of <see cref="Anchor"/>, which fixed-length intervals (seconds,
+    /// minutes, hours) count from: a wall-clock time in the repeated hour of a fall-back
+    /// transition would otherwise resolve to the wrong one of its two instants.</summary>
+    public DateTimeOffset? AnchorUtc { get; init; }
+
     /// <summary>When a running countdown ends; null when not started.</summary>
     public DateTimeOffset? CountdownEndsUtc { get; init; }
 

@@ -7,9 +7,11 @@ namespace AlarmCalendar;
 /// </summary>
 public static class Occurrences
 {
-    /// <summary>The wall-clock anchor an Interval task counts from: the state's anchor
-    /// after a FromDone mark-done, otherwise the definition's start.</summary>
-    public static DateTime AnchorOf(TaskDefinition d, TaskState s) => s.Anchor ?? d.Start;
+    /// <summary>The wall-clock anchor an Interval task counts from: for FromDone, the time it
+    /// was last marked done (the start until then); for OnSchedule, always the start, since
+    /// that is the "original schedule" it keeps to, even after a switch from FromDone.</summary>
+    public static DateTime AnchorOf(TaskDefinition d, TaskState s) =>
+        d.Restart == RestartMode.FromDone ? s.Anchor ?? d.Start : d.Start;
 
     /// <summary>The latest occurrence at or before <paramref name="t"/>, or null if none.</summary>
     public static DateTimeOffset? AtOrBefore(TaskDefinition d, TaskState s, DateTimeOffset t, TimeZoneInfo z)
@@ -128,10 +130,13 @@ public static class Occurrences
         public IntervalGrid(TaskDefinition d, TaskState s, TimeZoneInfo z)
         {
             _anchor = AnchorOf(d, s);
-            _anchorInstant = TimeMath.ToInstant(_anchor, z);
             _n = Math.Max(1, d.IntervalCount);
             _unit = d.Unit;
             _z = z;
+            bool fromDoneAnchor = d.Restart == RestartMode.FromDone && s.Anchor is not null;
+            _anchorInstant = IsFixedLength && fromDoneAnchor && s.AnchorUtc is { } exact
+                ? exact
+                : TimeMath.ToInstant(_anchor, z);
         }
 
         private bool IsFixedLength => _unit is IntervalUnit.Seconds or IntervalUnit.Minutes or IntervalUnit.Hours;

@@ -116,18 +116,15 @@ public static class AppHost
         RestartSync();
     }
 
-    /// <summary>Replaces the settings with <paramref name="updated"/>, saves them, and
-    /// tells the windows.</summary>
-    public static void ApplySettings(AppSettings updated)
+    /// <summary>Applies <paramref name="edit"/> to the current settings, saves them, applies
+    /// what changed (autostart, sync), and tells the windows. A window passes only the
+    /// fields it shows, applied to the settings as they are now, so anything that changed
+    /// while it was open (a pairing, the window placement) isn't reverted.</summary>
+    public static void UpdateSettings(Action<AppSettings> edit)
     {
         var old = Settings;
-        // The settings windows edit a copy taken when they opened; the sync identity may
-        // have changed since (a pairing), and they never edit it, so the current one stands.
-        updated.NodeId = old.NodeId;
-        updated.GroupId = old.GroupId;
-        updated.GroupKey = old.GroupKey;
-        updated.KnownPeers = old.KnownPeers;
-        updated.AutostartInitialized = old.AutostartInitialized;
+        var updated = old.Clone();
+        edit(updated);
         Settings = updated;
         Settings.Save(SettingsPath, Log);
         Autostart.Apply(Settings.StartWithWindows);
@@ -140,11 +137,23 @@ public static class AppHost
 
     public static void SaveSettings() => Settings.Save(SettingsPath, Log);
 
+    /// <summary>The app is exiting: windows closing now must not count as the user's answer.</summary>
+    public static bool Exiting { get; private set; }
+
+    /// <summary>Starts exiting: closes the alarm windows quietly, so a ringing alarm stays
+    /// due and rings again (marked late) on the next start, rather than being dismissed.</summary>
+    public static void BeginExit()
+    {
+        if (Exiting) return;
+        Exiting = true;
+        Alarms?.Dispose();
+    }
+
     public static void Shutdown()
     {
+        BeginExit();
         Sync?.Dispose();
         Sync = null;
-        Alarms?.Dispose();
         Sounds?.StopAll();
     }
 

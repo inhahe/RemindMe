@@ -3,14 +3,26 @@ using System.Windows;
 
 namespace AlarmCalendar.Desktop;
 
-/// <summary>Picks a Windows sound or a sound file (R10), or "default" when choosing for a task.</summary>
+/// <summary>Picks a Windows sound or a sound file (R10), or "default" when choosing for a
+/// task. Not modal (see <see cref="TaskEditorWindow"/>): OK reports the choice through
+/// <see cref="Chosen"/>.</summary>
 public partial class SoundPickerWindow : Window
 {
     private readonly object _previewOwner = new();
     private readonly bool _allowDefault;
 
-    /// <summary>The chosen sound after OK; null means "default".</summary>
-    public SoundRef? Choice { get; private set; }
+    /// <summary>Raised on OK with the chosen sound; null means "default".</summary>
+    public event Action<SoundRef?>? Chosen;
+
+    /// <summary>Opens a picker owned by <paramref name="owner"/>, or brings forward the one
+    /// it already has.</summary>
+    public static void Open(Window owner, SoundRef? current, bool allowDefault, Action<SoundRef?> chosen)
+    {
+        if (owner.OwnedWindows.OfType<SoundPickerWindow>().FirstOrDefault() is { } open) { open.Activate(); return; }
+        var picker = new SoundPickerWindow(current, allowDefault) { Owner = owner };
+        picker.Chosen += chosen;
+        picker.Show();
+    }
 
     /// <param name="current">The sound chosen now; null means "default".</param>
     /// <param name="allowDefault">Offer "default" (for a task). The default itself, in
@@ -90,7 +102,9 @@ public partial class SoundPickerWindow : Window
             MessageBox.Show(this, "Choose a file first, or pick another option.", Title);
             return;
         }
-        Choice = Selected();
-        DialogResult = true;
+        Chosen?.Invoke(Selected());
+        Close();
     }
+
+    private void Cancel_Click(object sender, RoutedEventArgs e) => Close();
 }

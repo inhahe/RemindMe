@@ -144,12 +144,11 @@ public partial class TaskEditorWindow : Window
 
     private void Sound_Click(object sender, RoutedEventArgs e)
     {
-        var picker = new SoundPickerWindow(_sound, allowDefault: true) { Owner = this };
-        if (picker.ShowDialog() == true)
+        SoundPickerWindow.Open(this, _sound, allowDefault: true, chosen =>
         {
-            _sound = picker.Choice;
+            _sound = chosen;
             RefreshDefaults();
-        }
+        });
     }
 
     private void Cancel_Click(object sender, RoutedEventArgs e) => Close();

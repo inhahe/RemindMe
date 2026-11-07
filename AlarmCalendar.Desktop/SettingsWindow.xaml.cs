@@ -4,16 +4,17 @@ using System.Windows;
 namespace AlarmCalendar.Desktop;
 
 /// <summary>Per-device settings: the defaults for tasks (R11, R14, R6) and startup (D1).
-/// Not modal, for the same reason as the task editor.</summary>
+/// Not modal, for the same reason as the task editor. Save applies only the fields this
+/// window shows, onto the settings as they are by then.</summary>
 public partial class SettingsWindow : Window
 {
-    private readonly AppSettings _draft;
+    private SoundRef? _sound;
 
     public SettingsWindow()
     {
         InitializeComponent();
-        _draft = AppHost.Settings.Clone();
-        var s = _draft;
+        var s = AppHost.Settings;
+        _sound = s.DefaultSound;
         ModeOnce.IsChecked = s.DefaultSoundMode == SoundMode.Once;
         ModeRepeat.IsChecked = s.DefaultSoundMode == SoundMode.Repeat;
         ReminderHours.Text = (s.DefaultReminderMinutes / 60).ToString(CultureInfo.CurrentCulture);
@@ -26,15 +27,15 @@ public partial class SettingsWindow : Window
         ShowSound();
     }
 
-    private void ShowSound() =>
-        SoundButton.Content = (_draft.DefaultSound ?? SoundService.BuiltIn).Name + "…";
+    private void ShowSound() => SoundButton.Content = (_sound ?? SoundService.BuiltIn).Name + "…";
 
     private void Sound_Click(object sender, RoutedEventArgs e)
     {
-        var picker = new SoundPickerWindow(_draft.DefaultSound, allowDefault: false) { Owner = this };
-        if (picker.ShowDialog() != true) return;
-        _draft.DefaultSound = picker.Choice;
-        ShowSound();
+        SoundPickerWindow.Open(this, _sound, allowDefault: false, chosen =>
+        {
+            _sound = chosen;
+            ShowSound();
+        });
     }
 
     private void Cancel_Click(object sender, RoutedEventArgs e) => Close();
@@ -46,13 +47,20 @@ public partial class SettingsWindow : Window
         if (!Fields.TryTime(TimeOfDay.Text, out var tod)) errors.Add("The time of day isn't a time, e.g. 9:00 or 21:30.");
         if (errors.Count > 0) { ErrorText.Text = string.Join("\n", errors); return; }
 
-        _draft.DefaultSoundMode = ModeOnce.IsChecked == true ? SoundMode.Once : SoundMode.Repeat;
-        _draft.DefaultReminderMinutes = reminder;
-        _draft.DefaultTimeOfDay = tod;
-        _draft.DefaultRestartMode = RestartOnSchedule.IsChecked == true ? RestartMode.OnSchedule : RestartMode.FromDone;
-        _draft.StartWithWindows = StartWithWindows.IsChecked == true;
-        _draft.CloseToTray = CloseToTray.IsChecked == true;
-        AppHost.ApplySettings(_draft);
+        var sound = _sound;
+        var mode = ModeOnce.IsChecked == true ? SoundMode.Once : SoundMode.Repeat;
+        var restart = RestartOnSchedule.IsChecked == true ? RestartMode.OnSchedule : RestartMode.FromDone;
+        bool startWithWindows = StartWithWindows.IsChecked == true, closeToTray = CloseToTray.IsChecked == true;
+        AppHost.UpdateSettings(s =>
+        {
+            s.DefaultSound = sound;
+            s.DefaultSoundMode = mode;
+            s.DefaultReminderMinutes = reminder;
+            s.DefaultTimeOfDay = tod;
+            s.DefaultRestartMode = restart;
+            s.StartWithWindows = startWithWindows;
+            s.CloseToTray = closeToTray;
+        });
         Close();
     }
 }

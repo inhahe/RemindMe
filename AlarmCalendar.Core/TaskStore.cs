@@ -18,10 +18,12 @@ public static class MergeRules
             ? (remote.Def, remote.DefVersion) : (local.Def, local.DefVersion);
         var winner = StateOrder(remote.State.Revision, remote.StateVersion, local.State.Revision, local.StateVersion) > 0
             ? remote : local;
-        var state = winner.State with
-        {
-            DoneThroughUtc = TimeMath.Max(local.State.DoneThroughUtc, remote.State.DoneThroughUtc),
-        };
+        // Within one schedule revision, "done" only ever moves forward, whichever write wins.
+        // A newer revision (a schedule edit) replaces it outright, which is also how a
+        // DoneThrough left in the future by a wrong clock gets cleared.
+        var state = local.State.Revision == remote.State.Revision
+            ? winner.State with { DoneThroughUtc = TimeMath.Max(local.State.DoneThroughUtc, remote.State.DoneThroughUtc) }
+            : winner.State;
         return local with { Def = def, DefVersion = defVersion, State = state, StateVersion = winner.StateVersion };
     }
 
@@ -34,7 +36,7 @@ public static class MergeRules
     public static bool IsNewerThan(AlarmTask local, DigestEntry peer) =>
         local.DefVersion > peer.DefVersion
         || StateOrder(local.State.Revision, local.StateVersion, peer.Revision, peer.StateVersion) > 0
-        || local.State.DoneThroughUtc > peer.DoneThroughUtc;
+        || (local.State.Revision == peer.Revision && local.State.DoneThroughUtc > peer.DoneThroughUtc);
 
     public static DigestEntry DigestOf(AlarmTask t) =>
         new(t.Id, t.DefVersion, t.State.Revision, t.StateVersion, t.State.DoneThroughUtc);
@@ -125,9 +127,13 @@ public sealed class TaskStore
             else
             {
                 bool reschedule = old.Def.ScheduleDiffers(def) || (restartCountdown && def.Kind == ScheduleKind.Countdown);
+                // Definition and state merge separately, so the state can already carry a
+                // higher revision than the definition; a new schedule must outrank both.
                 def = def with
                 {
-                    ScheduleRevision = reschedule ? old.Def.ScheduleRevision + 1 : old.Def.ScheduleRevision,
+                    ScheduleRevision = reschedule
+                        ? Math.Max(old.Def.ScheduleRevision, old.State.Revision) + 1
+                        : old.Def.ScheduleRevision,
                     Deleted = false,
                 };
                 result = old;

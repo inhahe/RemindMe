@@ -42,6 +42,9 @@ public static class Json
     /// overwritten, so the user's data can still be recovered by hand.
     /// </summary>
     /// <returns>The value, or null when neither file exists or parses.</returns>
+    /// <exception cref="IOException">A file exists but stays unreadable (locked by another
+    /// program, or access denied). Starting empty instead would let the next save overwrite
+    /// the user's data, so the caller must not carry on as if there were none.</exception>
     public static T? ReadWithFallback<T>(string path, Action<string>? log = null) where T : class
     {
         foreach (var candidate in new[] { path, path + ".bak" })
@@ -49,7 +52,7 @@ public static class Json
             if (!File.Exists(candidate)) continue;
             try
             {
-                var value = JsonSerializer.Deserialize<T>(File.ReadAllText(candidate), Options);
+                var value = JsonSerializer.Deserialize<T>(ReadShared(candidate), Options);
                 if (value is not null)
                 {
                     if (candidate != path) log?.Invoke($"{Path.GetFileName(path)} was unreadable; restored from its backup.");
@@ -64,5 +67,28 @@ public static class Json
             }
         }
         return null;
+    }
+
+    /// <summary>Reads a file, retrying for a couple of seconds while another program (an
+    /// antivirus scan, a backup) holds it open.</summary>
+    private static string ReadShared(string path)
+    {
+        for (int attempt = 1; ; attempt++)
+        {
+            try
+            {
+                using var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+                using var r = new StreamReader(fs);
+                return r.ReadToEnd();
+            }
+            catch (Exception e) when ((e is IOException or UnauthorizedAccessException) && e is not FileNotFoundException && attempt < 10)
+            {
+                Thread.Sleep(250);
+            }
+            catch (UnauthorizedAccessException e)
+            {
+                throw new IOException($"{path} can't be read: {e.Message}", e);
+            }
+        }
     }
 }

@@ -220,10 +220,16 @@ separately (see *Simplification opportunities*).
   marshal them to their UI thread.
 - **Identity**: the node ID, device name, group ID and group secret live in
   `AppSettings`. Pairing raises `IdentityChanged` for the app to persist.
-  `AppHost.ApplySettings` copies the identity fields from the live settings
-  into the copy a settings window edited, because a pairing may have changed
-  them while that window was open. Without that copy, saving the window would
-  silently undo the link.
+  Settings windows change only their own fields, through `UpdateSettings(edit)`
+  (`AppHost` on desktop, `AppState` on Android), on the settings as they are at
+  save time. A window that saved the copy it took on opening would silently
+  undo a pairing made while it was open.
+- **Merge across revisions**: `DoneThroughUtc` takes the maximum only between
+  states of the same schedule revision. A newer revision replaces it outright,
+  which is the one way a `DoneThrough` left in the future by a wrong clock
+  gets lowered: saving the schedule again. A new revision is
+  `max(definition's, state's) + 1`, since the two merge separately and the
+  state can be ahead.
 
 ## Testing
 
@@ -242,18 +248,43 @@ separately (see *Simplification opportunities*).
 
 ## Desktop app
 
-- `App.xaml.cs`: single instance through a named mutex and a "show" event (the
-  same as LanLink). It reads `--minimized`, which autostart passes.
-- `MainWindow`: the task list, refreshed every second; the tray icon; the
-  1-second tick that drives `AlarmEngine` and opens `AlarmWindow`s.
-- `TaskEditorWindow`: the R3/R4 layout, with `GroupBox`es styled as rounded
-  rectangles. Esc is `IsCancel`. The description `TextBox` has
-  `AcceptsReturn = true`, so Enter adds a line rather than pressing Save.
-- `AlarmWindow`: one per ringing task, topmost.
-- `SoundPlayer`: WPF `MediaPlayer`, looping on `MediaEnded`. Only one sound
-  plays at a time (D5). The newest popup's sound plays, and closing it resumes
-  the sound of the newest popup still open.
-- `Autostart.cs`: a single per-user `HKCU\...\Run` entry, as in LanLink.
+- `App.xaml.cs`: single instance per data directory, through a named mutex and
+  a "show" event (the same as LanLink). Command line: `--minimized` (to the
+  tray, which autostart passes) and `--data-dir <dir>`. If startup fails, it
+  shows the error and exits rather than holding the mutex invisibly.
+- `AppHost`: the long-lived services (settings, store, sounds, alarms, sync),
+  plus `UpdateSettings(edit)`. Every settings change goes through
+  `UpdateSettings`, which applies a window's edits to the *current* settings.
+  So a pairing, or the window placement, changed while the window was open isn't
+  reverted.
+- `AlarmCoordinator`: the 1-second tick. It evaluates every task and opens,
+  re-alerts or quietly closes `AlarmWindow`s. A window opened by "Show alarm" on
+  a snoozed task doesn't ring until its reminder comes due.
+- `MainWindow`: the task list (rows updated in place, `Move` keeping the
+  selection), the toolbar, and the tray icon. The close button hides it to the
+  tray.
+- `TaskEditorWindow`, `SettingsWindow`, `DevicesWindow` and
+  `SoundPickerWindow` are all **non-modal**. WPF's `ShowDialog` disables every
+  other window of the thread, ringing alarm windows included, and an alarm must
+  stay answerable. In the editor, the description `TextBox` has
+  `AcceptsReturn`, so Enter adds a line. There is no default button; Esc is
+  `IsCancel`, and Cancel closes the window.
+- `AlarmWindow`: one per ringing task, topmost. Closing it any way the user can
+  dismisses the task; `CloseQuietly` and exiting the app (`AppHost.Exiting`,
+  also set when Windows ends the session) don't. The task stays due and rings
+  late on the next start. Of the reminder and restart fields, it writes back
+  only the ones the user changed.
+- `SoundService`: one sound at a time (D5). The newest alert's sound plays, and
+  stopping it resumes the newest remaining looping one. WAV files play through
+  `SoundPlayer`, which needs no Media Foundation, so Windows N editions work too;
+  other formats play through WPF `MediaPlayer`. A failure falls back to the
+  built-in `Alarm01.wav` and reports it in the alarm window, then to the
+  system beep.
+- `Autostart.cs`: a single per-user `HKCU\...\Run` entry, as in LanLink. An
+  instance with its own `--data-dir` gets an entry of its own name, and is never
+  enabled on its first run.
+- `Fields.cs`: the editors' parsing, which lives in Core's `FieldParsing`, so
+  Android uses the same rules.
 
 ## Android app
 

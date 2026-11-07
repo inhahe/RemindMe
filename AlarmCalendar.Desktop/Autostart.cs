@@ -58,6 +58,9 @@ public static class Autostart
             if (AppHost.Settings.StartWithWindows && IsEnabled()) Apply(true);
             return;
         }
+        // An instance with its own --data-dir (a test, an experiment) never starts with
+        // Windows on its own: it could be a throwaway folder ringing test alarms at every login.
+        if (!IsDefaultDataDir) AppHost.Settings.StartWithWindows = false;
         Apply(AppHost.Settings.StartWithWindows);
         AppHost.Settings.AutostartInitialized = true;
         AppHost.SaveSettings();

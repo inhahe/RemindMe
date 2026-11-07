@@ -21,8 +21,8 @@
         <DockPanel Margin="0,14,0,0" LastChildFill="False">
             <Button DockPanel.Dock="Left" x:Name="PreviewButton" Content="▶ _Play" Click="Preview_Click" />
             <Button DockPanel.Dock="Left" Content="■ S_top" Margin="6,0,0,0" Click="Stop_Click" />
-            <Button DockPanel.Dock="Right" Content="Cancel" IsCancel="True" Margin="8,0,0,0" />
-            <Button DockPanel.Dock="Right" Content="_OK" IsDefault="True" Click="Ok_Click" />
+            <Button DockPanel.Dock="Right" Content="Cancel" IsCancel="True" Margin="8,0,0,0" Click="Cancel_Click" />
+            <Button DockPanel.Dock="Right" Content="_OK" Click="Ok_Click" />
         </DockPanel>
     </StackPanel>
 </Window>

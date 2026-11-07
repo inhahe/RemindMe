@@ -11,6 +11,15 @@ public partial class App : Application
     private Mutex? _instanceMutex;
     private EventWaitHandle? _showSignal;
     private RegisteredWaitHandle? _showWait;
+    private bool _showingError;
+
+    protected override void OnSessionEnding(SessionEndingCancelEventArgs e)
+    {
+        // Windows is logging off or shutting down: ringing alarms must survive, not be
+        // dismissed by their windows closing.
+        AppHost.BeginExit();
+        base.OnSessionEnding(e);
+    }
 
     protected override void OnStartup(StartupEventArgs e)
     {
@@ -35,15 +44,33 @@ public partial class App : Application
         DispatcherUnhandledException += (_, ev) =>
         {
             AppHost.Log($"Unhandled: {ev.Exception}");
-            MessageBox.Show(ev.Exception.Message, "Alarm & Calendar", MessageBoxButton.OK, MessageBoxImage.Error);
             ev.Handled = true;
+            // One box at a time: an error repeating on the 1-second tick would otherwise
+            // stack a new nested message box every second.
+            if (_showingError) return;
+            _showingError = true;
+            try { MessageBox.Show(ev.Exception.Message, "Alarm & Calendar", MessageBoxButton.OK, MessageBoxImage.Error); }
+            finally { _showingError = false; }
         };
         AppDomain.CurrentDomain.UnhandledException += (_, ev) => AppHost.Log($"Fatal: {ev.ExceptionObject}");
 
-        AppHost.Initialize(dataDir);
-        Autostart.ApplyOnFirstRun();
-
-        var main = new MainWindow();
+        MainWindow main;
+        try
+        {
+            AppHost.Initialize(dataDir);
+            Autostart.ApplyOnFirstRun();
+            main = new MainWindow();
+        }
+        catch (Exception ex)
+        {
+            // Without a window or tray icon, a half-started copy would hold the
+            // single-instance mutex invisibly and turn every later launch away.
+            AppHost.Log($"Startup failed: {ex}");
+            MessageBox.Show($"Alarm & Calendar couldn't start:\n\n{ex.Message}", "Alarm & Calendar",
+                MessageBoxButton.OK, MessageBoxImage.Error);
+            Shutdown(1);
+            return;
+        }
         MainWindow = main;
         if (!minimized) main.ShowFromTray();
 

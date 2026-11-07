@@ -83,13 +83,16 @@ public partial class DevicesWindow : Window
         var bad = addresses.Where(a => !Protocol.TryParseAddress(a, out _, out _)).ToList();
         if (bad.Count > 0) { ErrorText.Text = $"Not a host or host:port: {string.Join(", ", bad)}"; return; }
         ErrorText.Text = "";
-        var s = AppHost.Settings.Clone();
-        s.SyncEnabled = SyncEnabled.IsChecked == true;
-        s.DeviceName = DeviceName.Text.Trim().Length > 0 ? DeviceName.Text.Trim() : Environment.MachineName;
-        s.RemoteAddresses = addresses;
-        s.AcceptExternalConnections = AcceptExternal.IsChecked == true;
-        s.Port = port;
-        AppHost.ApplySettings(s);
+        bool enabled = SyncEnabled.IsChecked == true, external = AcceptExternal.IsChecked == true;
+        var name = DeviceName.Text.Trim().Length > 0 ? DeviceName.Text.Trim() : Environment.MachineName;
+        AppHost.UpdateSettings(s =>
+        {
+            s.SyncEnabled = enabled;
+            s.DeviceName = name;
+            s.RemoteAddresses = addresses;
+            s.AcceptExternalConnections = external;
+            s.Port = port;
+        });
         Refresh();
     }
 

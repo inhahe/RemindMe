@@ -436,6 +436,19 @@ public class ExportImportTests
     }
 
     [Fact]
+    public void AFileExportedBeforeTheRenameStillImports()
+    {
+        var a = NewStore("node-a");
+        var t = a.Save(null, new TaskDefinition { Description = "x", Kind = ScheduleKind.Once, At = new DateTime(2026, 7, 1, 9, 0, 0) });
+        var old = a.Export().Replace("\"app\": \"RemindMe\"", "\"app\": \"AlarmCalendar\"");
+        Assert.Contains("\"AlarmCalendar\"", old);
+        var b = NewStore("node-b");
+        Assert.Equal(new ImportResult(1, 0, 0), b.Import(old));
+        Assert.Equal("x", b.Get(t.Id)!.Def.Description);
+        Assert.Throws<InvalidDataException>(() => b.Import(old.Replace("\"AlarmCalendar\"", "\"SomethingElse\"")));
+    }
+
+    [Fact]
     public void ANonExportFileIsRefused()
     {
         var a = NewStore("node-a");

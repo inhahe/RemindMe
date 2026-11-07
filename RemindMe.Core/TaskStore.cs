@@ -247,6 +247,10 @@ public sealed class TaskStore
 
     // ---- Export and import (S8) ----------------------------------------------------
 
+    /// <summary>The app name in exports and backups written before the app was renamed
+    /// RemindMe, which import still reads: the same format under its old name.</summary>
+    private const string LegacyExportApp = "AlarmCalendar";
+
     /// <summary>Every task that isn't deleted, as the JSON of an export file.</summary>
     public string Export() => Export(out _);
 
@@ -274,7 +278,7 @@ public sealed class TaskStore
         ExportFile? file;
         try { file = System.Text.Json.JsonSerializer.Deserialize(json, Json.Files.ExportFile); }
         catch (System.Text.Json.JsonException e) { throw new InvalidDataException("This isn't a file of exported tasks.", e); }
-        if (file is null || file.App != Sync.Protocol.App || file.Tasks is null)
+        if (file is null || file.App is not (Sync.Protocol.App or LegacyExportApp) || file.Tasks is null)
             throw new InvalidDataException("This isn't a file of exported tasks.");
         if (file.Format > 1)
             throw new InvalidDataException("This file was exported by a newer version of the app.");

@@ -89,7 +89,8 @@
         </File>
       </Component>
 
-      <Component Id="RememberInstallDir" Directory="INSTALLFOLDER" Guid="50F4F21E-D614-448E-98E5-CF319490EC0C">
+      <!-- Its GUID goes with its key path: a different registry key needs a new GUID. -->
+      <Component Id="RememberInstallDir" Directory="INSTALLFOLDER" Guid="D520221D-D77A-4BFA-9868-9B0D931BD054">
         <RegistryValue Root="HKLM" Key="SOFTWARE\RemindMe" Name="InstallDir" Type="string"
                        Value="[INSTALLFOLDER]" KeyPath="yes" />
       </Component>

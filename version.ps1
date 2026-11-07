@@ -9,15 +9,28 @@
   are at most 99.
 #>
 
-# Returns the version's text (as written, e.g. "1.2.3") and its four parts, missing
-# parts being 0. Throws if VERSION breaks the rules above.
+# The version $text ("1.2.3", or a tag's "v1.2.3") as a [version] of four parts, missing
+# parts being 0, so two versions compare with -lt and -gt; $null for anything else,
+# including parts beyond the limits above.
+function ConvertTo-ReleaseVersion([string]$text) {
+    if ($text -notmatch '^v?(\d{1,3})(\.\d{1,2}){1,3}$') { return $null }
+    $parts = @($text.TrimStart('v').Split('.') | ForEach-Object { [int]$_ }) + @(0, 0, 0)
+    if ($parts[0] -gt 255) { return $null }
+    return [version]::new($parts[0], $parts[1], $parts[2], $parts[3])
+}
+
+# Returns the version's text (as written, e.g. "1.2.3"), its four parts (missing ones
+# being 0), and the same as a [version]. Throws if VERSION breaks the rules above.
 function Get-ReleaseVersion([string]$root) {
     $text = (Get-Content (Join-Path $root 'VERSION') -Raw).Trim()
     if ($text -notmatch '^\d+(\.\d+){1,3}$') { throw "VERSION must be like 1.2.3.4, not '$text'." }
-    $parts = @($text.Split('.') | ForEach-Object { [int]$_ }) + @(0, 0, 0)
-    $parts = $parts[0..3]
-    if ($parts[0] -gt 255 -or ($parts[1..3] | Where-Object { $_ -gt 99 })) {
+    $version = ConvertTo-ReleaseVersion $text
+    if (-not $version) {
         throw "VERSION $text is out of range: the first part can be at most 255, the others at most 99."
     }
-    [pscustomobject]@{ Text = $text; Parts = $parts }
+    [pscustomobject]@{
+        Text = $text
+        Parts = @($version.Major, $version.Minor, $version.Build, $version.Revision)
+        Version = $version
+    }
 }

@@ -13,6 +13,8 @@ namespace RemindMe.Droid;
 public static class AppState
 {
     private static readonly object LogLock = new();
+    /// <summary>The tag of the app's lines in logcat.</summary>
+    private const string LogTag = "RemindMe";
     /// <summary>The main thread's handler, for work to post there or to delay.</summary>
     internal static readonly Handler Main = new(Looper.MainLooper!);
 
@@ -152,7 +154,7 @@ public static class AppState
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException)
         {
-            global::Android.Util.Log.Warn("RemindMe", $"Couldn't copy the data to device storage: {e.Message}");
+            global::Android.Util.Log.Warn(LogTag, $"Couldn't copy the data to device storage: {e.Message}");
             return old ?? dir;
         }
         if (old is not null && old != dir)
@@ -362,7 +364,7 @@ public static class AppState
     /// <summary>Logs to logcat, and to <c>app.log</c> once the data directory is known.</summary>
     public static void Log(string message)
     {
-        global::Android.Util.Log.Info("RemindMe", message);
+        global::Android.Util.Log.Info(LogTag, message);
         if (DataDir.Length == 0) return;   // Provisional: the files can't be written yet
         try
         {

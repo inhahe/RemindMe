@@ -89,9 +89,9 @@ Checked on the emulator:
 ### Releasing (these are yours to settle)
 - **The APK's signing key.** `build-apk.ps1` signs with your key when the
   `REMINDME_*` variables point at one, and with this machine's debug key
-  otherwise. The first release (0.1.0.0) went out signed with the debug key, as
-  LanLink's APKs are. An update installs over it only if it is signed with the
-  same key: build releases on this machine, or keep a copy of
+  otherwise, as LanLink's APKs are. Whatever key a published APK is signed with,
+  an update installs over it only if it is signed with the same one: build
+  releases on this machine, or keep a copy of
   `%LOCALAPPDATA%\Xamarin\Mono for Android\debug.keystore`. Moving to a real
   release key later (the script's header says how to make one) means users
   uninstall first. Their tasks then come back from the automatic backups in

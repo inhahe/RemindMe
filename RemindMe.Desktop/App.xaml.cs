@@ -31,12 +31,12 @@ public partial class App : Application
         // One instance per data directory: a second launch brings the first one forward.
         // (--data-dir gives tests and experiments an instance of their own.)
         string tag = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(dataDir.ToLowerInvariant())))[..16];
-        _instanceMutex = new Mutex(true, $"RemindMe-{tag}", out bool first);
+        _instanceMutex = new Mutex(true, $"{AppHost.Name}-{tag}", out bool first);
         if (exit)
         {
             // --exit (the installer, before replacing the exe): the running copy, if any, is
             // told to exit, and this waits until it has, so its files are free.
-            if (!first && EventWaitHandle.TryOpenExisting($"RemindMe-{tag}-exit", out var quit))
+            if (!first && EventWaitHandle.TryOpenExisting($"{AppHost.Name}-{tag}-exit", out var quit))
             {
                 quit.Set();
                 try { _instanceMutex.WaitOne(TimeSpan.FromSeconds(15)); }
@@ -47,7 +47,7 @@ public partial class App : Application
         }
         if (!first)
         {
-            if (!minimized && EventWaitHandle.TryOpenExisting($"RemindMe-{tag}-show", out var show))
+            if (!minimized && EventWaitHandle.TryOpenExisting($"{AppHost.Name}-{tag}-show", out var show))
                 show.Set();
             Shutdown();
             return;
@@ -86,10 +86,10 @@ public partial class App : Application
         MainWindow = main;
         if (!minimized) main.ShowFromTray();
 
-        _showSignal = new EventWaitHandle(false, EventResetMode.AutoReset, $"RemindMe-{tag}-show");
+        _showSignal = new EventWaitHandle(false, EventResetMode.AutoReset, $"{AppHost.Name}-{tag}-show");
         _showWait = ThreadPool.RegisterWaitForSingleObject(_showSignal,
             (_, _) => Dispatcher.BeginInvoke(main.ShowFromTray), null, Timeout.Infinite, executeOnlyOnce: false);
-        _exitSignal = new EventWaitHandle(false, EventResetMode.AutoReset, $"RemindMe-{tag}-exit");
+        _exitSignal = new EventWaitHandle(false, EventResetMode.AutoReset, $"{AppHost.Name}-{tag}-exit");
         _exitWait = ThreadPool.RegisterWaitForSingleObject(_exitSignal,
             (_, _) => Dispatcher.BeginInvoke(main.ExitApp), null, Timeout.Infinite, executeOnlyOnce: true);
     }

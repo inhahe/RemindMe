@@ -13,9 +13,9 @@ public static class Autostart
     private const string RunKey = @"Software\Microsoft\Windows\CurrentVersion\Run";
     /// <summary>An instance with its own <c>--data-dir</c> gets an entry of its own, so it
     /// can never overwrite or delete the normal instance's.</summary>
-    private static string ValueName => IsDefaultDataDir ? "RemindMe" : $"RemindMe ({AppHost.DataDir})";
+    private static string ValueName => IsDefaultDataDir ? AppHost.Name : $"{AppHost.Name} ({AppHost.DataDir})";
 
-    private static bool IsDefaultDataDir => string.Equals(AppHost.DataDir, DefaultDataDir(), StringComparison.OrdinalIgnoreCase);
+    private static bool IsDefaultDataDir => string.Equals(AppHost.DataDir, AppHost.DefaultDataDir, StringComparison.OrdinalIgnoreCase);
 
     public static bool IsEnabled()
     {
@@ -65,7 +65,4 @@ public static class Autostart
         AppHost.Settings.AutostartInitialized = true;
         AppHost.SaveSettings();
     }
-
-    private static string DefaultDataDir() => System.IO.Path.GetFullPath(System.IO.Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "RemindMe"));
 }

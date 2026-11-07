@@ -108,9 +108,13 @@ public static class AppHost
 
     private static string SettingsPath => Path.Combine(DataDir, "settings.json");
 
+    /// <summary>The name in everything Windows knows the app by: the data folder, the
+    /// single-instance mutex and its events, the autostart value.</summary>
+    public const string Name = "RemindMe";
+
     /// <summary>Where tasks and settings live unless <c>--data-dir</c> says otherwise.</summary>
     public static string DefaultDataDir { get; } =
-        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "RemindMe");
+        Path.GetFullPath(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), Name));
 
     /// <summary>Where backups go unless Settings names a folder: "RemindMe backups" in
     /// Documents, where people look for their files (and which a cloud drive often keeps).

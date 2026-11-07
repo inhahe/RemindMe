@@ -62,9 +62,11 @@ public static class Notifications
     public static int AlarmId(Guid task) => 1000 + (task.GetHashCode() & 0x3FFFFFFF);
 
     /// <summary>The ringing notification of one task: it opens the alarm screen full-screen
-    /// when the phone is locked, and offers Mark done and Remind me later.</summary>
+    /// when the phone is locked, and offers Mark done and Remind me later. It also carries
+    /// <paramref name="alert"/>, for a process that starts while it shows (<see cref="ShownAlarms"/>).</summary>
     /// <param name="fallback">Posted without the ringing service, on the channel that sounds.</param>
-    public static Notification Alarm(Context context, TaskStatus st, bool fallback)
+    /// <param name="silenced">The safety net's alarm, silenced: posted on the silent channel.</param>
+    public static Notification Alarm(Context context, TaskStatus st, RingingService.AlertInfo alert, bool fallback, bool silenced = false)
     {
         var d = st.Task.Def;
         var open = AlarmActivity.IntentFor(context, st.Task.Id);
@@ -93,7 +95,41 @@ public static class Notifications
         b.SetVisibility(NotificationCompat.VisibilityPublic);
         b.AddAction(0, "Mark done", AlarmActionReceiver.IntentFor(context, st.Task.Id, AlarmActionReceiver.Done));
         b.AddAction(0, "Remind me later", AlarmActionReceiver.IntentFor(context, st.Task.Id, AlarmActionReceiver.Later));
+        var extras = new Bundle();
+        extras.PutString(ExtraTask, st.Task.Id.ToString());
+        extras.PutLong(ExtraDue, alert.Due?.UtcTicks ?? 0);
+        extras.PutString(ExtraLate, alert.LateText);
+        extras.PutString(ExtraProblem, alert.SoundProblem);
+        extras.PutBoolean(ExtraRepeat, alert.Repeat);
+        extras.PutBoolean(ExtraSilenced, silenced);
+        b.AddExtras(extras);
         return b.Build()!;
+    }
+
+    private const string ExtraTask = "alarmcal.task", ExtraDue = "alarmcal.due", ExtraLate = "alarmcal.late",
+        ExtraProblem = "alarmcal.problem", ExtraRepeat = "alarmcal.repeat", ExtraSilenced = "alarmcal.silenced";
+
+    /// <summary>A task's alarm notification showing now, whoever posted it.</summary>
+    /// <param name="Task">Null for one whose alert can't be read (an earlier version posted it).</param>
+    public sealed record ShownAlarm(int Id, Guid? Task, RingingService.AlertInfo? Alert, bool Silenced);
+
+    public static IEnumerable<ShownAlarm> ShownAlarms(Context context)
+    {
+        var nm = (NotificationManager)context.GetSystemService(Context.NotificationService)!;
+        foreach (var n in nm.GetActiveNotifications() ?? [])
+        {
+            if (n.Notification?.ChannelId is not (AlarmChannel or FallbackChannel)) continue;
+            var x = n.Notification.Extras;
+            if (x is null || !Guid.TryParse(x.GetString(ExtraTask), out var task))
+            {
+                yield return new ShownAlarm(n.Id, null, null, false);
+                continue;
+            }
+            long due = x.GetLong(ExtraDue);
+            var alert = new RingingService.AlertInfo(due == 0 ? null : new DateTimeOffset(due, TimeSpan.Zero),
+                x.GetString(ExtraLate), x.GetString(ExtraProblem), x.GetBoolean(ExtraRepeat));
+            yield return new ShownAlarm(n.Id, task, alert, x.GetBoolean(ExtraSilenced));
+        }
     }
 
     /// <summary>The ringing service's own notification, which Android requires of a
@@ -152,14 +188,6 @@ public static class Notifications
     }
 
     public static void Cancel(Context context, int id) => NotificationManagerCompat.From(context)!.Cancel(id);
-
-    /// <summary>The IDs of this app's alarm notifications showing now, whoever posted them.</summary>
-    public static IEnumerable<int> ShownAlarms(Context context)
-    {
-        var nm = (NotificationManager)context.GetSystemService(Context.NotificationService)!;
-        foreach (var n in nm.GetActiveNotifications() ?? [])
-            if (n.Notification?.ChannelId is AlarmChannel or FallbackChannel) yield return n.Id;
-    }
 }
 
 /// <summary>The Mark done and Remind me later buttons of an alarm notification. Each acts
@@ -184,7 +212,8 @@ public sealed class AlarmActionReceiver : BroadcastReceiver
         if (!st.ShouldAlert)
         {
             AppState.Log($"Ignored a notification button for an alarm already answered: {TextFormat.Snippet(st.Task.Def.Description, 40)}");
-            RingingService.Poke();   // withdraws the leftover notification
+            Notifications.Cancel(context!, Notifications.AlarmId(id));
+            RingingService.Poke();
             return;
         }
         // Answering changes the store, whose handler pokes the ringing service, which

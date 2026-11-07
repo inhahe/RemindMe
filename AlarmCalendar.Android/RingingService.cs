@@ -25,8 +25,10 @@ public sealed class RingingService : Service
 
     private const int ServiceNotificationId = 1;
     private static RingingService? _instance;
-    /// <summary>The alerts posted so far, by task, on the main thread only. Shared with the
-    /// fallback path (<see cref="NotifyWithoutService"/>), so an alert is posted once.</summary>
+    /// <summary>The alerts posted and still showing, by task, on the main thread only. Shared
+    /// with the safety net (<see cref="NotifyWithoutService"/>), so an alert is posted once,
+    /// and rebuilt from the notifications themselves when a process starts
+    /// (<see cref="RestoreFromShown"/>), so it stays true across a process that died.</summary>
     private static readonly Dictionary<Guid, AlertInfo> Alerts = new();
     private static readonly HashSet<Guid> Silenced = new();
     private readonly Handler _handler = new(Looper.MainLooper!);
@@ -75,7 +77,7 @@ public sealed class RingingService : Service
             if (HasAlerted(st)) continue;
             var alert = NewAlert(st, now, soundProblem: "The alarm couldn't start its own sound, so the phone's alarm sound plays.");
             Alerts[st.Task.Id] = alert;
-            var n = Notifications.Alarm(context, st, fallback: true);
+            var n = Notifications.Alarm(context, st, alert, fallback: true);
             if (alert.Repeat) n.Flags |= NotificationFlags.Insistent;
             // Withdrawn first: an update of a notification still showing wouldn't sound again.
             Notifications.Cancel(context, Notifications.AlarmId(st.Task.Id));
@@ -97,27 +99,44 @@ public sealed class RingingService : Service
     public static void Poke()
     {
         if (_instance is { } s) s.Evaluate();
-        else WithdrawAnswered(AppState.Context, AlarmScheduler.RingingNow(AppState.Clock.UtcNow, out _));
+        else WithdrawAnswered(AppState.Context, sound: null);
     }
 
     /// <summary>
-    /// Withdraws every alert whose task no longer rings: its notification, its silencing,
-    /// and its sound if the service plays it. The notifications are found among those
-    /// showing, not only in <see cref="Alerts"/>: a process that died left its notifications
-    /// up, and the one that replaced it never knew of them.
+    /// Rebuilds <see cref="Alerts"/> and <see cref="Silenced"/> from the alarm notifications
+    /// showing; called as the process starts. They outlive a process that dies (the safety
+    /// net's keep sounding, since Android plays them), and a process that didn't know of them
+    /// would post each again, sounding one that was silenced and reopening the alarm screen,
+    /// or leave one up once answered. One whose alert can't be read (an earlier version
+    /// posted it) is withdrawn, and posted again as a new alert if its task still rings.
     /// </summary>
-    private static void WithdrawAnswered(Context context, IReadOnlyCollection<TaskStatus> ringing)
+    public static void RestoreFromShown(Context context)
     {
-        var ids = ringing.Select(st => st.Task.Id).ToHashSet();
-        foreach (var gone in Alerts.Keys.Where(k => !ids.Contains(k)).ToList())
+        foreach (var n in Notifications.ShownAlarms(context))
         {
-            Alerts.Remove(gone);
-            Silenced.Remove(gone);
-            _instance?._sound?.Stop(gone);
+            if (n is not { Task: { } task, Alert: { } alert })
+            {
+                Notifications.Cancel(context, n.Id);
+                continue;
+            }
+            Alerts[task] = alert;
+            if (n.Silenced) Silenced.Add(task);
         }
-        var live = ids.Select(Notifications.AlarmId).ToHashSet();
-        foreach (var shown in Notifications.ShownAlarms(context))
-            if (!live.Contains(shown)) Notifications.Cancel(context, shown);
+    }
+
+    /// <summary>Withdraws every alert whose task should no longer alert: its notification,
+    /// its silencing, and <paramref name="sound"/>'s playing of it. One merely held back while
+    /// sync settles after a start still should, and is kept.</summary>
+    private static void WithdrawAnswered(Context context, AlarmSound? sound)
+    {
+        foreach (var id in Alerts.Keys.ToList())
+        {
+            if (AppState.Store.Status(id) is { ShouldAlert: true, Task.Def.Deleted: false }) continue;
+            Alerts.Remove(id);
+            Silenced.Remove(id);
+            sound?.Stop(id);
+            Notifications.Cancel(context, Notifications.AlarmId(id));
+        }
     }
 
     /// <summary>Stops the sound, and the vibration, of one task without dismissing it.</summary>
@@ -131,8 +150,9 @@ public sealed class RingingService : Service
             return;
         }
         // The safety net, where the notification itself sounds: posted again on the silent channel.
-        if (Alerts.ContainsKey(task) && AppState.Store.Status(task) is { } st)
-            Notifications.Post(AppState.Context, Notifications.AlarmId(task), Notifications.Alarm(AppState.Context, st, fallback: false));
+        if (Alerts.TryGetValue(task, out var alert) && AppState.Store.Status(task) is { } st)
+            Notifications.Post(AppState.Context, Notifications.AlarmId(task),
+                Notifications.Alarm(AppState.Context, st, alert, fallback: false, silenced: true));
     }
 
     public override IBinder? OnBind(Intent? intent) => null;
@@ -180,20 +200,24 @@ public sealed class RingingService : Service
         _handler.RemoveCallbacksAndMessages(null);
         var now = AppState.Clock.UtcNow;
         var ringing = AlarmScheduler.RingingNow(now, out _);
-        WithdrawAnswered(this, ringing);
+        WithdrawAnswered(this, _sound);
 
         bool newAlert = false;
         foreach (var st in ringing)
         {
             var id = st.Task.Id;
-            // Posted already, by this service with its sound running: nothing new. (One
-            // posted by the fallback is taken over: re-posted quietly, with its own sound.)
-            if (HasAlerted(st) && (_sound!.IsPlayingOrPlayed(id) || Silenced.Contains(id))) continue;
+            bool posted = HasAlerted(st);
+            // Posted already, by this service with its sound running: nothing new.
+            if (posted && (_sound!.IsPlayingOrPlayed(id) || Silenced.Contains(id))) continue;
             Silenced.Remove(id);
             var problem = _sound!.Play(id, AppState.Settings.SoundFor(st.Task.Def, Platforms.Android),
                 AppState.Settings.SoundModeFor(st.Task.Def) == SoundMode.Repeat);
-            Alerts[id] = NewAlert(st, now, problem);
-            Notifications.Post(this, Notifications.AlarmId(id), Notifications.Alarm(this, st, fallback: false));
+            Alerts[id] = posted ? Alerts[id] with { SoundProblem = problem } : NewAlert(st, now, problem);
+            // A new alert (the first, or a later occurrence) is posted afresh, so it alerts and
+            // opens the alarm screen; alarm notifications alert only once. One taken over (from
+            // the safety net, or from a process that died) is updated quietly.
+            if (!posted) Notifications.Cancel(this, Notifications.AlarmId(id));
+            Notifications.Post(this, Notifications.AlarmId(id), Notifications.Alarm(this, st, Alerts[id], fallback: false));
             newAlert = true;
             AppState.Log($"Ringing: {TextFormat.Snippet(st.Task.Def.Description, 40)}");
         }

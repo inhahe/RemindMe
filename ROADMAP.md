@@ -116,4 +116,8 @@ Suggestions, not requested. S1 is built; the rest wait for a yes:
     alarms once answered (`4eff033`, `bea9b14`).
   - Opus `max` on those two: 13 fixes, among them dated announcements against
     replay, an IPv4-only listener without outside connections, and alarms
-    withdrawn even after the process died.
+    withdrawn even after the process died (`950def3`, `8832b76`).
+  - Fable `xhigh` on the whole round, as the second review its security and
+    data-handling parts call for: 12 fixes, among them alerts kept across a
+    process's death and announcements numbered per process, so a member's clock
+    stepping back doesn't silence it.

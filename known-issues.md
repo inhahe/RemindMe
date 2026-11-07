@@ -50,7 +50,13 @@ Checked on the emulator:
   sync on and the app op denied, opening the app logged the refusal instead of
   crashing.
 - **Silence, again**: a task ringing every minute, silenced on the alarm screen,
-  sounded again at its next occurrence, and the button was usable again.
+  sounded again at its next occurrence, and the button was usable again. With
+  the screen turned off after the first alert, the next one turned it on.
+- **Alerts across a process's death** (the safety net, app op denied, process
+  killed in the background): a silenced alarm stayed silent when a new process
+  started, and nothing was posted again; Silence worked in a process that never
+  posted the alarm; Mark done from the shade withdrew one this process only
+  knew from the notification.
 
 ## Decisions waiting on the user
 

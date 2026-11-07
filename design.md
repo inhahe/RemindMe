@@ -425,17 +425,26 @@ it runs on Android 10 (API 29) and up. The root namespace is
     alarm's full-screen intent doesn't open the alarm screen (measured on API
     36: the screen stayed off).
   - **Alarm notifications alert once**: posted again over themselves (the service
-    taking over from the safety net, a silenced safety-net alarm), they neither
-    sound nor open the alarm screen a second time. The safety net cancels before
-    posting a new alert, so that one does.
+    taking over from the safety net or from a process that died, a silenced
+    safety-net alarm), they neither sound nor open the alarm screen a second
+    time. A new alert, the first or a later occurrence of a task still showing,
+    is cancelled and posted afresh, by the service and the safety net alike, so
+    it does both.
   - **Their buttons act only while their task rings.** A leftover notification's
     Mark done would otherwise mark a task done that isn't due, which moves an
     interval task that restarts when done; it is withdrawn instead.
-  - **Answered alarms are withdrawn from what is showing** (`WithdrawAnswered`,
-    on every evaluation and store change): any alarm notification whose task no
-    longer rings, found among the app's notifications showing, not only those
-    this process posted. A process that died left its notifications up, and the
-    one that replaced it never knew of them.
+  - **What has been posted outlives the process**, and so does the record of it.
+    Each alarm notification carries its alert (task, due time, late warning,
+    sound problem, silenced) in its extras. When a process starts,
+    `RingingService.RestoreFromShown` rebuilds `Alerts` and `Silenced` from the
+    notifications showing. Otherwise a process started after one that died (by a
+    notification button, sync, Android) would post every alert again, sounding
+    a silenced safety-net alarm and reopening the alarm screen, or leave one up
+    once answered.
+  - **Answered alarms are withdrawn** (`WithdrawAnswered`, on every evaluation
+    and store change): every alert whose task should no longer alert. Its
+    notification, silencing and sound go. One merely held back while sync
+    settles after a start is kept.
   - The service's notification is re-posted only when the count changes.
   Silence stops a task's vibration as well as its sound; vibration repeats while
   some unsilenced alert repeats. A later alert of the same task sounds again,

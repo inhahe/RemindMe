@@ -360,6 +360,7 @@ public sealed class App : Application
         AppDomain.CurrentDomain.UnhandledException += (_, e) => AppState.Log($"Fatal: {e.ExceptionObject}");
         AppState.Initialize(this);
         Notifications.CreateChannels(this);
+        RingingService.RestoreFromShown(this);
         // Sync is started by whatever brought the process up and is allowed to start a
         // foreground service: MainActivity, the boot receiver, or Android restarting the
         // sticky service. Starting it from here is refused when a broadcast woke the app.

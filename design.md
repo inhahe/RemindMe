@@ -734,12 +734,23 @@ command separator to `cmd`.
   newer one without the downgrade message.
 - **`build-msi.ps1`**: two single-file builds of the desktop app (win-x64),
   then `installer/RemindMe.wxs` with WiX 7 and its UI and Firewall extensions.
-  - The self-contained build, with .NET included (about 75 MB, compressed), goes
-    into the MSI and beside it as `RemindMe.exe`.
+  Everything goes into `release/<version>/`.
+  - The self-contained build, with .NET included (around 70 MB, compressed),
+    goes into the MSI and beside it as `RemindMe.exe`.
   - The framework-dependent build (under 1 MB; it needs the .NET 10 Desktop
     Runtime) is `RemindMeFD.exe`.
-  - These are the names the user's NotepadRedo uses for its two exes: plain,
-    without the version, which is the release's.
+  - These are the names the author's NotepadRedo uses for its two exes: plain,
+    without the version, which is the release's. So each version gets a folder
+    of its own: a running copy of an earlier build (being tried) holds its exe,
+    and mustn't block the next version.
+  - The script deletes its own files from an earlier run of the version first,
+    and says what to close when a running copy holds one.
+  - Each build publishes with its own `--artifacts-path`, so the two can't mix
+    up their runtime settings in a shared `obj`. Both publish folders live in
+    one temporary folder, deleted when the script ends.
+  - Each publish must have made nothing but `RemindMe.exe` (and pdbs). Only
+    the exe is released, so a native library left beside it would be missing
+    from the release.
   - The MSI keeps .NET included, so installing needs nothing else.
   - Per machine, into `Program Files\RemindMe`. The install folder is
     remembered for upgrades, and the `UpgradeCode` is fixed forever (it
@@ -761,14 +772,17 @@ command separator to `cmd`.
     uncommitted changes, an untracked file where the build reads, and a commit
     GitHub's `main` doesn't have.
   - It refuses a version already released, or tagged without a release, or not
-    above the last release (`git describe` of the last `v*` tag).
-  - Then the tests, `build-msi.ps1` and `build-apk.ps1`. All four files are
-    required. The two exes' names carry no version, so they are deleted
-    before the build, and a stale one from an older build can't be attached.
-  - Then `gh release create --target <commit>`, with notes on what it is, the
-    alpha warning, how to install, and the commits since the last release. A
-    0.x version is a pre-release.
-  - `--dry-run` does everything but publish, and shows the notes.
+    above the highest version among the `v*` tags (whatever order they were
+    made in; a tag that isn't a version is skipped).
+  - Then the tests, `build-msi.ps1` and `build-apk.ps1`. All four files in
+    `release/<version>/` are required.
+  - Then `gh release create --target <commit>`. The notes give what it is, the
+    alpha warning, which Windows file to take (with the exes' measured sizes),
+    how to install, and the commits since the last release. A 0.x version is a
+    pre-release.
+  - `--dry-run` does everything but publish, and shows the notes. The checks
+    a real run stops at are only warnings in it, so a release can be tried
+    before anything is pushed.
   - `release.bat` runs it in Windows PowerShell 5.1. Under
     `$ErrorActionPreference = 'Stop'`, that ends the script at the first native
     command whose redirected stderr has a line, so the git and gh checks that

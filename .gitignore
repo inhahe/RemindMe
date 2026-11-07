@@ -12,6 +12,4 @@ TestResults/
 *.log
 scratch/
 release/
-installer/publish/
-installer/publish-fd/
 todo.txt

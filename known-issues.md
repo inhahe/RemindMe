@@ -39,6 +39,19 @@ What to watch:
   sleep in S3. Microsoft's page on timer wakes covers S3 and hibernation only,
   and Modern Standby honours wake timers far less.
 
+### The Windows exes on a PC without .NET
+Both exes were started only on this PC, which has the .NET SDK and therefore
+the Desktop Runtime. Not seen:
+- what `RemindMeFD.exe` does where the .NET 10 Desktop Runtime is missing.
+  .NET's own launcher should show a dialog naming the runtime and linking to
+  its download, but the app starts itself at every login (start with Windows),
+  and it isn't known whether that start shows the dialog each time or fails
+  silently;
+- that `RemindMe.exe` and the MSI need nothing installed.
+
+**To verify:** on a PC or VM without .NET, run each exe once, and log in again
+after running `RemindMeFD.exe`.
+
 ### Android on a real phone
 Checked only on the emulator (API 36). Worth checking on the phone, a Samsung
 running One UI: that the alarm screen opens over the lock screen (One UI can

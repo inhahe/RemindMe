@@ -95,9 +95,12 @@ if ($originIsRepo) {
 
 # --- Once per version, and each above the ones before ---
 $null = Invoke-Probe { gh release view $tag --repo $Repo }
-if (-not $LASTEXITCODE) { Stop-Release "Version $version is already released (https://github.com/$Repo/releases/tag/$tag): raise VERSION first." }
-$null = Invoke-Probe { git -C $root rev-parse -q --verify "refs/tags/$tag" }
-Test-Gate ($LASTEXITCODE -ne 0) "The tag $tag exists without a release (left by a deleted one?): raise VERSION, or delete the tag on GitHub and here."
+$released = $LASTEXITCODE -eq 0
+Test-Gate (-not $released) "Version $version is already released (https://github.com/$Repo/releases/tag/$tag): raise VERSION first."
+if (-not $released) {
+    $null = Invoke-Probe { git -C $root rev-parse -q --verify "refs/tags/$tag" }
+    Test-Gate ($LASTEXITCODE -ne 0) "The tag $tag exists without a release (left by a deleted one?): raise VERSION, or delete the tag on GitHub and here."
+}
 # The highest version tagged so far, whatever order the tags were made in.
 $tags = @(Invoke-Probe { git -C $root tag --list 'v*' } | Where-Object { ConvertTo-ReleaseVersion $_ })
 $previous = $tags | Sort-Object { ConvertTo-ReleaseVersion $_ } | Select-Object -Last 1
@@ -110,14 +113,22 @@ Write-Host '[1/3] Running the tests...'
 dotnet test (Join-Path $root 'RemindMe.Core.Tests')
 if ($LASTEXITCODE) { Stop-Release 'The tests failed.' }
 Write-Host '[2/3] Building...'
-# The exes' names carry no version, so an older build's could otherwise be attached
-# should this one fail to replace it.
-$names = "RemindMe-$version.msi", 'RemindMe.exe', 'RemindMeFD.exe', "RemindMe-$version.apk"
-$assets = @($names | ForEach-Object { Join-Path $root "release\$_" })
-$assets | Where-Object { Test-Path $_ } | Remove-Item -Force
+# The build scripts put this version's files in release\<version>\, deleting their own
+# files from an earlier run first.
 & (Join-Path $root 'build-msi.ps1')
 & (Join-Path $root 'build-apk.ps1')
-foreach ($asset in $assets) { if (-not (Test-Path $asset)) { Stop-Release "The build made no $asset." } }
+$names = "RemindMe-$version.msi", 'RemindMe.exe', 'RemindMeFD.exe', "RemindMe-$version.apk"
+$assets = @($names | ForEach-Object { Join-Path $root "release\$version\$_" })
+foreach ($asset in $assets) { if (-not (Test-Path -LiteralPath $asset)) { Stop-Release "The build made no $asset." } }
+
+# "72 MB", or "0.7 MB": a file's size for the notes.
+function Get-Size([string]$path) {
+    $mb = (Get-Item -LiteralPath $path).Length / 1MB
+    if ($mb -ge 10) { return '{0:N0} MB' -f $mb }
+    return '{0:N1} MB' -f $mb
+}
+$exeSize = Get-Size $assets[1]
+$exeFdSize = Get-Size $assets[2]
 
 # --- The release notes: what it is, how to install it, and what changed ---
 $notes = @(
@@ -127,11 +138,11 @@ $notes = @(
     ''
     '**Windows** (10 or 11, 64-bit): three files of the same program. Download one:'
     ''
-    "- **RemindMe-$version.msi** installs it, with .NET built in: in the Start menu, starting with Windows, and let through Windows Firewall for syncing on private networks. If unsure, take this one."
-    '- **RemindMe.exe** (about 75 MB) is the program on its own, with nothing to install: .NET is built in.'
-    '- **RemindMeFD.exe** (under 1 MB) is the same program, but needs the [.NET 10 Desktop Runtime](https://dotnet.microsoft.com/download/dotnet/10.0) installed. FD stands for framework-dependent.'
+    "- **RemindMe-$version.msi** installs it in Program Files and the Start menu, with .NET built in, and lets its syncing through Windows Firewall on private and domain networks. If unsure, take this one."
+    "- **RemindMe.exe** ($exeSize) is the program on its own, with nothing to install: .NET is built in."
+    "- **RemindMeFD.exe** ($exeFdSize) is the same program, but needs the [.NET 10 Desktop Runtime](https://dotnet.microsoft.com/download/dotnet/10.0) installed. FD stands for framework-dependent."
     ''
-    'Either exe can be renamed, to RemindMe.exe say.'
+    'Either exe can be renamed, to RemindMe.exe say. Whichever you take, RemindMe starts with Windows unless you untick that in Settings.'
     ''
     "**Android** (10 or later): download ``RemindMe-$version.apk`` on the phone and open it, allowing your browser or file manager to install apps when asked."
     ''

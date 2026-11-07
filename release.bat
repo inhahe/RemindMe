@@ -1,8 +1,8 @@
 @echo off
 rem Publishes a GitHub release of RemindMe (github.com/inhahe/RemindMe): the Windows
-rem installer and exe and the Android APK, tagged v<VERSION>, once the tests pass. Nothing
-rem is published unless this is main as GitHub has it and VERSION is new: raise VERSION for
-rem every release.
+rem installer, RemindMe.exe (.NET included) and RemindMeFD.exe (without), and the Android
+rem APK, tagged v<VERSION>, once the tests pass. Nothing is published unless this is main
+rem as GitHub has it and VERSION is new: raise VERSION for every release.
 rem
 rem   release.bat            test, build and publish
 rem   release.bat --dry-run  test, build and show the release; publish nothing

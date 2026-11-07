@@ -1,5 +1,5 @@
 <#
-  Builds the Android APK, release\RemindMe-<version>.apk (S9).
+  Builds the Android APK, release\<version>\RemindMe-<version>.apk (S9).
 
   The version comes from the VERSION file next to this script. Its four parts
   a.b.c.d become Android's versionName, and the versionCode Android compares for
@@ -25,8 +25,11 @@ $version = $release.Text
 $parts = $release.Parts
 $code = $parts[0] * 1000000 + $parts[1] * 10000 + $parts[2] * 100 + $parts[3]
 $project = Join-Path $root 'RemindMe.Android\RemindMe.Android.csproj'
-$out = Join-Path $root 'release'
+$out = Join-Path $root "release\$version"
+$dest = Join-Path $out "RemindMe-$version.apk"
 New-Item -ItemType Directory -Force $out | Out-Null
+# An earlier run's APK of this version goes first, so a failed build can't leave it behind.
+if (Test-Path -LiteralPath $dest) { Remove-Item -LiteralPath $dest -Force }
 
 $signing = @()
 if ($env:REMINDME_KEYSTORE) {
@@ -51,6 +54,5 @@ if ($LASTEXITCODE) { throw 'dotnet publish failed.' }
 $apk = Get-ChildItem (Join-Path $root 'RemindMe.Android\bin\Release') -Recurse -Filter '*-Signed.apk' |
     Sort-Object LastWriteTime -Descending | Select-Object -First 1
 if (-not $apk) { throw 'The build succeeded but no signed APK was found.' }
-$dest = Join-Path $out "RemindMe-$version.apk"
-Copy-Item $apk.FullName $dest -Force
+Copy-Item -LiteralPath $apk.FullName -Destination $dest
 Write-Host "=== Done: $dest ==="

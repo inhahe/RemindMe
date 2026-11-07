@@ -31,7 +31,10 @@ restrict full-screen intents), that background sync survives with the screen off
   under Restricted with the process alive.
 - **The safety net** (`RingingService.NotifyWithoutService`), which runs only
   when Android refuses to start the ringing service.
-- **Direct boot**: the locked-boot path needs a device with a screen lock.
+
+(Direct boot *was* checked: with a PIN set and the emulator rebooted, the app's
+alarm was registered while the user was still `RUNNING_LOCKED`, and every task
+was there after unlocking.)
 
 ## Decisions waiting on the user
 

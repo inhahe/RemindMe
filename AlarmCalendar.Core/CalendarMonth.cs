@@ -55,30 +55,49 @@ public static class CalendarMonth
         var s = t.State;
         if (d.Deleted || s.PausedAtUtc is not null) yield break;
         var title = TextFormat.Snippet(d.Description, 40) is { Length: > 0 } x ? x : "(no description)";
-        // Nothing at or before DoneThrough: dealt with, or from before the schedule was saved.
-        var from = TimeMath.Max(TimeMath.ToInstant(gridStart, zone) - TimeSpan.FromTicks(1), s.DoneThroughUtc);
+        var gridFrom = TimeMath.ToInstant(gridStart, zone) - TimeSpan.FromTicks(1);
         var to = TimeMath.ToInstant(gridStart.AddDays(42), zone);
+        // Nothing at or before DoneThrough: dealt with, or from before the schedule was saved.
+        var from = TimeMath.Max(gridFrom, s.DoneThroughUtc);
+        bool fromDone = d.Kind == ScheduleKind.Interval && d.Restart == RestartMode.FromDone;
+        bool severalADay = d.Kind == ScheduleKind.Interval && d.Unit is IntervalUnit.Seconds or IntervalUnit.Minutes or IntervalUnit.Hours
+            && Step(d) < TimeSpan.FromDays(1);
+        string every = d.Unit == IntervalUnit.Seconds ? $"every {d.IntervalCount} s" : $"every {TextFormat.Short(Step(d))}";
+        var st = AlarmEngine.Evaluate(t, now, zone);
 
-        if (d.Kind == ScheduleKind.Interval && d.Unit is IntervalUnit.Seconds or IntervalUnit.Minutes or IntervalUnit.Hours
-            && Step(d) < TimeSpan.FromDays(1))
+        // A task that restarts when marked done stops while it waits: only the time it came
+        // up is pending, and the next ones count from when it is marked done, now at the
+        // earliest.
+        DateTime? pendingDay = null;
+        if (fromDone && st.Triggered && st.Pending is { } p)
+        {
+            if (p > gridFrom && p < to)
+            {
+                pendingDay = TimeMath.ToWall(p, zone).Date;
+                yield return new CalendarEntry(t.Id, p, severalADay ? every : TextFormat.WallTime(TimeMath.ToWall(p, zone), culture),
+                    title, Estimated: false, Repeating: severalADay, Waiting: true);
+            }
+            s = AlarmEngine.MarkDone(t, now, zone);
+            from = TimeMath.Max(gridFrom, now);
+        }
+
+        if (severalADay)
         {
             // Several times a day: one line a day, at its first time.
-            string every = d.Unit == IntervalUnit.Seconds ? $"every {d.IntervalCount} s" : $"every {TextFormat.Short(Step(d))}";
             for (int i = 0; i < 42; i++)
             {
+                if (gridStart.AddDays(i) == pendingDay) continue;
                 var dayStart = TimeMath.Max(TimeMath.ToInstant(gridStart.AddDays(i), zone) - TimeSpan.FromTicks(1), from);
                 var dayEnd = TimeMath.ToInstant(gridStart.AddDays(i + 1), zone);
                 if (Occurrences.After(d, s, dayStart, zone) is { } o && o < dayEnd)
-                    yield return new CalendarEntry(t.Id, o, every, title, Estimated: d.Restart == RestartMode.FromDone, Repeating: true,
-                        Waiting: o <= now);
+                    yield return new CalendarEntry(t.Id, o, every, title, Estimated: fromDone, Repeating: true, Waiting: o <= now);
             }
             yield break;
         }
 
         // A task that restarts when marked done only knows its next time; the rest assume
         // it is marked done on time.
-        bool fromDone = d.Kind == ScheduleKind.Interval && d.Restart == RestartMode.FromDone;
-        var next = AlarmEngine.Evaluate(t, now, zone).NextOccurrence;
+        var next = st.NextOccurrence;
         var cursor = from;
         for (int n = 0; n < MaxPerTask && Occurrences.After(d, s, cursor, zone) is { } o && o < to; n++)
         {
@@ -88,6 +107,13 @@ public static class CalendarMonth
             cursor = o;
         }
     }
+
+    /// <summary>The next moment <paramref name="days"/> would look different without any
+    /// change to the tasks: when the first time still to come that it shows comes up, and
+    /// starts waiting (or moves a restart-when-done task's estimates). Null when it shows
+    /// nothing still to come. The date changing is the caller's to watch.</summary>
+    public static DateTimeOffset? NextChange(IEnumerable<CalendarDay> days, DateTimeOffset now) =>
+        days.SelectMany(d => d.Entries).Where(e => !e.Waiting && e.At > now).Select(e => (DateTimeOffset?)e.At).Min();
 
     private static TimeSpan Step(TaskDefinition d) => d.Unit switch
     {

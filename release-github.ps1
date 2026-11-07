@@ -18,8 +18,17 @@ $root = $PSScriptRoot
 $version = (Get-ReleaseVersion $root).Text
 $tag = "v$version"
 
+# Runs a command whose failure is an answer (no such remote, no such release), returning
+# its output without its errors; $LASTEXITCODE says how it went. Windows PowerShell 5.1,
+# which release-github.bat runs, turns a native command's redirected stderr into errors,
+# which 'Stop' would make fatal.
+function Invoke-Probe([scriptblock]$command) {
+    $ErrorActionPreference = 'Continue'
+    & $command 2>$null
+}
+
 if (-not $Repo) {
-    $url = git -C $root remote get-url origin 2>$null
+    $url = Invoke-Probe { git -C $root remote get-url origin }
     if ($url -match 'github\.com[:/](?<repo>[^/]+/[^/]+?)(\.git)?$') { $Repo = $Matches.repo }
     else { throw 'No GitHub repository: add a remote called origin, or pass -Repo owner/name.' }
 }
@@ -27,9 +36,9 @@ Write-Host "=== Alarm & Calendar $tag -> $Repo ==="
 
 if (-not $DryRun) {
     if (-not (Get-Command gh -ErrorAction SilentlyContinue)) { throw 'The GitHub CLI (gh) is missing: https://cli.github.com/' }
-    gh auth status *> $null
+    $null = Invoke-Probe { gh auth status }
     if ($LASTEXITCODE) { throw 'gh is not signed in: run gh auth login.' }
-    gh release view $tag --repo $Repo *> $null
+    $null = Invoke-Probe { gh release view $tag --repo $Repo }
     if (-not $LASTEXITCODE) {
         Write-Host "Release $tag already exists on ${Repo}: nothing to do. Bump VERSION to publish a new one."
         return

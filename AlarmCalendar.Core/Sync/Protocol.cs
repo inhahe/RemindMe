@@ -81,8 +81,10 @@ public static class Protocol
     /// <summary>Raise on every incompatible change, so mismatched builds refuse each other
     /// with a clear message instead of failing obscurely. 2: the "ready" frame, two-sided
     /// pairing acceptance, member counts in the commitment. 3: pairing rounds, MACed and
-    /// dated announcements.</summary>
-    public const int Version = 3;
+    /// dated announcements. 4: tasks carry a pause, every-N-weeks fields, a volume and a
+    /// fade-in; a build without them would drop them, and its next write would erase them
+    /// everywhere.</summary>
+    public const int Version = 4;
     public const int DefaultPort = 37660;
     /// <summary>Discovery always uses this UDP port, whatever TCP port a node listens on,
     /// so several instances on one machine (or a custom port) still find each other.</summary>

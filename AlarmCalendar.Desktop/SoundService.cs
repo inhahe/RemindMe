@@ -20,11 +20,14 @@ namespace AlarmCalendar.Desktop;
 public sealed class SoundService
 {
     /// <param name="Volume">0.1 to 1.</param>
-    /// <param name="Since">When the alarm began: a fade-in counts from it, so a sound resumed
-    /// after another alarm interrupted it carries on where its fade had got to.</param>
+    /// <param name="Since">When the alarm began, as <see cref="Environment.TickCount64"/>,
+    /// which no clock change moves: a fade-in counts from it, so a sound resumed after another
+    /// alarm interrupted it carries on where its fade had got to.</param>
     /// <param name="PlainWav">Play through <see cref="SoundPlayer"/> whatever the volume.</param>
-    private sealed record Entry(object Owner, string Path, bool Loop, double Volume, TimeSpan FadeIn, DateTime Since, bool PlainWav = false)
+    private sealed record Entry(object Owner, string Path, bool Loop, double Volume, TimeSpan FadeIn, long Since, bool PlainWav = false)
     {
+        public TimeSpan Elapsed => TimeSpan.FromMilliseconds(Environment.TickCount64 - Since);
+
         public bool ViaSoundPlayer => Path.EndsWith(".wav", StringComparison.OrdinalIgnoreCase)
             && (PlainWav || (Volume >= 0.999 && FadeIn <= TimeSpan.Zero));
     }
@@ -114,7 +117,7 @@ public sealed class SoundService
             Beep();
             return;
         }
-        var entry = new Entry(owner, path, loop, Math.Clamp(volume, 0.1, 1.0), fadeIn, DateTime.UtcNow);
+        var entry = new Entry(owner, path, loop, Math.Clamp(volume, 0.1, 1.0), fadeIn, Environment.TickCount64);
         _active.Add(entry);
         Start(entry);
     }
@@ -125,6 +128,9 @@ public sealed class SoundService
         _active.RemoveAll(e => e.Owner == owner);
         if (_playing?.Owner == owner) StartNewest();
     }
+
+    /// <summary>True while <paramref name="owner"/>'s sound is the one playing.</summary>
+    public bool IsPlaying(object owner) => _playing?.Owner == owner;
 
     public void StopAll()
     {
@@ -160,7 +166,7 @@ public sealed class SoundService
             }
             return;
         }
-        _media.Volume = SoundLevels.FadeLevel(e.Volume, DateTime.UtcNow - e.Since, e.FadeIn);
+        _media.Volume = SoundLevels.FadeLevel(e.Volume, e.Elapsed, e.FadeIn);
         _media.Open(new Uri(e.Path));
         _media.Play();
         if (_media.Volume < e.Volume) _fade.Start();
@@ -170,7 +176,7 @@ public sealed class SoundService
     private void Fade()
     {
         if (_playing is not { } e || e.ViaSoundPlayer) { _fade.Stop(); return; }
-        _media.Volume = SoundLevels.FadeLevel(e.Volume, DateTime.UtcNow - e.Since, e.FadeIn);
+        _media.Volume = SoundLevels.FadeLevel(e.Volume, e.Elapsed, e.FadeIn);
         if (_media.Volume >= e.Volume) _fade.Stop();
     }
 
@@ -221,7 +227,10 @@ public sealed class SoundService
         if (builtIn is not null && !string.Equals(e.Path, builtIn, StringComparison.OrdinalIgnoreCase))
         {
             Problem?.Invoke(e.Owner, $"\"{System.IO.Path.GetFileName(e.Path)}\" couldn't be played, so the built-in alarm sound plays instead.");
-            Play(e.Owner, builtIn, e.Loop);
+            // At the task's volume, its fade carrying on.
+            var fallback = e with { Path = builtIn, PlainWav = false };
+            _active.Add(fallback);
+            Start(fallback);
             return;
         }
         Problem?.Invoke(e.Owner, "No sound could be played; check the sound settings and the volume.");

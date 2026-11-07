@@ -222,6 +222,47 @@ public class EngineTests
     }
 
     [Fact]
+    public void TheEditorOffersToRestartOnlyAFinishedCountdown()
+    {
+        var t = _store.Save(null, new TaskDefinition { Kind = ScheduleKind.Countdown, Duration = TimeSpan.FromMinutes(25) });
+        _clock.UtcNow = NY(2026, 6, 1, 9, 10);
+        var running = Status(t.Id);
+        Assert.False(TextFormat.RestartCountdownByDefault(running));
+        Assert.StartsWith("Running: 15:00 left", TextFormat.CountdownStatus(running, _clock.UtcNow, NewYork));
+
+        _store.Pause(t.Id);
+        var paused = Status(t.Id);
+        Assert.False(TextFormat.RestartCountdownByDefault(paused));   // saving keeps it paused, with its time
+        Assert.StartsWith("Paused, with 15:00 left.", TextFormat.CountdownStatus(paused, _clock.UtcNow, NewYork));
+
+        _store.Resume(t.Id);
+        _clock.UtcNow = NY(2026, 6, 1, 9, 30);
+        Assert.True(TextFormat.RestartCountdownByDefault(Status(t.Id)));
+    }
+
+    [Fact]
+    public void APausedCountdownSavedAsAnotherKindStaysPaused()
+    {
+        var t = _store.Save(null, new TaskDefinition { Kind = ScheduleKind.Countdown, Duration = TimeSpan.FromMinutes(25) });
+        _store.Pause(t.Id);
+        // The editor's box was ticked, but the task is no longer a countdown to restart.
+        _store.Save(t.Id, t.Def with { Kind = ScheduleKind.Once, At = new DateTime(2026, 6, 2, 9, 0, 0) }, restartCountdown: true);
+        Assert.True(Status(t.Id).Paused);
+    }
+
+    [Fact]
+    public void ResumingATaskThatRestartsWhenDoneCountsFromNow()
+    {
+        var t = EveryHourFromNow(RestartMode.FromDone);   // next at 10:00
+        _clock.UtcNow = NY(2026, 6, 1, 9, 30);
+        _store.Pause(t.Id);
+        _clock.UtcNow = NY(2026, 6, 1, 10, 59, 30);
+        _store.Resume(t.Id);
+        // As if marked done now: an hour from now, not 11:00, thirty seconds away.
+        Assert.Equal(NY(2026, 6, 1, 11, 59, 30), Status(t.Id).NextOccurrence);
+    }
+
+    [Fact]
     public void EditingOnlyTheDescriptionKeepsTheTriggeredState()
     {
         var t = EveryHourFromNow(RestartMode.FromDone);

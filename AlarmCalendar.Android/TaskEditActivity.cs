@@ -206,10 +206,8 @@ public sealed class TaskEditActivity : Screen
         if (!isCountdown) return;
         var now = AppState.Clock.UtcNow;
         var st = AlarmEngine.Evaluate(existing!, now, AppState.Clock.Zone);
-        status.Text = st.NextOccurrence is { } end
-            ? $"Running: {TextFormat.Clock(end - now)} left, ends {TextFormat.When(end, now, AppState.Clock.Zone)}. Changing its length starts it again."
-            : st.Triggered ? "It has finished and is waiting to be marked done." : "It has finished.";
-        restart.Checked = st.NextOccurrence is null;
+        status.Text = TextFormat.CountdownStatus(st, now, AppState.Clock.Zone);
+        restart.Checked = TextFormat.RestartCountdownByDefault(st);
     }
 
     private void Save()

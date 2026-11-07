@@ -61,7 +61,9 @@ ringing it), **Pause**, and **Restart countdown**.
 alarm stops, and nothing comes up until you **Resume** it. Whatever would have
 come up meanwhile is skipped, not rung all at once. A paused countdown keeps the
 time it had left and carries on from there. Editing a paused task keeps it
-paused; **Restart countdown** starts it running again.
+paused; **Restart countdown** (or ticking "Start the countdown again" in the
+editor) starts it running again. A task that restarts when marked done counts
+its next time from when you resume it.
 
 ## Calendar
 
@@ -71,7 +73,8 @@ in full, and double-click one (tap it, on Android) to edit it. It shows what is
 still to come, and in red what has come up but isn't marked done yet. A task
 that comes up several times a day shows once, as "every 15 min". For a task that
 restarts when marked done, only its next time is certain; the later ones,
-marked "~", assume you mark it done on time. Paused tasks aren't shown.
+marked "~", assume you mark it done on time; once it has come up, they count
+from now. Paused tasks aren't shown.
 
 ## Sounds
 
@@ -96,7 +99,7 @@ plays instead and the alarm window says so.
 | For new "every N" tasks | Which restart choice new tasks start with. |
 | Start with Windows (in the tray) | On by default: alarms only ring while the app runs. |
 | Closing the main window keeps the app running in the tray | On by default. Use **Exit** (toolbar or tray menu) to quit. |
-| Wake the computer from sleep for alarms | On by default: a sleeping computer wakes just before an alarm, and the screen stays on while it rings. Windows must allow wake timers (Power Options → Change advanced power settings → Sleep → Allow wake timers); many laptops don't on battery. A computer that is shut down or hibernating doesn't wake. |
+| Wake the computer from sleep for alarms | On by default: a sleeping computer wakes just before an alarm, and the screen stays on while its sound plays. Windows must allow wake timers (Power Options → Change advanced power settings → Sleep → Allow wake timers); many laptops don't on battery. A computer that is shut down or hibernating doesn't wake. |
 
 **Your tasks** (in Settings, on Windows and Android): **Export tasks** saves every
 task to a file, as a backup or to move them to a device you haven't linked.
@@ -153,7 +156,7 @@ laid out for a phone:
 
 - **The list**: tap a task to edit it, long-press for Mark done, Show alarm,
   Restart countdown, Pause or Resume, and Delete, and tap **+** for a new task. The ⋮ menu has
-  **Devices and sync** and **Settings**.
+  **Calendar**, **Devices and sync** and **Settings**.
 - **The editor**: as on Windows. **Back** or **Cancel** leaves without saving.
 - **When a task comes up**: with the phone locked, the alarm screen opens over
   the lock screen; otherwise it appears as a notification with **Mark done** and

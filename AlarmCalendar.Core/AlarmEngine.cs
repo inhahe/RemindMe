@@ -200,21 +200,20 @@ public static class AlarmEngine
         task.State.PausedAtUtc is not null ? task.State : task.State with { PausedAtUtc = TimeMath.TruncateToSecond(now) };
 
     /// <summary>The state after the user resumes a paused task. Whatever came up before now
-    /// is passed over, as if marked done, and a countdown takes up where it stopped, with the
-    /// time it had left.</summary>
-    public static TaskState Resume(AlarmTask task, DateTimeOffset now)
+    /// is passed over, as if marked done now: a task that restarts when marked done counts
+    /// its next time from now. A countdown takes up where it stopped, with the time it had
+    /// left.</summary>
+    public static TaskState Resume(AlarmTask task, DateTimeOffset now, TimeZoneInfo zone)
     {
         var s = task.State;
         if (s.PausedAtUtc is not { } at) return s;
         var pausedFor = now > at ? now - at : TimeSpan.Zero;
-        return s with
+        var running = s with
         {
             PausedAtUtc = null,
             CountdownEndsUtc = s.CountdownEndsUtc is { } ends && ends > at ? ends + pausedFor : s.CountdownEndsUtc,
-            DoneThroughUtc = TimeMath.Max(s.DoneThroughUtc, now),
-            SnoozeUntilUtc = null,
-            SnoozeOccurrenceUtc = null,
         };
+        return MarkDone(task with { State = running }, now, zone);
     }
 
     /// <summary>The state to store with a newly saved schedule: only occurrences after

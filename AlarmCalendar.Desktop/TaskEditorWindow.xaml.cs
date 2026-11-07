@@ -144,10 +144,8 @@ public partial class TaskEditorWindow : Window
         if (!isCountdown) return;
         var now = AppHost.Clock.UtcNow;
         var st = AlarmEngine.Evaluate(existing!, now, AppHost.Clock.Zone);
-        CountdownStatus.Text = st.NextOccurrence is { } end
-            ? $"Running: {TextFormat.Clock(end - now)} left, ends {TextFormat.When(end, now, AppHost.Clock.Zone)}. Changing its length starts it again."
-            : st.Triggered ? "It has finished and is waiting to be marked done." : "It has finished.";
-        RestartCountdown.IsChecked = st.NextOccurrence is null;
+        CountdownStatus.Text = TextFormat.CountdownStatus(st, now, AppHost.Clock.Zone);
+        RestartCountdown.IsChecked = TextFormat.RestartCountdownByDefault(st);
     }
 
     /// <summary>The first week matters only when it isn't every week.</summary>

@@ -137,13 +137,17 @@ sync: each device reaches the same answer independently.
   `DoneThrough = save time`, and `Anchor` cleared. Only occurrences after the save
   fire. A start of "now", the editor's default, therefore means the first alarm
   comes one interval from now, not immediately. A paused task stays paused,
-  except a countdown restarted on purpose, which runs.
+  except a countdown restarted on purpose, which runs. The editor's "start the
+  countdown again" box starts ticked only for a countdown that has finished, not
+  for one running or paused (`TextFormat.RestartCountdownByDefault`).
 - **Pause (S4, S6)**: `PausedAt = now`. A paused task is never triggered, so
-  pausing one that rings stops it, and it has no wake-up. **Resume**:
-  `DoneThrough = now`, so whatever came up while paused (and before) is passed
-  over rather than ringing all at once. A countdown's end moves on by the time it
-  was paused, so it takes up where it stopped, with the time it had left. Both
-  are state changes, synced like a mark-done.
+  pausing one that rings stops it, and it has no wake-up. **Resume** is a
+  mark-done at the moment of resuming (`AlarmEngine.MarkDone`): `DoneThrough =
+  now`, so whatever came up while paused (and before) is passed over rather than
+  ringing all at once, and a task that restarts when done counts its next time
+  from now. A countdown's end first moves on by the time it was paused, so it
+  takes up where it stopped, with the time it had left. Both are state changes,
+  synced like a mark-done.
 - **Next wake-up**: the earliest of each untriggered task's next occurrence and
   each snoozed task's `SnoozeUntil` (or its next `OnSchedule` occurrence, if that
   is sooner). Android hands this to `AlarmManager`. The desktop polls every
@@ -172,11 +176,19 @@ otherwise also give.
   line a day ("every 15 min"), at its first time.
 - **Restarts when done:** only the next time is known; the later ones assume
   the task is marked done on time and are marked `Estimated` ("~9:00 AM").
+  Once it has come up, its timer has stopped: the time it came up is the one
+  `Waiting` entry, and the estimates count from now, as if it were marked done
+  now (`AlarmEngine.MarkDone`).
+- **Keeping up**: `CalendarMonth.NextChange` gives the first time shown still
+  to come. Both screens rebuild then, as well as on every store change and when
+  the date changes (checked at least once a minute), so a time turns red as it
+  comes up.
 - **The desktop window** (`CalendarWindow`) has a grid of up to four lines a
   day, plus "+N more", and the chosen day's full list beside it, which opens
-  the editor. It rebuilds on every store change and when the date changes.
+  the editor.
 - **Android** (`CalendarActivity`, from the ⋮ menu) shows each day's first
-  time and "+N", with the chosen day's list below it.
+  time, in short ("9:00a", "~6:30p", or "18:30" with a 24-hour clock), and
+  "+N", with the chosen day's list below it.
 
 ## Persistence (`TaskStore.cs`)
 
@@ -191,17 +203,30 @@ from sync.
 **Export and import (S8)**: `Export` writes every live task to a JSON file
 (`{app, format, exportedUtc, tasks}`). `Import` reads one back:
 
-- A task this device has merges by the sync rules (`MergeRules.Merge`), so an
-  old backup can't undo newer edits.
-- One it doesn't have, or has deleted, comes back as a new revision that
-  outranks the tombstone, with a fresh `DefVersion`. Its definition, anchor, a
-  running countdown's end and a pause are kept. `DoneThrough` becomes the
-  import time, so nothing in the past rings; a paused task keeps its own, since
-  resuming passes over the past anyway.
+- Every record keeps the versions and revision it was exported with and merges
+  by the sync rules (`MergeRules.Merge`). So an old backup can't undo newer
+  edits: not here, and not on the device it came from once the two are linked,
+  as fresh versions would.
+- Nothing in the past rings: wherever the file's state replaces this device's
+  (a task it doesn't have, or the file's state is of a newer revision),
+  `DoneThrough` is raised to the import time. Within one revision that is "done"
+  moving forward, which merging carries as it is, so the version stays. A
+  paused task keeps its own, since resuming passes over the past anyway. One
+  consequence: once linked, the raise reaches the device the file came from too,
+  passing over an occurrence still waiting there, as marking it done here would.
+- A task this device deleted comes back with a fresh `DefVersion`, outranking
+  the tombstone, and its state merges as above. Only if the tombstone's state is
+  of a newer revision (the task was rescheduled after the export, then deleted)
+  does it get a new revision, with a fresh `StateVersion` and `DoneThrough` =
+  now.
+- Records that aren't well formed (`MergeRules.IsWellFormed`: no ID,
+  definition or state, a null description or sound name) are skipped, as sync
+  skips them. JSON can leave a member null whatever its declared type: an
+  explicit `null`, or a record's missing constructor parameter.
 - The change is raised as a local one, so it reaches linked devices like an
   edit.
-- A file that isn't an export of this app, or is from a newer format, is
-  refused with `InvalidDataException`.
+- A file that isn't an export of this app (`tasks` missing, say), or is from a
+  newer format, is refused with `InvalidDataException`.
 
 Both apps offer it under *Your tasks* in Settings: file dialogs on the desktop,
 the document picker on Android.
@@ -282,7 +307,10 @@ separately (see *Simplification opportunities*).
   knock a linked device off its connection, or make it appear "not linked" and
   invite a re-link. Only authenticated sessions receive broadcasts. Node IDs must
   be 32 hex digits, which makes the key labels unambiguous. The protocol version
-  in `hello` must match.
+  in `hello` must match (`Protocol.Version`, raised whenever a build without a
+  change would misread or drop what a build with it sends: 4 added the pause,
+  every-N-weeks, volume and fade-in fields, which an older build would drop and
+  then erase everywhere with its next write).
 - **Bounded noise.** At most 256 devices are remembered from announcements. When
   the table is full, a proven member still gets in, in place of the stalest
   stranger, and a stranger's announcement can't take over a fresh member's
@@ -431,20 +459,27 @@ separately (see *Simplification opportunities*).
   through WPF `MediaPlayer`, the only one of the two with a volume. Where it
   can't play a WAV, the WAV falls back to `SoundPlayer` at full volume, and the
   alarm window says so. Any other failure falls back to the built-in
-  `Alarm01.wav` and reports it in the alarm window, then to the system beep.
+  `Alarm01.wav`, at the task's volume and with its fade carrying on, and
+  reports it in the alarm window, then to the system beep.
   A fade-in (`SoundLevels.FadeLevel`) rises with the square of the time, from 2%
   of the target, in 200 ms steps. It counts from when the alarm began, so a
-  sound resumed after another alarm interrupted it doesn't start quiet again.
+  sound resumed after another alarm interrupted it doesn't start quiet again,
+  and on a monotonic clock (`Environment.TickCount64`; Android's
+  `SystemClock.ElapsedRealtime`), so a clock change can't stall or skip it.
 - `WakeTimer` (S3): one waitable timer (`CreateWaitableTimerExW`,
   `SetWaitableTimer` with `fResume`), kept set by the coordinator 20 s before
   the next wake-up (`AlarmEngine.NextWakeUp`), so the computer wakes from sleep
-  and the app is up when the alarm is due. It is re-armed only when that time
-  changes, and closing the app destroys it. Windows must allow wake timers, which
-  many laptops don't on battery; a system that can't resume this way is logged.
-  While an alarm window is sounding, `SetThreadExecutionState` keeps the system
-  and the display on, since after a timer wake Windows leaves the display off
-  and goes back to sleep within about two minutes. The **Wake the computer from
-  sleep for alarms** setting (on by default) turns the timer off.
+  and the app is up when the alarm is due. It is set again when that time
+  changes, when it has gone off while the computer was awake (so a computer put
+  to sleep in the last 20 s still wakes), and after a failure to set it, which
+  is logged once. Closing the app destroys it. Windows must allow wake timers,
+  which many laptops don't on battery; a system that can't resume this way is
+  logged. While an alarm window's sound plays (`SoundService.IsPlaying`),
+  `SetThreadExecutionState` keeps the system and the display on, since after a
+  timer wake Windows leaves the display off and goes back to sleep within about
+  two minutes. Once it stops (played once, or silenced), the computer may sleep
+  again, the alarm window still on screen. The **Wake the computer from sleep
+  for alarms** setting (on by default) turns the timer off.
 - `Autostart.cs`: a single per-user `HKCU\...\Run` entry, as in LanLink. An
   instance with its own `--data-dir` gets an entry of its own name, and is never
   enabled on its first run.
@@ -611,7 +646,9 @@ is a command separator to `cmd`.
   enforces both platforms' limits. The first part can be at most 255, as MSI
   allows. The others can be at most 99, so the `versionCode` stays unique and
   increasing. MSI ignores the fourth part, so the installer's
-  `AllowSameVersionUpgrades` makes a fourth-part bump an upgrade anyway.
+  `AllowSameVersionUpgrades` makes a fourth-part bump an upgrade anyway. The
+  price: an older MSI that differs only in the fourth part installs over a
+  newer one without the downgrade message.
 - **`build-msi.ps1`**: a self-contained single-file `AlarmCalendar.exe`
   (win-x64), then `installer/AlarmCalendar.wxs` with WiX 7 and its UI and
   Firewall extensions.
@@ -632,7 +669,10 @@ is a command separator to `cmd`.
 - **`release-github.ps1`**: builds both and creates the GitHub release
   `v<version>` with `gh`, unless it exists already. The APK is optional.
   `-DryRun` builds and prints the command; the repository comes from `origin`
-  or `-Repo`.
+  or `-Repo`. `release-github.bat` runs it in Windows PowerShell 5.1, which,
+  under `$ErrorActionPreference = 'Stop'`, ends the script at the first native
+  command whose redirected stderr has a line. The checks that expect to fail
+  (no remote, no such release) therefore go through `Invoke-Probe`.
 
 ## Simplification opportunities
 

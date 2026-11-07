@@ -10,7 +10,7 @@ namespace AlarmCalendar.Desktop;
 /// <summary>
 /// A month of the tasks (S2): six weeks of days, each with the times its tasks come up, and
 /// the chosen day's list beside it, where a task opens in the editor. It follows every
-/// change to the tasks, and the date.
+/// change to the tasks, the date, and the times it shows coming up.
 /// </summary>
 public partial class CalendarWindow : Window
 {
@@ -22,10 +22,13 @@ public partial class CalendarWindow : Window
     private static readonly Brush WaitingText = new SolidColorBrush(Color.FromRgb(0xB0, 0x00, 0x20));
 
     private readonly MainWindow _main;
-    private readonly DispatcherTimer _clock = new() { Interval = TimeSpan.FromMinutes(1) };
+    /// <summary>Wakes at the next time shown coming up, and at least once a minute for the date.</summary>
+    private readonly DispatcherTimer _clock = new();
     private DateTime _month;
     private DateOnly _chosen;
     private DateTime _builtOn;
+    private DateTimeOffset? _nextChange;
+    private bool _closed;
     private IReadOnlyList<CalendarDay> _days = [];
 
     public CalendarWindow(MainWindow main)
@@ -36,10 +39,23 @@ public partial class CalendarWindow : Window
         _month = new DateTime(today.Year, today.Month, 1);
         _chosen = DateOnly.FromDateTime(today);
         AppHost.Store.Changed += OnStoreChanged;
-        _clock.Tick += (_, _) => { if (Today() != _builtOn) Build(); };
-        _clock.Start();
-        Closed += (_, _) => { AppHost.Store.Changed -= OnStoreChanged; _clock.Stop(); };
+        _clock.Tick += (_, _) =>
+        {
+            if (Today() != _builtOn || AppHost.Clock.UtcNow >= _nextChange) Build();
+            else ScheduleTick();
+        };
+        Closed += (_, _) => { _closed = true; AppHost.Store.Changed -= OnStoreChanged; _clock.Stop(); };
         Build();
+    }
+
+    private void ScheduleTick()
+    {
+        if (_closed) return;   // a store change queued before closing still builds once
+        var wait = _nextChange is { } at ? at - AppHost.Clock.UtcNow + TimeSpan.FromMilliseconds(200) : TimeSpan.MaxValue;
+        _clock.Stop();
+        _clock.Interval = wait < TimeSpan.FromMilliseconds(200) ? TimeSpan.FromMilliseconds(200)
+            : wait > TimeSpan.FromMinutes(1) ? TimeSpan.FromMinutes(1) : wait;
+        _clock.Start();
     }
 
     private static DateTime Today() => TimeMath.ToWall(AppHost.Clock.UtcNow, AppHost.Clock.Zone).Date;
@@ -68,7 +84,10 @@ public partial class CalendarWindow : Window
     {
         var culture = CultureInfo.CurrentCulture;
         _builtOn = Today();
-        _days = CalendarMonth.Build(AppHost.Store.Live(), _month.Year, _month.Month, AppHost.Clock.UtcNow, AppHost.Clock.Zone, culture);
+        var now = AppHost.Clock.UtcNow;
+        _days = CalendarMonth.Build(AppHost.Store.Live(), _month.Year, _month.Month, now, AppHost.Clock.Zone, culture);
+        _nextChange = CalendarMonth.NextChange(_days, now);
+        ScheduleTick();
         MonthTitle.Text = _month.ToString("MMMM yyyy", culture);
 
         MonthGrid.Children.Clear();

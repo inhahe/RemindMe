@@ -97,4 +97,51 @@ public class CalendarTests
         _store.Pause(t.Id);
         Assert.All(June(), d => Assert.Empty(d.Entries));   // paused: it won't ring
     }
+
+    [Fact]
+    public void ARestartWhenDoneTaskThatCameUpWaitsOnceAndEstimatesFromNow()
+    {
+        _store.Save(null, new TaskDefinition
+        {
+            Description = "water plants", Kind = ScheduleKind.Interval, IntervalCount = 3, Unit = IntervalUnit.Days,
+            Start = new DateTime(2026, 6, 10, 12, 0, 0), Restart = RestartMode.FromDone,
+        });
+        _clock.UtcNow = NY(2026, 6, 18, 8);   // came up on Jun 13 and has waited since: its timer stopped
+        var days = June();
+        Assert.True(Day(days, 6, 13).Entries.Single().Waiting);
+        Assert.Empty(Day(days, 6, 16).Entries);   // no second time came up
+        Assert.Empty(Day(days, 6, 19).Entries);
+        var estimate = Day(days, 6, 21).Entries.Single();   // three days after now, if marked done now
+        Assert.Equal(("~8:00 AM", true, false), (estimate.Text, estimate.Estimated, estimate.Waiting));
+    }
+
+    [Fact]
+    public void ARestartWhenDoneTaskSeveralTimesADayWaitsOnItsOwnDayOnly()
+    {
+        _store.Save(null, new TaskDefinition
+        {
+            Description = "stretch", Kind = ScheduleKind.Interval, IntervalCount = 15, Unit = IntervalUnit.Minutes,
+            Start = new DateTime(2026, 6, 10, 12, 0, 0), Restart = RestartMode.FromDone,
+        });
+        _clock.UtcNow = NY(2026, 6, 12, 8);   // came up at 12:15 on Jun 10
+        var days = June();
+        var waiting = Day(days, 6, 10).Entries.Single();
+        Assert.True(waiting.Waiting);
+        Assert.Equal(NY(2026, 6, 10, 12, 15), waiting.At);
+        Assert.Empty(Day(days, 6, 11).Entries);
+        var today = Day(days, 6, 12).Entries.Single();
+        Assert.False(today.Waiting);
+        Assert.Equal(NY(2026, 6, 12, 8, 15), today.At);
+    }
+
+    [Fact]
+    public void TheNextChangeIsTheFirstTimeStillToCome()
+    {
+        _store.Save(null, new TaskDefinition { Description = "dentist", Kind = ScheduleKind.Once, At = new DateTime(2026, 6, 20, 9, 30, 0) });
+        Assert.Equal(NY(2026, 6, 20, 9, 30), CalendarMonth.NextChange(June(), _clock.UtcNow));
+        _clock.UtcNow = NY(2026, 6, 20, 9, 31);
+        var days = June();
+        Assert.True(Day(days, 6, 20).Entries.Single().Waiting);
+        Assert.Null(CalendarMonth.NextChange(days, _clock.UtcNow));
+    }
 }

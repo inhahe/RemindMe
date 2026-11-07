@@ -290,9 +290,13 @@ public sealed class RingingService : Service
 public sealed class AlarmSound(Context context)
 {
     /// <param name="Volume">0.1 to 1, of the alarm stream's volume (S10).</param>
-    /// <param name="Since">When the alarm began: a fade-in counts from it, so a sound resumed
-    /// after another alarm interrupted it carries on where its fade had got to.</param>
-    private sealed record Entry(Guid Owner, global::Android.Net.Uri Uri, bool Loop, float Volume, TimeSpan FadeIn, DateTime Since);
+    /// <param name="Since">When the alarm began, as <see cref="global::Android.OS.SystemClock.ElapsedRealtime"/>,
+    /// which no clock change moves: a fade-in counts from it, so a sound resumed after another
+    /// alarm interrupted it carries on where its fade had got to.</param>
+    private sealed record Entry(Guid Owner, global::Android.Net.Uri Uri, bool Loop, float Volume, TimeSpan FadeIn, long Since)
+    {
+        public TimeSpan Elapsed => TimeSpan.FromMilliseconds(global::Android.OS.SystemClock.ElapsedRealtime() - Since);
+    }
 
     private readonly Handler _fade = new(Looper.MainLooper!);
 
@@ -339,7 +343,7 @@ public sealed class AlarmSound(Context context)
         candidates.AddRange(SystemSounds());
         foreach (var uri in candidates)
         {
-            var e = new Entry(owner, uri, loop, (float)Math.Clamp(volume, 0.1, 1.0), fadeIn, DateTime.UtcNow);
+            var e = new Entry(owner, uri, loop, (float)Math.Clamp(volume, 0.1, 1.0), fadeIn, global::Android.OS.SystemClock.ElapsedRealtime());
             if (!Start(e)) continue;
             _active.Add(e);
             return sound is not null && uri != candidates[0]
@@ -402,7 +406,7 @@ public sealed class AlarmSound(Context context)
         if (_active.Count == 0) Release();
     }
 
-    private static float Level(Entry e) => (float)SoundLevels.FadeLevel(e.Volume, DateTime.UtcNow - e.Since, e.FadeIn);
+    private static float Level(Entry e) => (float)SoundLevels.FadeLevel(e.Volume, e.Elapsed, e.FadeIn);
 
     /// <summary>One step of a fade-in, every 200 ms until the sound reaches its volume.</summary>
     private void Fade()

@@ -244,4 +244,21 @@ public static class TextFormat
             return $"Waiting to be marked done{missed}; reminds {When(r, now, zone, culture)} (in {HoursMinutes(r - now)})";
         return $"Waiting to be marked done{missed}; no further reminders";
     }
+
+    /// <summary>The task editor's line about an existing countdown, above its "start the
+    /// countdown again" box.</summary>
+    public static string CountdownStatus(TaskStatus st, DateTimeOffset now, TimeZoneInfo zone, CultureInfo? culture = null)
+    {
+        if (st.Paused)
+            return st.CountdownLeft is { } left
+                ? $"Paused, with {Clock(left)} left. It stays paused when you save; a new length replaces the time left."
+                : "Paused, after it had finished. It stays paused when you save.";
+        if (st.NextOccurrence is { } end)
+            return $"Running: {Clock(end - now)} left, ends {When(end, now, zone, culture)}. Changing its length starts it again.";
+        return st.Triggered ? "It has finished and is waiting to be marked done." : "It has finished.";
+    }
+
+    /// <summary>Whether the editor's "start the countdown again" box starts ticked: for a
+    /// countdown that has finished, not for one running or paused, which saving keeps.</summary>
+    public static bool RestartCountdownByDefault(TaskStatus st) => !st.Paused && st.NextOccurrence is null;
 }

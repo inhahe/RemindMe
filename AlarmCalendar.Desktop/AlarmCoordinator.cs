@@ -81,7 +81,7 @@ public sealed class AlarmCoordinator : IDisposable
             CloseWindow(id, w);
 
         _wake.WakeFor(AppHost.Settings.WakeFromSleep ? AlarmEngine.NextWakeUp(statuses) : null, now);
-        _wake.KeepAwake(_windows.Values.Any(w => w.Alerting));
+        _wake.KeepAwake(_windows.Values.Any(Sounds.IsPlaying));
 
         Current = statuses;
         Evaluated?.Invoke(statuses);

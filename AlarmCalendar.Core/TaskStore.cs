@@ -64,6 +64,21 @@ public static class MergeRules
 
     public static DigestEntry DigestOf(AlarmTask t) =>
         new(t.Id, t.DefVersion, t.State.Revision, t.StateVersion, t.State.DoneThroughUtc);
+
+    /// <summary>True when <paramref name="r"/>, a record from another device or a file, has
+    /// everything the app relies on. JSON can leave a member null whatever its declared type
+    /// says (an explicit null, or a missing constructor parameter such as a sound's name),
+    /// and a record stored with one would break every screen that shows it.</summary>
+    public static bool IsWellFormed(AlarmTask? r) =>
+        r is { Def: { Description: not null } d, State: not null } && r.Id != Guid.Empty
+        && IsWellFormed(d.WindowsSound) && IsWellFormed(d.AndroidSound);
+
+    private static bool IsWellFormed(SoundRef? s) => s is null || (s.Value is not null && s.Name is not null);
+
+    /// <summary>True when <paramref name="merged"/>, the result of merging into
+    /// <paramref name="local"/>, differs from it: it must be stored, and passed on.</summary>
+    public static bool Changed(AlarmTask local, AlarmTask merged) =>
+        merged.DefVersion != local.DefVersion || merged.StateVersion != local.StateVersion || merged.State != local.State;
 }
 
 /// <summary>
@@ -121,7 +136,9 @@ public sealed class TaskStore
 
     /// <summary>Saves the editor's result: a new task when <paramref name="id"/> is null.</summary>
     /// <param name="def">The definition as edited; its ScheduleRevision and Deleted are set here.</param>
-    /// <param name="restartCountdown">Start a countdown again even though its length didn't change.</param>
+    /// <param name="restartCountdown">Start a countdown again from now, running even if it was
+    /// paused, though its length didn't change. Ignored unless <paramref name="def"/> is a
+    /// countdown: a paused task saved as another kind stays paused.</param>
     /// <returns>The stored task.</returns>
     public AlarmTask Save(Guid? id, TaskDefinition def, bool restartCountdown = false)
     {
@@ -158,7 +175,8 @@ public sealed class TaskStore
                 if (reschedule)
                     result = result with
                     {
-                        State = AlarmEngine.FreshState(old.State, def, now, keepPaused: !restartCountdown),
+                        State = AlarmEngine.FreshState(old.State, def, now,
+                            keepPaused: !(restartCountdown && def.Kind == ScheduleKind.Countdown)),
                         StateVersion = Versions.Tick(),
                     };
                 if (result == old) return old;
@@ -196,7 +214,7 @@ public sealed class TaskStore
 
     public AlarmTask? Pause(Guid id) => ChangeState(id, t => AlarmEngine.Pause(t, _clock.UtcNow));
 
-    public AlarmTask? Resume(Guid id) => ChangeState(id, t => AlarmEngine.Resume(t, _clock.UtcNow));
+    public AlarmTask? Resume(Guid id) => ChangeState(id, t => AlarmEngine.Resume(t, _clock.UtcNow, _clock.Zone));
 
     public void Delete(Guid id)
     {
@@ -237,11 +255,13 @@ public sealed class TaskStore
     }
 
     /// <summary>
-    /// Imports an export file. A task this device has merges by the sync rules, so an old
-    /// file can't undo newer edits. One it doesn't have, or has deleted, comes back as a new
-    /// revision with whatever came up before now passed over (for a paused task, when it is
-    /// resumed), so importing doesn't ring for the past: its definition, its anchor, a
-    /// running countdown's end and a pause are kept.
+    /// Imports an export file. Each record merges by the sync rules, keeping the versions
+    /// it was exported with, so an old file can't undo newer edits, here or, once linked,
+    /// on the device it came from. Whatever came up before now is passed over (for a paused
+    /// task, when it is resumed), so importing doesn't ring for the past: where the file's
+    /// state replaces this device's, its DoneThrough is raised to now, which the sync rules
+    /// carry as "done" moving forward. A task deleted here comes back with a new version of
+    /// its definition, to outrank the deletion.
     /// The changes reach linked devices like any edit made here.
     /// </summary>
     /// <exception cref="InvalidDataException">The text isn't an export file of this app.</exception>
@@ -250,7 +270,7 @@ public sealed class TaskStore
         ExportFile? file;
         try { file = System.Text.Json.JsonSerializer.Deserialize(json, Json.Files.ExportFile); }
         catch (System.Text.Json.JsonException e) { throw new InvalidDataException("This isn't a file of exported tasks.", e); }
-        if (file is null || file.App != Sync.Protocol.App)
+        if (file is null || file.App != Sync.Protocol.App || file.Tasks is null)
             throw new InvalidDataException("This isn't a file of exported tasks.");
         if (file.Format > 1)
             throw new InvalidDataException("This file was exported by a newer version of the app.");
@@ -262,46 +282,73 @@ public sealed class TaskStore
         {
             foreach (var r in file.Tasks)
             {
-                if (r is null || r.Id == Guid.Empty || r.Def is null || r.State is null || r.Def.Deleted) continue;
+                if (!MergeRules.IsWellFormed(r) || r.Def.Deleted) continue;
                 Versions.Observe(r.DefVersion);
                 Versions.Observe(r.StateVersion);
-                if (_tasks.TryGetValue(r.Id, out var local) && !local.Def.Deleted)
+                _tasks.TryGetValue(r.Id, out var local);
+                AlarmTask result;
+                if (local is null)
                 {
-                    var merged = MergeRules.Merge(local, r);
-                    if (merged.DefVersion == local.DefVersion && merged.StateVersion == local.StateVersion && merged.State == local.State)
+                    result = PassOverPast(r, now);
+                    added++;
+                }
+                else if (local.Def.Deleted)
+                {
+                    result = Restore(local, r, now);
+                    added++;
+                }
+                else
+                {
+                    result = MergeRules.Merge(local, r.State.Revision > local.State.Revision ? PassOverPast(r, now) : r);
+                    if (!MergeRules.Changed(local, result))
                     {
                         unchanged++;
                         continue;
                     }
-                    _tasks[r.Id] = merged;
-                    changed.Add(merged);
                     updated++;
-                    continue;
                 }
-                // New here, or deleted here: a new revision, outranking any tombstone.
-                int revision = Math.Max(Math.Max(r.Def.ScheduleRevision, r.State.Revision),
-                    local is null ? 0 : Math.Max(local.Def.ScheduleRevision, local.State.Revision)) + 1;
-                var def = r.Def with { ScheduleRevision = revision, Deleted = false };
-                // A paused task keeps its own: resuming passes over the past anyway, and a
-                // paused countdown's end may lie in the past until it is resumed.
-                var doneThrough = r.State.PausedAtUtc is null ? now
-                    : r.State.DoneThroughUtc < now ? r.State.DoneThroughUtc : now;
-                var restored = new AlarmTask
-                {
-                    Id = r.Id,
-                    Def = def,
-                    DefVersion = Versions.Tick(),
-                    State = r.State with { Revision = revision, DoneThroughUtc = doneThrough, SnoozeUntilUtc = null, SnoozeOccurrenceUtc = null },
-                    StateVersion = Versions.Tick(),
-                };
-                _tasks[r.Id] = restored;
-                changed.Add(restored);
-                added++;
+                _tasks[r.Id] = result;
+                changed.Add(result);
             }
             if (changed.Count > 0) SaveLocked();
         }
         if (changed.Count > 0) Raise(changed, false);
         return new ImportResult(added, updated, unchanged);
+    }
+
+    /// <summary><paramref name="r"/> with whatever came up before <paramref name="now"/>
+    /// passed over: DoneThrough raised to now, which within one revision only ever rises, so
+    /// the record keeps its version. A paused task keeps its own: resuming passes over the
+    /// past anyway, and a paused countdown's end may lie in the past until it is resumed.</summary>
+    private static AlarmTask PassOverPast(AlarmTask r, DateTimeOffset now) =>
+        r.State.PausedAtUtc is not null ? r
+            : r with { State = r.State with { DoneThroughUtc = TimeMath.Max(r.State.DoneThroughUtc, now) } };
+
+    /// <summary>The file's copy <paramref name="r"/> of a task this device deleted. The
+    /// definition gets a new version, outranking the deletion. The state keeps the file's
+    /// revision unless this device's is newer: then it was written against a later schedule,
+    /// which only a new revision outranks.</summary>
+    private AlarmTask Restore(AlarmTask tombstone, AlarmTask r, DateTimeOffset now)
+    {
+        var def = r.Def with { Deleted = false };
+        if (r.State.Revision >= tombstone.State.Revision)
+        {
+            var merged = PassOverPast(MergeRules.Merge(tombstone, r), now);
+            return merged with { Def = def, DefVersion = Versions.Tick() };
+        }
+        int revision = Math.Max(Math.Max(r.Def.ScheduleRevision, r.State.Revision),
+            Math.Max(tombstone.Def.ScheduleRevision, tombstone.State.Revision)) + 1;
+        // A new revision replaces DoneThrough outright: now, or for a paused task its own,
+        // as above (but not past now, as a fresh schedule's isn't).
+        var s = r.State;
+        var doneThrough = s.PausedAtUtc is null ? now : s.DoneThroughUtc < now ? s.DoneThroughUtc : now;
+        return r with
+        {
+            Def = def with { ScheduleRevision = revision },
+            DefVersion = Versions.Tick(),
+            State = s with { Revision = revision, DoneThroughUtc = doneThrough, SnoozeUntilUtc = null, SnoozeOccurrenceUtc = null },
+            StateVersion = Versions.Tick(),
+        };
     }
 
     // ---- Sync ----------------------------------------------------------------------
@@ -317,7 +364,7 @@ public sealed class TaskStore
             {
                 // Records come from other devices, possibly running another version: one
                 // that is malformed is skipped, rather than stored and gossiped onwards.
-                if (r is null || r.Id == Guid.Empty || r.Def is null || r.State is null) continue;
+                if (!MergeRules.IsWellFormed(r)) continue;
                 Versions.Observe(r.DefVersion);
                 Versions.Observe(r.StateVersion);
                 if (!_tasks.TryGetValue(r.Id, out var local))
@@ -327,7 +374,7 @@ public sealed class TaskStore
                     continue;
                 }
                 var merged = MergeRules.Merge(local, r);
-                if (merged.DefVersion != local.DefVersion || merged.StateVersion != local.StateVersion || merged.State != local.State)
+                if (MergeRules.Changed(local, merged))
                 {
                     _tasks[r.Id] = merged;
                     changed.Add(merged);

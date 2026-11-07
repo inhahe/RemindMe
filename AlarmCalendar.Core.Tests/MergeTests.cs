@@ -268,11 +268,111 @@ public class ExportImportTests
         var back = a.Get(t.Id)!;
         Assert.False(back.Def.Deleted);
         Assert.Equal("v1", back.Def.Description);
-        Assert.True(back.Def.ScheduleRevision > t.Def.ScheduleRevision);
+        // The schedule wasn't changed after the export, so the revision needn't be either.
+        Assert.Equal(t.State.Revision, back.State.Revision);
 
         // The restored task outranks the tombstone wherever they meet.
         var tombstone = t with { Def = t.Def with { Deleted = true }, DefVersion = new Hlc(back.DefVersion.Ms - 1, 0, "node-z") };
         Assert.False(MergeRules.Merge(back, tombstone).Def.Deleted);
+    }
+
+    [Fact]
+    public void ATaskRescheduledThenDeletedComesBackAsTheFileHasIt()
+    {
+        var a = NewStore("node-a");
+        var t = a.Save(null, new TaskDefinition
+        {
+            Description = "daily", Kind = ScheduleKind.Interval, Unit = IntervalUnit.Days, Start = new DateTime(2026, 6, 1, 8, 0, 0),
+            Restart = RestartMode.OnSchedule,
+        });
+        var backup = a.Export();
+        _clock.Advance(TimeSpan.FromMinutes(1));
+        a.Save(t.Id, t.Def with { Start = new DateTime(2026, 6, 1, 20, 0, 0) });   // revision 2
+        a.Delete(t.Id);
+        _clock.UtcNow = NY(2026, 6, 5, 10);
+        Assert.Equal(new ImportResult(1, 0, 0), a.Import(backup));
+        var back = a.Get(t.Id)!;
+        Assert.Equal(new DateTime(2026, 6, 1, 8, 0, 0), back.Def.Start);
+        Assert.Equal(3, back.State.Revision);   // outranks the state written for 20:00 everywhere
+        Assert.False(a.Status(t.Id)!.Triggered);
+        Assert.Equal(NY(2026, 6, 6, 8), a.Status(t.Id)!.NextOccurrence);
+    }
+
+    /// <summary>The device a file came from goes on editing and marking done; another
+    /// imports the file, and the two are linked later. The import must not outrank any of it.</summary>
+    [Fact]
+    public void AnImportOutranksNothingTheDeviceItCameFromDidLater()
+    {
+        var pc = NewStore("node-pc");
+        var t = pc.Save(null, new TaskDefinition
+        {
+            Description = "pills", Kind = ScheduleKind.Interval, Unit = IntervalUnit.Days, Start = new DateTime(2026, 6, 1, 8, 0, 0),
+            Restart = RestartMode.OnSchedule,
+        });
+        var file = pc.Export();
+        _clock.UtcNow = NY(2026, 6, 2, 9);
+        pc.Save(t.Id, pc.Get(t.Id)!.Def with { Description = "pills, with food" });
+        _clock.UtcNow = NY(2026, 6, 3, 9);
+        var phone = NewStore("node-phone");
+        phone.Import(file);
+        _clock.UtcNow = NY(2026, 6, 20, 9);
+        pc.MarkDone(t.Id);   // done through Jun 20
+
+        pc.Merge(phone.All());
+        phone.Merge(pc.All());
+        foreach (var store in new[] { pc, phone })
+        {
+            Assert.Equal("pills, with food", store.Get(t.Id)!.Def.Description);
+            Assert.False(store.Status(t.Id)!.Triggered);   // Jun 4 to 20 were marked done on the PC
+            Assert.Equal(NY(2026, 6, 21, 8), store.Status(t.Id)!.NextOccurrence);
+        }
+    }
+
+    [Fact]
+    public void ImportingANewerScheduleDoesNotRingForThePast()
+    {
+        var a = NewStore("node-a");
+        var t = a.Save(null, new TaskDefinition
+        {
+            Description = "daily", Kind = ScheduleKind.Interval, Unit = IntervalUnit.Days, Start = new DateTime(2026, 6, 1, 8, 0, 0),
+            Restart = RestartMode.OnSchedule,
+        });
+        var b = NewStore("node-b");
+        b.Merge(a.All());   // b has revision 1
+        _clock.Advance(TimeSpan.FromMinutes(1));
+        a.Save(t.Id, t.Def with { Start = new DateTime(2026, 6, 1, 20, 0, 0) });   // revision 2, from Jun 1
+        var file = a.Export();
+        _clock.UtcNow = NY(2026, 6, 10, 10);
+        b.MarkDone(t.Id);
+
+        Assert.Equal(new ImportResult(0, 1, 0), b.Import(file));
+        Assert.Equal(2, b.Get(t.Id)!.State.Revision);
+        Assert.False(b.Status(t.Id)!.Triggered);   // Jun 1 to 9 at 20:00 are passed over
+        Assert.Equal(NY(2026, 6, 10, 20), b.Status(t.Id)!.NextOccurrence);
+    }
+
+    [Fact]
+    public void RecordsMissingWhatTheAppReliesOnAreSkipped()
+    {
+        var a = NewStore("node-a");
+        a.Save(null, new TaskDefinition { Description = "x", Kind = ScheduleKind.Once, At = new DateTime(2026, 7, 1, 9, 0, 0) });
+        var withSound = a.Save(null, new TaskDefinition { Description = "y", Kind = ScheduleKind.Once, At = new DateTime(2026, 7, 1, 9, 0, 0) }
+            .WithSound(Platforms.Windows, new SoundRef(SoundSource.File, "C:/a.wav", "a")));
+        var file = a.Export();
+        var nullDescription = file.Replace("\"description\": \"x\"", "\"description\": null");
+        var noSoundName = file.Replace("\"name\": \"a\"", "\"other\": 1");
+        Assert.NotEqual(file, nullDescription);
+        Assert.NotEqual(file, noSoundName);
+
+        var b = NewStore("node-b");
+        Assert.Equal(new ImportResult(1, 0, 0), b.Import(nullDescription));   // only "y"
+        var c = NewStore("node-c");
+        Assert.Equal(new ImportResult(1, 0, 0), c.Import(noSoundName));       // only "x"
+        Assert.Throws<InvalidDataException>(() => c.Import("{\"app\": \"AlarmCalendar\", \"tasks\": null}"));
+
+        // Sync applies the same check.
+        var broken = withSound with { Def = withSound.Def with { Description = null! } };
+        Assert.Empty(NewStore("node-d").Merge([broken]));
     }
 
     [Fact]

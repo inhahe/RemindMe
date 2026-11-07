@@ -10,7 +10,8 @@ namespace AlarmCalendar.Droid;
 /// <summary>
 /// A month of the tasks (S2), as the desktop's Calendar window: six weeks of days, each
 /// showing its first time and how many more, and the chosen day's tasks below, where one
-/// opens in the editor. It follows every change to the tasks.
+/// opens in the editor. It follows every change to the tasks, the date, and the times it
+/// shows coming up.
 /// </summary>
 [Activity(Label = "Calendar", Exported = false)]
 public sealed class CalendarActivity : Screen
@@ -18,6 +19,9 @@ public sealed class CalendarActivity : Screen
     private DateTime _month;
     private DateOnly _chosen;
     private IReadOnlyList<CalendarDay> _days = [];
+    private readonly Handler _ticks = new(Looper.MainLooper!);
+    private DateTime _builtOn;
+    private DateTimeOffset? _nextChange;
 
     protected override void OnCreate(Bundle? savedInstanceState)
     {
@@ -52,7 +56,23 @@ public sealed class CalendarActivity : Screen
     protected override void OnPause()
     {
         AppState.TasksChanged -= Build;
+        _ticks.RemoveCallbacksAndMessages(null);
         base.OnPause();
+    }
+
+    private DateTime Today() => TimeMath.ToWall(AppState.Clock.UtcNow, AppState.Clock.Zone).Date;
+
+    /// <summary>Wakes at the next time shown coming up, and at least once a minute for the date.</summary>
+    private void ScheduleTick()
+    {
+        _ticks.RemoveCallbacksAndMessages(null);
+        var wait = _nextChange is { } at ? at - AppState.Clock.UtcNow + TimeSpan.FromMilliseconds(200) : TimeSpan.MaxValue;
+        long ms = wait < TimeSpan.FromMilliseconds(200) ? 200 : wait > TimeSpan.FromMinutes(1) ? 60_000 : (long)wait.TotalMilliseconds;
+        _ticks.PostDelayed(() =>
+        {
+            if (Today() != _builtOn || AppState.Clock.UtcNow >= _nextChange) Build();
+            else ScheduleTick();
+        }, ms);
     }
 
     private void ShowMonth(DateTime month)
@@ -65,7 +85,11 @@ public sealed class CalendarActivity : Screen
     private void Build()
     {
         var culture = CultureInfo.CurrentCulture;
-        _days = CalendarMonth.Build(AppState.Store.Live(), _month.Year, _month.Month, AppState.Clock.UtcNow, AppState.Clock.Zone, culture);
+        var now = AppState.Clock.UtcNow;
+        _builtOn = Today();
+        _days = CalendarMonth.Build(AppState.Store.Live(), _month.Year, _month.Month, now, AppState.Clock.Zone, culture);
+        _nextChange = CalendarMonth.NextChange(_days, now);
+        ScheduleTick();   // Build runs only while resumed: OnPause unsubscribes and cancels
         Find<TextView>(Resource.Id.month).Text = _month.ToString("MMMM yyyy", culture);
 
         var grid = Find<GridLayout>(Resource.Id.grid);

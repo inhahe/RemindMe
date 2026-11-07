@@ -1,12 +1,12 @@
 <Window x:Class="RemindMe.Desktop.CalendarWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:local="clr-namespace:RemindMe.Desktop"
         Title="Calendar" Icon="app.ico"
         Width="1080" Height="700" MinWidth="720" MinHeight="480"
         WindowStartupLocation="CenterOwner" ShowInTaskbar="True">
     <Window.Resources>
-        <!-- A day in the grid: a card, shaded under the mouse. The chosen day's border is
-             set in code, in the accent colour. -->
+        <!-- A day in the grid: a card, shaded under the mouse. -->
         <Style x:Key="DayCell" TargetType="Border">
             <Setter Property="Background" Value="{DynamicResource CardBackgroundFillColorDefaultBrush}" />
             <Setter Property="BorderBrush" Value="{DynamicResource CardStrokeColorDefaultBrush}" />
@@ -21,22 +21,29 @@
                 </Trigger>
             </Style.Triggers>
         </Style>
+        <!-- The chosen day: outlined in the accent colour, its contents where they were. -->
+        <Style x:Key="ChosenDayCell" TargetType="Border" BasedOn="{StaticResource DayCell}">
+            <Setter Property="BorderBrush" Value="{DynamicResource AccentFillColorDefaultBrush}" />
+            <Setter Property="BorderThickness" Value="2" />
+            <Setter Property="Padding" Value="5,3" />
+        </Style>
     </Window.Resources>
     <DockPanel Margin="10">
         <DockPanel DockPanel.Dock="Top" Margin="0,0,0,8" LastChildFill="False">
-            <!-- The arrow buttons as tall as Today: the icon font's lines are shorter than text's. -->
+            <!-- The arrow buttons stretch to Today's height: the icon font's lines are shorter
+                 than text's, and the theme centres buttons. -->
             <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                <Button x:Name="PrevButton" Click="Prev_Click" MinWidth="0" MinHeight="{Binding ActualHeight, ElementName=TodayButton}"
+                <Button x:Name="PrevButton" Click="Prev_Click" MinWidth="0" VerticalAlignment="Stretch"
                         ToolTip="Previous month" AutomationProperties.Name="Previous month">
-                    <TextBlock Style="{StaticResource Icon}" Text="&#xE76B;" FontSize="12" />
+                    <TextBlock Style="{StaticResource Icon}" Text="{x:Static local:Icons.Previous}" FontSize="12" />
                 </Button>
                 <TextBlock x:Name="MonthTitle" FontSize="18" FontWeight="SemiBold" Margin="12,0" MinWidth="200"
                            TextAlignment="Center" VerticalAlignment="Center" />
-                <Button x:Name="NextButton" Click="Next_Click" MinWidth="0" MinHeight="{Binding ActualHeight, ElementName=TodayButton}"
+                <Button x:Name="NextButton" Click="Next_Click" MinWidth="0" VerticalAlignment="Stretch"
                         ToolTip="Next month" AutomationProperties.Name="Next month">
-                    <TextBlock Style="{StaticResource Icon}" Text="&#xE76C;" FontSize="12" />
+                    <TextBlock Style="{StaticResource Icon}" Text="{x:Static local:Icons.Next}" FontSize="12" />
                 </Button>
-                <Button x:Name="TodayButton" Content="_Today" Click="Today_Click" MinWidth="0" Margin="12,0,0,0" />
+                <Button Content="_Today" Click="Today_Click" MinWidth="0" Margin="12,0,0,0" />
             </StackPanel>
             <TextBlock DockPanel.Dock="Right" Style="{StaticResource Hint}" VerticalAlignment="Center"
                        Text="Red: came up, not marked done yet. ~: an estimate, for a task that restarts when marked done. Paused tasks aren't shown." />

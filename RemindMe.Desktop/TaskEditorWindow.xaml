@@ -8,6 +8,7 @@
         <Grid.RowDefinitions>
             <RowDefinition Height="*" />
             <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
         <ScrollViewer VerticalScrollBarVisibility="Auto">
             <StackPanel Margin="14,10,14,4">
@@ -32,7 +33,7 @@
                                         IsEnabled="{Binding IsChecked, ElementName=IntervalRadio}">
                                 <WrapPanel>
                                     <TextBlock Text="Every " VerticalAlignment="Center" />
-                                    <TextBox x:Name="IntervalCount" Style="{StaticResource Small}" Width="56" />
+                                    <TextBox x:Name="IntervalCount" Style="{StaticResource Small}" />
                                     <ComboBox x:Name="IntervalUnitBox" Width="110" Margin="6,0,0,0" />
                                 </WrapPanel>
                                 <WrapPanel Margin="0,6,0,0">
@@ -63,7 +64,7 @@
                                 </WrapPanel>
                                 <WrapPanel Margin="0,6,0,0">
                                     <TextBlock Text="Every " VerticalAlignment="Center" />
-                                    <TextBox x:Name="WeekIntervalBox" Style="{StaticResource Small}" Width="56" />
+                                    <TextBox x:Name="WeekIntervalBox" Style="{StaticResource Small}" />
                                     <TextBlock Text=" weeks, starting the week of " VerticalAlignment="Center" />
                                     <DatePicker x:Name="WeeksFromDate" Width="165" />
                                 </WrapPanel>
@@ -135,10 +136,11 @@
                                    Text="Of the system volume. A fade-in starts quietly and grows to this." />
                     </StackPanel>
                 </Border>
-                <TextBlock x:Name="ErrorText" Style="{StaticResource Error}" Margin="0,2,0,0" />
             </StackPanel>
         </ScrollViewer>
-        <StackPanel Grid.Row="1" Orientation="Horizontal" HorizontalAlignment="Right" Margin="14,6,14,12">
+        <!-- Below the scrolling part, so an error is seen when Save finds one. -->
+        <TextBlock Grid.Row="1" x:Name="ErrorText" Style="{StaticResource Error}" Margin="14,8,14,0" />
+        <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Right" Margin="14,6,14,12">
             <!-- No IsDefault button: Enter never saves; only a click (or Alt+S) does. -->
             <Button Content="_Save" Click="Save_Click" Style="{StaticResource Primary}" />
             <!-- IsCancel makes Esc press it; the window isn't modal, so Click closes it. -->

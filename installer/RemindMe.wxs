@@ -60,7 +60,8 @@
                   ExeCommand="&quot;[INSTALLFOLDER]RemindMe.exe&quot;"
                   Execute="immediate" Return="asyncNoWait" Impersonate="yes" />
 
-    <!-- Welcome, the license (MIT, as in LICENSE), the install folder, then installing. -->
+    <!-- Welcome, the license, the install folder, then installing. build-msi.ps1 writes
+         License.rtf from LICENSE into its work folder, a bind path. -->
     <ui:WixUI Id="WixUI_InstallDir" InstallDirectory="INSTALLFOLDER" />
     <WixVariable Id="WixUILicenseRtf" Value="License.rtf" />
     <Property Id="WIXUI_EXITDIALOGOPTIONALCHECKBOXTEXT" Value="Launch RemindMe now" />

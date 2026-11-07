@@ -574,34 +574,52 @@ separately (see *Simplification opportunities*).
   light or dark mode, and switching when it changes. `App.xaml` merges
   `PresentationFramework.Fluent`'s `Themes/Fluent.xaml` itself, so that its own
   styles can be `BasedOn` the theme's named styles (`DefaultButtonStyle`,
-  `AccentButtonStyle`, ...) while the file loads. WPF reads the mode back from
-  that file's name (`Fluent.xaml` is "System"; `Fluent.Light.xaml` or
-  `Fluent.Dark.xaml` would pin one), which overrides the `ThemeMode` attribute.
-- A style without `BasedOn` would bring back the old Aero look, and one
-  `BasedOn="{StaticResource {x:Type Button}}"` in `App.xaml` finds itself.
+  `AccentButtonStyle`, ...) while the file loads. That merge also sets the
+  mode: WPF reads it from the file's name (`Fluent.xaml` is "System";
+  `Fluent.Light.xaml` or `Fluent.Dark.xaml` would pin one) and replaces the
+  dictionary with the theme in Windows' colours, again whenever Windows
+  changes. `Application.ThemeMode` is left unset: it would insert a second copy
+  of the theme ahead of this one.
+- A style without `BasedOn` would bring back the old Aero look, and an implicit
+  one `BasedOn="{StaticResource {x:Type Button}}"` in `App.xaml` finds itself (a
+  keyed one, such as `PaneRadio`, finds the implicit style).
 - Colours are the theme's brushes as `DynamicResource`
   (`TextFillColorSecondaryBrush`, `SystemFillColorCriticalBrush`,
   `CardBackgroundFillColorDefaultBrush`, ...), never fixed values; code sets them
   with `SetResourceReference` (the calendar's cells). Shared styles in
-  `App.xaml`: `Pane` and `NestedPane` (cards), `Section`, `Hint`, `Error`,
-  `Primary` (the window's main button, in the accent colour), `ToolButton` (the
-  toolbar's, flat, with its own template), `Small` (number boxes), `Icon`.
-- Icons are characters of Windows' icon font, Segoe Fluent Icons. A button keeps
-  its text as its `Content`, so screen readers name it and its access key works;
-  `Icons.Glyph`, an attached property, gives the icon, which the `WithIcon`
-  template puts before the text.
+  `App.xaml`: `Pane` and `NestedPane` (cards), `Section`, `Hint`, `Error`
+  (collapsed while empty), `Primary` (the window's main button, in the accent
+  colour), `ToolButton` (the toolbar's, flat, with its own template), `Small`
+  (number boxes), `Icon`.
+- Icons are characters of Windows' icon font, Segoe Fluent Icons, named in
+  `Icons` (XAML: `{x:Static local:Icons.Edit}`). A button keeps its text as its
+  `Content`, so screen readers name it and its access key works; `Icons.Glyph`,
+  an attached property, gives the icon, which the `WithIcon` template puts
+  before the text.
+- The main window's toolbar is a `ToolBar` with a template of its own (`Bar`):
+  too narrow for its buttons, it puts the last ones in a menu under a More
+  button. The button keeps its room while hidden, since showing it would take
+  room from a button and change what fits. Devices, Calendar, Settings and Exit
+  are a plain row docked first, so they stay.
 - Workarounds for the theme: its accent button doesn't show access keys (the
   `AccessKeyText` template does); its text box shows a clear button over the
   text when focused unless it wraps (`Small` sets `WrapWithOverflow`, which never
-  breaks a number); its buttons are `VerticalAlignment="Center"` and
-  `HorizontalAlignment="Left"` by default.
-- `ScreenFit` keeps the tall dialogs (the editor, Settings, Devices) on the
-  screen they open on: no taller than its work area, their contents scrolling
-  above fixed buttons, and moved back inside it if centring on the owner left an
-  edge outside.
+  breaks a number); its toolbar's overflow chevron is faint and easily missed;
+  its buttons are `VerticalAlignment="Center"` and `HorizontalAlignment="Left"`
+  by default.
+- `ScreenFit` keeps the windows that size themselves to their contents (the
+  editor, Settings, Devices and the alarm) on their screen: no taller than its
+  work area, their contents scrolling above the buttons and the error line,
+  which stay in view. It starts from the screen the window opens on (its
+  owner's, or the mouse's for the alarm, as WPF centres them), moves the window
+  back inside when it opens or grows, and takes the new screen's height when it
+  is moved to another.
 - The tray icon is WinForms' `NotifyIcon`, with a WPF `ContextMenu`
-  (`MainWindow.xaml`'s `TrayMenu`) so the menu takes the theme too. Opening it
-  makes its window the foreground, or a click elsewhere wouldn't close it.
+  (`MainWindow.xaml`'s `TrayMenu`) so the menu takes the theme too. It is not
+  shared: each opening makes a new one, with the theme as it is then, since a
+  closed menu outside every window would miss a switch between light and dark.
+  Opening it makes its window the foreground, or a click elsewhere wouldn't
+  close it.
 
 ## Android app
 
@@ -793,7 +811,8 @@ command separator to `cmd`.
   - A Start menu shortcut.
   - Firewall exceptions for the exe on private and domain networks (not
     public), which replace the first-run prompt.
-  - A license page: the MIT license of `LICENSE`, as `installer/License.rtf`.
+  - A license page: `LICENSE`, which the script turns into the RTF the page
+    needs (`Write-LicenseRtf`), so the text is kept in one place.
   - "Launch now" on the last page, run as the installing user.
   - An upgrade first runs the installed exe with `--exit`, which signals the
     running copy (through a named event per data folder, like the existing

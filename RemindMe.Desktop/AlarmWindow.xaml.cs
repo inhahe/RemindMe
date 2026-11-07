@@ -34,13 +34,13 @@ public partial class AlarmWindow : Window
     public AlarmWindow(AlarmCoordinator owner, TaskStatus st)
     {
         InitializeComponent();
+        ScreenFit.Apply(this);
         _owner = owner;
         _id = st.Task.Id;
         var d = st.Task.Def;
         RestartPanel.Visibility = d.Kind == ScheduleKind.Interval ? Visibility.Visible : Visibility.Collapsed;
         ShowChoices(d);
         LatePanel.Visibility = Visibility.Collapsed;
-        SoundProblem.Visibility = Visibility.Collapsed;
         SilenceButton.IsEnabled = false;
         foreach (var preset in AlarmEngine.SnoozePresets)
         {
@@ -61,7 +61,6 @@ public partial class AlarmWindow : Window
     {
         if (who != this) return;
         SoundProblem.Text = message;
-        SoundProblem.Visibility = Visibility.Visible;
     }
 
     private void ShowChoices(TaskDefinition d)
@@ -97,8 +96,7 @@ public partial class AlarmWindow : Window
         else LatePanel.Visibility = Visibility.Collapsed;
 
         var path = SoundService.Resolve(st.Task.Def.SoundFor(Platforms.Windows), out var problem);
-        SoundProblem.Text = problem ?? "";
-        SoundProblem.Visibility = problem is null ? Visibility.Collapsed : Visibility.Visible;
+        SoundProblem.Text = problem ?? "";   // the Error style hides it while empty
         var s = AppHost.Settings;
         _owner.Sounds.Play(this, path, loop: s.SoundModeFor(st.Task.Def) == SoundMode.Repeat,
             volume: s.VolumeFor(st.Task.Def), fadeIn: s.FadeInFor(st.Task.Def));

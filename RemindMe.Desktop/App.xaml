@@ -2,22 +2,21 @@
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:local="clr-namespace:RemindMe.Desktop"
-             ShutdownMode="OnExplicitShutdown"
-             ThemeMode="System">
-    <!-- ThemeMode: WPF's Fluent theme styles every standard control, light or dark as
-         Windows is set. The styles here add to it, so each is BasedOn the theme's own (a
-         style without BasedOn would replace it with the old look). They name the theme's
-         styles (DefaultButtonStyle) rather than its type ({x:Type Button}): an implicit
-         style here, made when first used, would find itself under its type. Colours come
-         from the theme's brushes as DynamicResource, so they change with Windows' light or
-         dark. -->
+             ShutdownMode="OnExplicitShutdown">
+    <!-- WPF's Fluent theme styles every standard control, light or dark as Windows is set.
+         The styles here add to it, so each is BasedOn the theme's own (a style without
+         BasedOn would replace it with the old look). An implicit style names the theme's
+         style (DefaultButtonStyle) rather than its type ({x:Type Button}): made when first
+         used, it would find itself under its type. Colours come from the theme's brushes as
+         DynamicResource, so they change with Windows' light or dark. -->
     <Application.Resources>
       <ResourceDictionary>
-        <!-- Merged here, ahead of the styles below, so that their BasedOn finds the Fluent
-             styles: ThemeMode alone adds them only after this file has been read. WPF then
-             takes the mode from this file's name, overriding ThemeMode above: Fluent.xaml
-             is "System", and WPF adds Windows' light or dark colours to it, and swaps them
-             when Windows changes. Fluent.Light.xaml or Fluent.Dark.xaml would fix one. -->
+        <!-- The theme, merged here so that the BasedOn below find its styles while this
+             file loads. It also sets the mode, in place of Application.ThemeMode (which
+             would load a second copy): WPF reads the mode from this file's name, where
+             Fluent.xaml means "System", and replaces this dictionary with the theme in
+             Windows' light or dark, again whenever Windows changes. Fluent.Light.xaml or
+             Fluent.Dark.xaml would pin one. -->
         <ResourceDictionary.MergedDictionaries>
             <ResourceDictionary Source="pack://application:,,,/PresentationFramework.Fluent;component/Themes/Fluent.xaml" />
         </ResourceDictionary.MergedDictionaries>
@@ -53,8 +52,8 @@
             <Setter Property="MinHeight" Value="26" />
             <Setter Property="VerticalAlignment" Value="Center" />
         </Style>
-        <Style x:Key="PaneRadio" TargetType="RadioButton" BasedOn="{StaticResource DefaultRadioButtonStyle}">
-            <Setter Property="MinHeight" Value="26" />
+        <!-- Keyed, so {x:Type RadioButton} finds the implicit style above, not itself. -->
+        <Style x:Key="PaneRadio" TargetType="RadioButton" BasedOn="{StaticResource {x:Type RadioButton}}">
             <Setter Property="FontWeight" Value="SemiBold" />
             <Setter Property="Margin" Value="0,0,0,4" />
         </Style>
@@ -129,10 +128,15 @@
             <Setter Property="Foreground" Value="{DynamicResource TextFillColorSecondaryBrush}" />
             <Setter Property="TextWrapping" Value="Wrap" />
         </Style>
-        <!-- A problem to fix before going on. -->
+        <!-- A problem to fix before going on; it takes no room while there is none. -->
         <Style x:Key="Error" TargetType="TextBlock">
             <Setter Property="Foreground" Value="{DynamicResource SystemFillColorCriticalBrush}" />
             <Setter Property="TextWrapping" Value="Wrap" />
+            <Style.Triggers>
+                <Trigger Property="Text" Value="">
+                    <Setter Property="Visibility" Value="Collapsed" />
+                </Trigger>
+            </Style.Triggers>
         </Style>
         <!-- A section's title, above its card. -->
         <Style x:Key="Section" TargetType="TextBlock">

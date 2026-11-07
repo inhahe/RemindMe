@@ -8,8 +8,10 @@
         <Grid.RowDefinitions>
             <RowDefinition Height="*" />
             <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
-        <!-- Scrolls when the screen is too short for it all (ScreenFit); the buttons stay. -->
+        <!-- Scrolls when the screen is too short for it all (ScreenFit); the error and the
+             buttons stay below it, in view. -->
         <ScrollViewer VerticalScrollBarVisibility="Auto">
             <StackPanel Margin="14,10,14,4">
                 <TextBlock Text="Defaults for tasks" Style="{StaticResource Section}" />
@@ -85,11 +87,10 @@
                                    Text="A new file a few seconds after a task is added, changed or deleted, here or on a linked device (marking done doesn't count). Every backup from the last day is kept, then one a day for 60 days, then one a month for two years. To restore, import one: it brings back deleted tasks, and doesn't undo changes made since." />
                     </StackPanel>
                 </Border>
-
-                <TextBlock x:Name="ErrorText" Style="{StaticResource Error}" />
             </StackPanel>
         </ScrollViewer>
-        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Grid.Row="1" Margin="14,6,14,12">
+        <TextBlock Grid.Row="1" x:Name="ErrorText" Style="{StaticResource Error}" Margin="14,8,14,0" />
+        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Grid.Row="2" Margin="14,6,14,12">
             <Button Content="_Save" Click="Save_Click" Style="{StaticResource Primary}" />
             <Button Content="Cancel" IsCancel="True" Margin="8,0,0,0" Click="Cancel_Click" />
         </StackPanel>

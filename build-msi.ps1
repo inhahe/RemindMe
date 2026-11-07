@@ -58,6 +58,28 @@ function Publish-Exe([string]$name, [string[]]$options) {
     return $dir
 }
 
+# Writes the installer's license page to $path, from LICENSE, so the text lives in one
+# place: a paragraph of RTF for each of LICENSE's (blank-line separated, their lines
+# joined), the first, the license's name, in bold.
+function Write-LicenseRtf([string]$path) {
+    $text = [IO.File]::ReadAllText((Join-Path $root 'LICENSE'))
+    $paragraphs = @($text.Trim() -split '\r?\n\s*\r?\n' | ForEach-Object { (($_ -split '\r?\n') | ForEach-Object { $_.Trim() }) -join ' ' })
+    $rtf = [Text.StringBuilder]::new()
+    [void]$rtf.Append('{\rtf1\ansi\deff0{\fonttbl{\f0\fnil\fcharset0 Segoe UI;}}\viewkind4\uc1\pard\sa120\f0\fs20 ')
+    for ($i = 0; $i -lt $paragraphs.Count; $i++) {
+        $escaped = [Text.StringBuilder]::new()
+        foreach ($c in $paragraphs[$i].ToCharArray()) {
+            if ($c -eq '\' -or $c -eq '{' -or $c -eq '}') { [void]$escaped.Append('\').Append($c) }
+            # \u takes a signed 16-bit number, and ? stands in for readers without Unicode.
+            elseif ([int]$c -gt 127) { [void]$escaped.Append("\u$(if ([int]$c -gt 32767) { [int]$c - 65536 } else { [int]$c })?") }
+            else { [void]$escaped.Append($c) }
+        }
+        if ($i -eq 0) { [void]$rtf.Append("\b $escaped\b0\par`n") } else { [void]$rtf.Append("$escaped\par`n") }
+    }
+    [void]$rtf.Append('}')
+    [IO.File]::WriteAllText($path, $rtf.ToString(), [Text.Encoding]::ASCII)
+}
+
 try {
     Write-Host '[1/4] Publishing the self-contained single-file exe...'
     $publish = Publish-Exe 'self-contained' @('--self-contained', 'true', '-p:EnableCompressionInSingleFile=true')
@@ -82,9 +104,10 @@ try {
     }
 
     Write-Host '[4/4] Building the MSI...'
+    Write-LicenseRtf (Join-Path $work 'License.rtf')
     wix build (Join-Path $root 'installer\RemindMe.wxs') -arch x64 `
         -d "Version=$version" -d "PublishDir=$publish" `
-        -b (Join-Path $root 'installer') -b (Join-Path $root 'RemindMe.Desktop') `
+        -b $work -b (Join-Path $root 'installer') -b (Join-Path $root 'RemindMe.Desktop') `
         -ext WixToolset.UI.wixext -ext WixToolset.Firewall.wixext -pdbtype none -o $msi
     if ($LASTEXITCODE) { throw 'wix build failed (if it mentions the EULA: wix eula accept wix7).' }
     Copy-Item -LiteralPath (Join-Path $publish 'RemindMe.exe') -Destination $exe

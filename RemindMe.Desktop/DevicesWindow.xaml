@@ -8,8 +8,10 @@
         <Grid.RowDefinitions>
             <RowDefinition Height="*" />
             <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
-        <!-- Scrolls when the screen is too short for it all (ScreenFit); the buttons stay. -->
+        <!-- Scrolls when the screen is too short for it all (ScreenFit); the error and the
+             buttons stay below it, in view. -->
         <ScrollViewer VerticalScrollBarVisibility="Auto">
             <StackPanel Margin="14,10,14,4">
                 <CheckBox x:Name="SyncEnabled" Content="_Sync tasks with my other devices" FontWeight="SemiBold" />
@@ -54,11 +56,10 @@
                         </WrapPanel>
                     </StackPanel>
                 </Border>
-
-                <TextBlock x:Name="ErrorText" Style="{StaticResource Error}" />
             </StackPanel>
         </ScrollViewer>
-        <DockPanel Grid.Row="1" Margin="14,6,14,12" LastChildFill="False">
+        <TextBlock Grid.Row="1" x:Name="ErrorText" Style="{StaticResource Error}" Margin="14,8,14,0" />
+        <DockPanel Grid.Row="2" Margin="14,6,14,12" LastChildFill="False">
             <Button DockPanel.Dock="Left" Content="Lea_ve the sync group…" Click="Leave_Click"
                     ToolTip="This device keeps its tasks but stops syncing with the others" />
             <Button DockPanel.Dock="Right" Content="Close" IsCancel="True" Margin="8,0,0,0" Click="Close_Click" />

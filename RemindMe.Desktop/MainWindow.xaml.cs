@@ -55,7 +55,7 @@ public partial class MainWindow : Window
 
         _tray = new Forms.NotifyIcon { Icon = LoadTrayIcon(), Text = "RemindMe", Visible = true };
         _tray.MouseClick += (_, e) => { if (e.Button == Forms.MouseButtons.Left) ShowFromTray(); };
-        // On the button's release, as WinForms opened its own menus.
+        // On the button's release, as Windows opens its own tray menus.
         _tray.MouseUp += (_, e) => { if (e.Button == Forms.MouseButtons.Right) ShowTrayMenu(); };
 
         AppHost.Alarms.Evaluated += OnEvaluated;

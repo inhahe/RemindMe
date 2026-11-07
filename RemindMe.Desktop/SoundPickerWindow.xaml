@@ -21,9 +21,9 @@
 
         <DockPanel Margin="0,14,0,0" LastChildFill="False">
             <Button DockPanel.Dock="Left" Click="Preview_Click" ContentTemplate="{StaticResource WithIcon}"
-                    local:Icons.Glyph="&#xE768;" Content="_Play" />
+                    local:Icons.Glyph="{x:Static local:Icons.Play}" Content="_Play" />
             <Button DockPanel.Dock="Left" Margin="6,0,0,0" Click="Stop_Click" ContentTemplate="{StaticResource WithIcon}"
-                    local:Icons.Glyph="&#xE71A;" Content="S_top" />
+                    local:Icons.Glyph="{x:Static local:Icons.Stop}" Content="S_top" />
             <Button DockPanel.Dock="Right" Content="Cancel" IsCancel="True" Margin="8,0,0,0" Click="Cancel_Click" />
             <Button DockPanel.Dock="Right" Content="_OK" Click="Ok_Click" Style="{StaticResource Primary}" />
         </DockPanel>

@@ -38,6 +38,8 @@ public partial class CalendarWindow : Window
     }
 
     private readonly MainWindow _main;
+    /// <summary>The styles of a day in the grid, and of the chosen one (CalendarWindow.xaml).</summary>
+    private readonly Style _cell, _chosenCell;
     /// <summary>Wakes at the next time shown coming up, and at least once a minute for the date.</summary>
     private readonly DispatcherTimer _clock = new();
     private DateTime _month;
@@ -51,6 +53,8 @@ public partial class CalendarWindow : Window
     {
         InitializeComponent();
         _main = main;
+        _cell = (Style)FindResource("DayCell");
+        _chosenCell = (Style)FindResource("ChosenDayCell");
         var today = TimeMath.ToWall(AppHost.Clock.UtcNow, AppHost.Clock.Zone).Date;
         _month = new DateTime(today.Year, today.Month, 1);
         _chosen = DateOnly.FromDateTime(today);
@@ -161,14 +165,7 @@ public partial class CalendarWindow : Window
         if (day.Entries.Count > LinesPerCell)
             panel.Children.Add(Ink(new TextBlock { Text = $"+{day.Entries.Count - (LinesPerCell - 1)} more", FontSize = 11 }, Quiet));
 
-        var cell = new Border { Child = panel, Style = (Style)FindResource("DayCell") };
-        if (day.Date == _chosen)
-        {
-            // A thicker border, less padding: the contents stay where they were.
-            cell.SetResourceReference(Border.BorderBrushProperty, "AccentFillColorDefaultBrush");
-            cell.BorderThickness = new Thickness(2);
-            cell.Padding = new Thickness(cell.Padding.Left - 1, cell.Padding.Top - 1, cell.Padding.Right - 1, cell.Padding.Bottom - 1);
-        }
+        var cell = new Border { Child = panel, Style = day.Date == _chosen ? _chosenCell : _cell };
         cell.MouseLeftButtonUp += (_, _) => { _chosen = day.Date; Build(); };
         return cell;
     }

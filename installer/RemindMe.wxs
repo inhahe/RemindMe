@@ -4,7 +4,8 @@
      xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui"
      xmlns:fw="http://wixtoolset.org/schemas/v4/wxs/firewall">
 
-  <!-- Supplied by build-msi.ps1 with -d; the defaults let the file build on its own. -->
+  <!-- Supplied by build-msi.ps1 with -d. Built without it, these defaults serve, and
+       License.rtf (below) must be put on a bind path: the script writes it from LICENSE. -->
   <?ifndef Version?>    <?define Version    = "0.1.0.0"?> <?endif?>
   <?ifndef PublishDir?> <?define PublishDir = "publish"?> <?endif?>
 

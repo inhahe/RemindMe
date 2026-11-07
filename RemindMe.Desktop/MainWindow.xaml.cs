@@ -150,6 +150,25 @@ public partial class MainWindow : Window
         Icons.SetGlyph(PauseButton, PauseMenuIcon.Text = resume ? Icons.Play : Icons.Pause);
     }
 
+    /// <summary>
+    /// Alt and the access key of a toolbar button in the More menu, which Windows' access
+    /// keys skip while the menu is closed: a narrow window would otherwise lose them.
+    /// </summary>
+    private void Window_PreviewTextInput(object sender, TextCompositionEventArgs e)
+    {
+        if (e.SystemText.Length != 1) return;
+        char key = char.ToUpperInvariant(e.SystemText[0]);
+        foreach (var button in MainBar.Items.OfType<System.Windows.Controls.Button>())
+        {
+            if (!System.Windows.Controls.ToolBar.GetIsOverflowItem(button) || !button.IsEnabled
+                || button.Content is not string label
+                || char.ToUpperInvariant(new System.Windows.Controls.AccessText { Text = label }.AccessKey) != key) continue;
+            button.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent, button));
+            e.Handled = true;
+            return;
+        }
+    }
+
     private void List_SelectionChanged(object sender, System.Windows.Controls.SelectionChangedEventArgs e) => UpdateButtons();
 
     private void Row_DoubleClick(object sender, MouseButtonEventArgs e)

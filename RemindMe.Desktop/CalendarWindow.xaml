@@ -33,13 +33,13 @@
             <!-- The arrow buttons stretch to Today's height: the icon font's lines are shorter
                  than text's, and the theme centres buttons. -->
             <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                <Button x:Name="PrevButton" Click="Prev_Click" MinWidth="0" VerticalAlignment="Stretch"
+                <Button Click="Prev_Click" MinWidth="0" VerticalAlignment="Stretch"
                         ToolTip="Previous month" AutomationProperties.Name="Previous month">
                     <TextBlock Style="{StaticResource Icon}" Text="{x:Static local:Icons.Previous}" FontSize="12" />
                 </Button>
                 <TextBlock x:Name="MonthTitle" FontSize="18" FontWeight="SemiBold" Margin="12,0" MinWidth="200"
                            TextAlignment="Center" VerticalAlignment="Center" />
-                <Button x:Name="NextButton" Click="Next_Click" MinWidth="0" VerticalAlignment="Stretch"
+                <Button Click="Next_Click" MinWidth="0" VerticalAlignment="Stretch"
                         ToolTip="Next month" AutomationProperties.Name="Next month">
                     <TextBlock Style="{StaticResource Icon}" Text="{x:Static local:Icons.Next}" FontSize="12" />
                 </Button>

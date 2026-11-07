@@ -11,22 +11,22 @@ namespace RemindMe.Desktop;
 /// </summary>
 public static class Icons
 {
-    public const string New = "";
-    public const string Edit = "";
-    public const string Done = "";
-    public const string ShowAlarm = "";
-    public const string Pause = "";
-    public const string Play = "";
-    public const string Stop = "";
-    public const string Restart = "";
-    public const string Delete = "";
-    public const string Devices = "";
-    public const string Calendar = "";
-    public const string Settings = "";
-    public const string Exit = "";
-    public const string Previous = "";
-    public const string Next = "";
-    public const string More = "";
+    public const string New = "\uE710";
+    public const string Edit = "\uE70F";
+    public const string Done = "\uE73E";
+    public const string ShowAlarm = "\uEA8F";
+    public const string Pause = "\uE769";
+    public const string Play = "\uE768";
+    public const string Stop = "\uE71A";
+    public const string Restart = "\uE72C";
+    public const string Delete = "\uE74D";
+    public const string Devices = "\uE895";
+    public const string Calendar = "\uE787";
+    public const string Settings = "\uE713";
+    public const string Exit = "\uE7E8";
+    public const string Previous = "\uE76B";
+    public const string Next = "\uE76C";
+    public const string More = "\uE712";
 
     public static readonly DependencyProperty GlyphProperty = DependencyProperty.RegisterAttached(
         "Glyph", typeof(string), typeof(Icons), new PropertyMetadata(""));

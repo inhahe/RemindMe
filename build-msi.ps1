@@ -81,6 +81,7 @@ function Write-LicenseRtf([string]$path) {
 }
 
 try {
+    New-Item -ItemType Directory -Force $work | Out-Null
     Write-Host '[1/4] Publishing the self-contained single-file exe...'
     $publish = Publish-Exe 'self-contained' @('--self-contained', 'true', '-p:EnableCompressionInSingleFile=true')
 

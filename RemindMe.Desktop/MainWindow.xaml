@@ -3,7 +3,8 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:local="clr-namespace:RemindMe.Desktop"
         Title="RemindMe" Icon="app.ico"
-        Width="1080" Height="540" MinWidth="560" MinHeight="260">
+        Width="1080" Height="540" MinWidth="560" MinHeight="260"
+        PreviewTextInput="Window_PreviewTextInput">
     <Window.Resources>
         <!-- BasedOn the theme's row for a GridView: the plain list item has no columns. -->
         <Style x:Key="RowStyle" TargetType="ListViewItem"
@@ -55,6 +56,8 @@
              it would take room from a button, changing what fits. The theme's template has a
              grip for moving the toolbar, and a faint chevron for the menu, easily missed. -->
         <Style x:Key="Bar" TargetType="ToolBar" BasedOn="{StaticResource {x:Type ToolBar}}">
+            <!-- Tab goes on past the toolbar, which by default keeps it cycling inside. -->
+            <Setter Property="KeyboardNavigation.TabNavigation" Value="Continue" />
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="ToolBar">
@@ -123,7 +126,7 @@
                             ToolTip="Quit RemindMe: alarms don't ring until it runs again"
                             local:Icons.Glyph="{x:Static local:Icons.Exit}" Content="E_xit" />
                 </StackPanel>
-                <ToolBar Style="{StaticResource Bar}">
+                <ToolBar x:Name="MainBar" Style="{StaticResource Bar}">
                     <Button Style="{StaticResource Primary}" ContentTemplate="{StaticResource WithIcon}"
                             Click="New_Click" Margin="0,0,10,0" MinWidth="0" ToolBar.OverflowMode="Never"
                             local:Icons.Glyph="{x:Static local:Icons.New}" Content="_New task…" />

@@ -600,7 +600,10 @@ separately (see *Simplification opportunities*).
   too narrow for its buttons, it puts the last ones in a menu under a More
   button. The button keeps its room while hidden, since showing it would take
   room from a button and change what fits. Devices, Calendar, Settings and Exit
-  are a plain row docked first, so they stay.
+  are a plain row docked first, so they stay. The toolbar lets Tab go on past it
+  (a `ToolBar` keeps it cycling inside), and the main window's
+  `PreviewTextInput` gives Alt and the access key to the buttons in the More
+  menu, which Windows' access keys skip while the menu is closed.
 - Workarounds for the theme: its accent button doesn't show access keys (the
   `AccessKeyText` template does); its text box shows a clear button over the
   text when focused unless it wraps (`Small` sets `WrapWithOverflow`, which never
@@ -611,13 +614,18 @@ separately (see *Simplification opportunities*).
   editor, Settings, Devices and the alarm) on their screen: no taller than its
   work area, their contents scrolling above the buttons and the error line,
   which stay in view. It starts from the screen the window opens on (its
-  owner's, or the mouse's for the alarm, as WPF centres them), moves the window
-  back inside when it opens or grows, and takes the new screen's height when it
-  is moved to another.
+  owner's, or the mouse's for the alarm, as WPF centres them), and moves the
+  window back inside when it opens or its contents grow it. Where the user puts
+  or sizes it is left alone: nothing moves while it is maximized, during
+  Windows' move and size loop, or once the user has sized it (`SizeToContent`
+  is then `Manual`); dragged to another screen, it takes that screen's height
+  when the drag ends.
 - The tray icon is WinForms' `NotifyIcon`, with a WPF `ContextMenu`
   (`MainWindow.xaml`'s `TrayMenu`) so the menu takes the theme too. It is not
-  shared: each opening makes a new one, with the theme as it is then, since a
-  closed menu outside every window would miss a switch between light and dark.
+  shared: each opening makes a new one, with the theme as it is then. A test app
+  showed a closed menu kept in resources, outside every window, keeping its
+  light colours after a switch to dark, while a menu set as an element's
+  `ContextMenu` (the task list's) followed it.
   Opening it makes its window the foreground, or a click elsewhere wouldn't
   close it.
 

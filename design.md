@@ -176,17 +176,21 @@ separately (see *Simplification opportunities*).
 - **Port 37660**, TCP for sessions and UDP for discovery. Different from
   LanLink's 37656, so both apps can run on one machine.
 - **Discovery**: a UDP broadcast every 3 s on each interface's subnet broadcast
-  address: `{app, proto, node, name, port, group, at, mac}`. `group` is the sync
-  group's public ID, not its secret, so claiming it proves nothing: `mac` is an
-  HMAC-SHA256 of the other fields under a key derived from the group secret, and
-  an announcement claiming this node's group without a valid one is dropped.
-  `at`, the sending time, makes a recording useless: each member's announcements
-  must be newer than the last one accepted from it, and within 10 minutes of this
-  device's clock. A replay, from anywhere, is ignored, so it can neither keep a
-  device that left the group a member nor point dials at the replayer. (A device
-  whose clock is further off goes unannounced, and the log says why; remote
-  links still work.) Only members so proven are shown as linked from
-  announcements alone, and dialled.
+  address: `{app, proto, node, name, port, group, at, boot, seq, mac}`. `group`
+  is the sync group's public ID, not its secret, so claiming it proves nothing:
+  `mac` is an HMAC-SHA256 of the other fields under a key derived from the group
+  secret, and an announcement claiming this node's group without a valid one is
+  dropped. The rest makes a recording useless (`AdmitMemberAnnouncement`).
+  `boot` is a random ID of the sender's process and `seq` its announcement's
+  number in it: within one process the number must grow, which no change of
+  either clock can upset. An announcement from another process of the sender
+  must have a later sending time (`at`) than the last accepted, and every one
+  must be within 10 minutes of this device's clock. So a replay, from anywhere,
+  is ignored: it can neither keep a device that left the group a member nor
+  point dials at the replayer. (A device whose clock is further off goes
+  unannounced, and so, until its clock catches up, does one that restarted with
+  its clock set back; the log says why, and remote links still work.) Only
+  members so proven are shown as linked from announcements alone, and dialled.
 - **Sessions**: frames of `[4B length][body]`. Each side sends a plaintext
   `hello`: `{node, name, group, nonce, proto}`. With the same group, both
   derive per-direction keys from the group secret and the two nonces (HKDF-SHA256),
@@ -263,7 +267,10 @@ separately (see *Simplification opportunities*).
   no or went away), its prompt is `Withdrawn` and the screens close it. A round
   that ends without linking leaves the connection free to try again, and the
   requester always hears Accepted, Rejected or Failed. A round unanswered for 5
-  minutes ends with `pair_reject {reason: timeout}`.
+  minutes ends with `pair_reject {reason: timeout}`. The accepter waits 30 s
+  longer, so the requester, which started first, always gives up first: a
+  `pair_group` sent just before then still finds the accepter's round open,
+  rather than a requester reporting a link that never happened.
 - **Replication**: when a session starts, both sides send a `digest`:
   `{id, defVersion, stateVersion, doneThrough}` for every task. Each then pushes
   `tasks` for every record where it is newer in any of those three, or that the

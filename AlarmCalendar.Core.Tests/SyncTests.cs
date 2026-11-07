@@ -457,13 +457,15 @@ public sealed class SyncTests : IDisposable
     }
 
     /// <summary>What member <paramref name="node"/> of <paramref name="group"/>'s group would
-    /// announce at <paramref name="at"/>.</summary>
-    private static SyncMessage MemberAnnouncement(SyncIdentity group, string node, int port, DateTimeOffset at)
+    /// announce at <paramref name="at"/>, as announcement <paramref name="seq"/> of its process
+    /// <paramref name="boot"/>.</summary>
+    private static SyncMessage MemberAnnouncement(SyncIdentity group, string node, int port, DateTimeOffset at,
+        string boot = "0123456789abcdef0123456789abcdef", long seq = 1)
     {
         var m = new SyncMessage
         {
             Type = MessageTypes.Announce, App = Protocol.App, Proto = Protocol.Version, Node = node, Name = "B",
-            Group = group.GroupId, Port = port, At = at.ToUnixTimeSeconds(),
+            Group = group.GroupId, Port = port, At = at.ToUnixTimeSeconds(), Boot = boot, Seq = seq,
         };
         m.Mac = SyncCrypto.AnnouncementMac(Convert.FromBase64String(group.GroupKeyBase64), m);
         return m;
@@ -484,6 +486,50 @@ public sealed class SyncTests : IDisposable
         ea.OnAnnounced(recorded, IPAddress.Loopback);
         ea.OnAnnounced(recorded, IPAddress.Parse("127.0.0.5"));
         Assert.Equal("127.0.0.1", ea.Peers().Single(p => p.NodeId == b).Address);
+
+        // Nor does one from an earlier run of the member, though recent.
+        ea.OnAnnounced(MemberAnnouncement(a, b, 9, DateTimeOffset.UtcNow.AddMinutes(-2), boot: Guid.NewGuid().ToString("N"), seq: 50),
+            IPAddress.Parse("127.0.0.6"));
+        Assert.Equal("127.0.0.1", ea.Peers().Single(p => p.NodeId == b).Address);
+    }
+
+    [Fact]
+    public void AMemberWhoseClockStepsBackIsStillHeard()
+    {
+        var a = NewIdentity("A");
+        var (ea, _) = Node(a);
+        var b = Guid.NewGuid().ToString("N");
+        ea.OnAnnounced(MemberAnnouncement(a, b, 9, DateTimeOffset.UtcNow, seq: 7), IPAddress.Loopback);
+        // Its clock is corrected 5 minutes back; its next announcement, from a new address.
+        ea.OnAnnounced(MemberAnnouncement(a, b, 9, DateTimeOffset.UtcNow.AddMinutes(-5), seq: 8), IPAddress.Parse("127.0.0.7"));
+        Assert.Equal("127.0.0.7", ea.Peers().Single(p => p.NodeId == b).Address);
+    }
+
+    [Fact]
+    public async Task AnUnansweredPairingTimesOutOnBothSidesAndFreesThem()
+    {
+        var quick = Options(0, TimeSpan.FromMilliseconds(200), IPAddress.Loopback) with
+        {
+            PairingTimeout = TimeSpan.FromSeconds(1.5), HousekeepingInterval = TimeSpan.FromMilliseconds(100),
+        };
+        var (ea, _) = Node(NewIdentity("A"), quick);
+        var (eb, _) = Node(NewIdentity("B"), quick with { RemoteAddresses = [Addr(ea)] });
+        var aPrompts = new List<PairPrompt>();
+        ea.PairRequested += p => { lock (aPrompts) aPrompts.Add(p); };
+        PairPrompt? bPrompt = null;
+        eb.PairRequested += p => bPrompt = p;
+        var progress = new List<PairProgress>();
+        eb.PairProgressed += p => { lock (progress) progress.Add(p); };
+        await WaitFor(() => eb.Peers().Any(p => p.Connected), "B connected to A");
+
+        await eb.RequestPairingAsync(ea.Identity.NodeId);   // and nobody answers
+        await WaitFor(() => { lock (progress) return progress.Any(p => p.Stage == PairStage.Failed); }, "B giving up");
+        lock (progress) Assert.Equal("Nobody answered in time.", progress.Single(p => p.Stage == PairStage.Failed).Message);
+        Assert.True(bPrompt!.IsWithdrawn);
+        await WaitFor(() => { lock (aPrompts) return aPrompts[0].IsWithdrawn; }, "A's prompt withdrawn too");
+
+        await eb.RequestPairingAsync(ea.Identity.NodeId);
+        await WaitFor(() => { lock (aPrompts) return aPrompts.Count == 2; }, "A asked again, nothing left busy");
     }
 
     [Fact]

@@ -49,6 +49,11 @@ public sealed class SyncMessage
     /// <summary>When an announcement was sent, in Unix seconds; covered by <see cref="Mac"/>, so a
     /// recorded announcement can't be passed off as a later one.</summary>
     public long? At { get; set; }
+    /// <summary>A random ID of the sending process, and the number of its announcement within
+    /// it, both covered by <see cref="Mac"/>: within one process the number must grow, which no
+    /// change of either clock can upset.</summary>
+    public string? Boot { get; set; }
+    public long? Seq { get; set; }
 
     // replication
     public List<DigestEntry>? Digest { get; set; }
@@ -220,7 +225,7 @@ public static class SyncCrypto
     /// <summary>Whether <paramref name="m"/> carries a valid <see cref="AnnouncementMac"/> under <paramref name="groupKey"/>.</summary>
     public static bool HasValidMac(byte[] groupKey, SyncMessage m)
     {
-        if (m.Mac is null || !Protocol.IsValidNodeId(m.Group)) return false;
+        if (m.Mac is null || !Protocol.IsValidNodeId(m.Group) || !Protocol.IsValidNodeId(m.Boot)) return false;
         byte[] given;
         try { given = Convert.FromBase64String(m.Mac); }
         catch (FormatException) { return false; }
@@ -229,9 +234,10 @@ public static class SyncCrypto
 
     private static byte[] AnnouncementMacBytes(byte[] groupKey, SyncMessage m)
     {
-        // The node and group IDs have a fixed length and the port, version and time are
-        // numbers, so with the name last no two announcements share this text.
-        var data = Encoding.UTF8.GetBytes($"{m.Node}\n{m.Group}\n{m.Port}\n{m.Proto}\n{m.At}\n{m.Name}");
+        // The node, group and boot IDs have a fixed length (or are refused) and the port,
+        // version, time and number are numbers, so with the name last no two announcements
+        // share this text.
+        var data = Encoding.UTF8.GetBytes($"{m.Node}\n{m.Group}\n{m.Port}\n{m.Proto}\n{m.At}\n{m.Boot}\n{m.Seq}\n{m.Name}");
         return HMACSHA256.HashData(AnnouncementKey(groupKey), data);
     }
 

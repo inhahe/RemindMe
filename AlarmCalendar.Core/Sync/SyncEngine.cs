@@ -105,7 +105,7 @@ public sealed class SyncEngine : IDisposable
     /// announce any number of made-up devices.</summary>
     private const int MaxNearby = 256;
     /// <summary>A member's announcement dated further than this from this device's clock is
-    /// ignored (<see cref="IsFreshMemberAnnouncement"/>).</summary>
+    /// ignored (<see cref="AdmitMemberAnnouncement"/>).</summary>
     private static readonly TimeSpan MaxClockDifference = TimeSpan.FromMinutes(10);
 
     private readonly TaskStore _store;
@@ -121,10 +121,15 @@ public sealed class SyncEngine : IDisposable
     private readonly ConcurrentDictionary<string, byte> _dialing = new();
     private readonly ConcurrentDictionary<string, byte> _dialFailLogged = new();
     private readonly ConcurrentDictionary<string, string> _remoteErrors = new();
-    /// <summary>The time of the last announcement accepted from each member (only proven
-    /// members get here, so a flood can't grow it).</summary>
-    private readonly ConcurrentDictionary<string, long> _memberAt = new();
+    /// <summary>The last announcement accepted from each member (only proven members get
+    /// here, so a flood can't grow it).</summary>
+    private readonly ConcurrentDictionary<string, LastAnnouncement> _memberLast = new();
     private readonly ConcurrentDictionary<string, byte> _clockLogged = new();
+    /// <summary>This process's ID in its announcements, and how many it has sent.</summary>
+    private readonly string _boot = Guid.NewGuid().ToString("N");
+    private long _announced;
+
+    private sealed record LastAnnouncement(string Boot, long Seq, long At);
     private SyncIdentity _id;
     private TcpListener? _listener;
     private Discovery? _discovery;
@@ -296,6 +301,8 @@ public sealed class SyncEngine : IDisposable
         if (type == MessageTypes.Announce)
         {
             m.At = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+            m.Boot = _boot;
+            m.Seq = Interlocked.Increment(ref _announced);
             m.Mac = SyncCrypto.AnnouncementMac(id.GroupKey, m);
         }
         return m;
@@ -403,7 +410,7 @@ public sealed class SyncEngine : IDisposable
         // announcement carries it), so only the MAC makes a device a member here. A claim to
         // the group without it is a forgery, and dropped.
         bool member = msg.Group == id.GroupId;
-        if (member && !IsFreshMemberAnnouncement(msg, id, now)) return;
+        if (member && !AdmitMemberAnnouncement(msg, id, now)) return;
         bool known = _nearby.TryGetValue(node, out var old);
         // Nor may a stranger's announcement give a member's ID and push the member out.
         if (known && !member && IsMember(old!, id.GroupId) && now - old!.Seen <= PeerExpiry) return;
@@ -431,24 +438,37 @@ public sealed class SyncEngine : IDisposable
     }
 
     /// <summary>
-    /// The MAC shows that a member sent an announcement once; its time, that this isn't a
-    /// recording. Each member's announcements must be newer than the last one accepted from
-    /// it, so a replay (from anywhere) is ignored, and recent, so one recorded before this
-    /// process started is too. Otherwise a recording would keep a device that has left the
-    /// group a member here for good, at whatever address it was replayed from.
+    /// Decides whether a member's announcement is a new one, and if so records it as the last.
+    /// The MAC shows that a member sent it once; the rest, that it isn't a recording. Within
+    /// one process of the sender (<see cref="SyncMessage.Boot"/>), its number must grow, so a
+    /// replay, from anywhere, is ignored whatever either clock does. One from another process
+    /// of the sender must be newer than the last accepted, and every one must be within
+    /// <see cref="MaxClockDifference"/> of this device's clock, so a recording made before
+    /// this process started is ignored too. Otherwise a recording would keep a device that
+    /// has left the group a member here for good, at whatever address it was replayed from.
     /// </summary>
-    private bool IsFreshMemberAnnouncement(SyncMessage msg, SyncIdentity id, DateTimeOffset now)
+    private bool AdmitMemberAnnouncement(SyncMessage msg, SyncIdentity id, DateTimeOffset now)
     {
-        if (!SyncCrypto.HasValidMac(id.GroupKey, msg) || msg.At is not { } at) return false;
+        if (!SyncCrypto.HasValidMac(id.GroupKey, msg) || msg.At is not { } at || msg.Seq is not { } seq) return false;
+        var name = Protocol.CleanName(msg.Name, msg.Node![..8]);
         if (Math.Abs(now.ToUnixTimeSeconds() - at) > MaxClockDifference.TotalSeconds)
         {
-            if (_clockLogged.TryAdd(msg.Node!, 0))
-                _log?.Invoke($"Ignored announcements from {Protocol.CleanName(msg.Name, msg.Node![..8])}: its clock is "
+            if (_clockLogged.TryAdd(msg.Node, 0))
+                _log?.Invoke($"Ignored announcements from {name}: its clock is "
                     + $"{TextFormat.Span(DateTimeOffset.FromUnixTimeSeconds(at).UtcDateTime, now.UtcDateTime, 2)} off this device's.");
             return false;
         }
-        if (_memberAt.TryGetValue(msg.Node!, out var last) && at <= last) return false;
-        _memberAt[msg.Node!] = at;
+        if (_memberLast.TryGetValue(msg.Node, out var last))
+        {
+            if (msg.Boot == last.Boot ? seq <= last.Seq : at <= last.At)
+            {
+                if (msg.Boot != last.Boot && _clockLogged.TryAdd(msg.Node + " back", 0))
+                    _log?.Invoke($"Ignored announcements from {name} dated before ones already seen: "
+                        + "its clock went back since it restarted, or they are being replayed.");
+                return false;
+            }
+        }
+        _memberLast[msg.Node] = new LastAnnouncement(msg.Boot!, seq, at);
         return true;
     }
 
@@ -548,13 +568,14 @@ public sealed class SyncEngine : IDisposable
             {
                 idle = _allSessions.Where(s => s.PeerGroup != group && s.Round is null && !s.IsOutgoing
                     && now - s.LastActive > _options.UnlinkedIdleTimeout).ToList();
-                unanswered = _allSessions.Where(s => s.Round is { } r && now - r.StartedAt > _options.PairingTimeout)
+                unanswered = _allSessions.Where(s => s.Round is { } r && now - r.StartedAt > TimeoutOf(r))
                     .Select(s => (s, s.Round!)).ToList();
             }
             foreach (var s in idle) s.Close();
+            // LinkedJustNow stays as it is: the other side may have linked a moment ago, and its
+            // pair_reject is what says otherwise. At worst, a remote link redials once at once.
             foreach (var (s, r) in unanswered)
             {
-                s.LinkedJustNow = false;
                 _ = s.SendAsync(new SyncMessage { Type = MessageTypes.PairReject, Round = r.Id, Reason = "timeout" });
                 EndPairing(s, r, PairStage.Failed, "Nobody answered in time.");
             }
@@ -716,7 +737,18 @@ public sealed class SyncEngine : IDisposable
     // on a later one, however the two users' answers interleave. One round at a time on each
     // side, and per connection.
 
-    private int LinkedCount() => Math.Clamp(_options.LinkedDeviceCount?.Invoke() ?? 0, 0, 10_000);
+    private int LinkedCount() => ClampMembers(_options.LinkedDeviceCount?.Invoke());
+
+    /// <summary>A member count as both sides hash it into the commitment and the code.</summary>
+    private static int ClampMembers(int? members) => Math.Clamp(members ?? 0, 0, 10_000);
+
+    /// <summary>How long a round may wait for its answers. The accepter waits a little longer,
+    /// so the requester, which starts first, always gives up first: a pair_group it sent just
+    /// before then can't reach an accepter that has already given up, leaving the requester
+    /// reporting a link that never happened.</summary>
+    private TimeSpan TimeoutOf(PairRound r) => _options.PairingTimeout + (r.Initiator ? TimeSpan.Zero : AccepterGrace);
+
+    private static readonly TimeSpan AccepterGrace = TimeSpan.FromSeconds(30);
 
     /// <summary>Starts pairing with the device <paramref name="node"/>. Progress arrives
     /// through <see cref="PairProgressed"/>, and the code through <see cref="PairRequested"/>.</summary>
@@ -773,7 +805,7 @@ public sealed class SyncEngine : IDisposable
         var round = new PairRound
         {
             Initiator = false, Key = key, Public = key.ExportSubjectPublicKeyInfo(), Commit = commit,
-            MyMembers = LinkedCount(), PeerMembers = Math.Clamp(m.Members ?? 0, 0, 10_000),
+            MyMembers = LinkedCount(), PeerMembers = ClampMembers(m.Members),
         };
         bool busy;
         lock (_lock)
@@ -842,7 +874,7 @@ public sealed class SyncEngine : IDisposable
     private void OnPairChallenge(PeerSession s, PairRound round, SyncMessage m)
     {
         var theirs = Convert.FromBase64String(m.PairKey ?? "");
-        round.PeerMembers = Math.Clamp(m.Members ?? 0, 0, 10_000);
+        round.PeerMembers = ClampMembers(m.Members);
         (round.Secret, round.Code) = SyncCrypto.PairingSecret(round.Key, theirs,
             requesterKey: round.Public, accepterKey: theirs, requesterMembers: round.MyMembers, accepterMembers: round.PeerMembers);
         round.RequesterJoins = round.MyMembers <= round.PeerMembers;

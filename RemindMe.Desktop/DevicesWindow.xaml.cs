@@ -1,3 +1,4 @@
+using System.Collections.ObjectModel;
 using System.Windows;
 using RemindMe.Sync;
 
@@ -7,12 +8,28 @@ namespace RemindMe.Desktop;
 /// sync settings. The device list is live; the settings take effect on Apply.</summary>
 public partial class DevicesWindow : Window
 {
-    public sealed record DeviceRow(string NodeId, string Name, string Status, string Address, bool CanLink)
+    /// <summary>One device in the list, kept while the device is listed and updated in
+    /// place by <see cref="Refresh"/>.</summary>
+    public sealed class DeviceRow(string nodeId) : Observable
     {
+        private string _name = "", _status = "", _address = "", _spokenStatus = "";
+        private bool _canLink;
+
+        public string NodeId { get; } = nodeId;
+        public string Name { get => _name; set => Set(ref _name, value); }
+        public string Status { get => _status; set => Set(ref _status, value); }
+        public string Address { get => _address; set => Set(ref _address, value); }
+        public bool CanLink { get => _canLink; set => Set(ref _canLink, value); }
+        /// <summary>What a screen reader says after the name: the status, and the address
+        /// if there is one, so two devices of one name differ.</summary>
+        public string SpokenStatus { get => _spokenStatus; set => Set(ref _spokenStatus, value); }
+
         /// <summary>The device's name: what a screen reader says for its row, and the text
         /// typing in the list finds it by.</summary>
         public override string ToString() => Name;
     }
+
+    private readonly ObservableCollection<DeviceRow> _rows = [];
 
     public DevicesWindow()
     {
@@ -24,6 +41,7 @@ public partial class DevicesWindow : Window
         RemoteAddresses.Text = string.Join(Environment.NewLine, s.RemoteAddresses);
         AcceptExternal.IsChecked = s.AcceptExternalConnections;
         Port.Text = s.Port.ToString();
+        DeviceList.ItemsSource = _rows;
         AppHost.SyncChanged += Refresh;
         AppHost.PairProgressed += OnPairProgress;
         Closed += (_, _) => { AppHost.SyncChanged -= Refresh; AppHost.PairProgressed -= OnPairProgress; };
@@ -37,18 +55,32 @@ public partial class DevicesWindow : Window
 
     private bool _pairing;
 
+    /// <summary>Shows the devices in reach, then the linked ones out of reach. Rows are
+    /// updated in place, so the selection and the keyboard focus stay on their device.</summary>
     private void Refresh()
     {
         var remotes = AppHost.Sync?.RemoteStates() ?? [];
         StatusText.Text = AppHost.SyncStatus + string.Concat(remotes.Select(r => $"\n{r.Address}: {r.State}"));
         var now = AppHost.Clock.UtcNow;
         var live = AppHost.Sync?.Peers() ?? [];
-        var rows = live.Select(p => new DeviceRow(p.NodeId, p.Name, RemindMe.PairText.DeviceStatus(p), p.Address ?? "", !p.Linked)).ToList();
-        foreach (var k in AppHost.Settings.KnownPeers.Where(k => rows.All(r => r.NodeId != k.NodeId)))
-            rows.Add(new DeviceRow(k.NodeId, k.Name, RemindMe.PairText.LastInSync(k, now, AppHost.Clock.Zone), "", false));
-        var selected = (DeviceList.SelectedItem as DeviceRow)?.NodeId;
-        DeviceList.ItemsSource = rows;
-        DeviceList.SelectedItem = rows.FirstOrDefault(r => r.NodeId == selected);
+        var shown = live.Select(p => (p.NodeId, p.Name, Status: RemindMe.PairText.DeviceStatus(p), Address: p.Address ?? "", CanLink: !p.Linked)).ToList();
+        foreach (var k in AppHost.Settings.KnownPeers.Where(k => shown.All(r => r.NodeId != k.NodeId)))
+            shown.Add((k.NodeId, k.Name, RemindMe.PairText.LastInSync(k, now, AppHost.Clock.Zone), "", false));
+
+        for (int i = 0; i < shown.Count; i++)
+        {
+            var d = shown[i];
+            var row = _rows.FirstOrDefault(r => r.NodeId == d.NodeId);
+            if (row is null) _rows.Insert(i, row = new DeviceRow(d.NodeId));
+            else if (_rows.IndexOf(row) is var at && at != i) _rows.Move(at, i);   // Move keeps the selection
+            row.Name = d.Name;
+            row.Status = d.Status;
+            row.Address = d.Address;
+            row.CanLink = d.CanLink;
+            row.SpokenStatus = d.Address.Length > 0 ? $"{d.Status}, {d.Address}" : d.Status;
+        }
+        // The first shown.Count rows are the devices shown, in order; any after went away.
+        while (_rows.Count > shown.Count) _rows.RemoveAt(_rows.Count - 1);
         LinkButton.IsEnabled = CanLink();
     }
 

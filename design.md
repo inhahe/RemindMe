@@ -523,6 +523,10 @@ separately (see *Simplification opportunities*).
 - `MainWindow`: the task list (rows updated in place, `Move` keeping the
   selection), the toolbar, and the tray icon. The close button hides it to the
   tray.
+- `DevicesWindow`'s list is refreshed every 3 seconds and on every sync change.
+  Like the task list, its rows (`Observable`, as `TaskRow` is) stay while their
+  device is listed and are updated in place, so the selection and the keyboard
+  focus aren't thrown off a row at each refresh.
 - `TaskEditorWindow`, `SettingsWindow`, `DevicesWindow` and
   `SoundPickerWindow` are all **non-modal**. WPF's `ShowDialog` disables every
   other window of the thread, ringing alarm windows included, and an alarm must

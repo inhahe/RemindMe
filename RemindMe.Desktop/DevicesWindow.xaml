@@ -21,19 +21,11 @@
                 <Border Style="{StaticResource Pane}" Padding="2,4" Margin="0,0,0,0">
                     <ListView x:Name="DeviceList" Height="170" SelectionMode="Single" BorderThickness="0"
                               Background="Transparent" SelectionChanged="DeviceList_SelectionChanged">
-                        <!-- A screen reader says a row's device (DeviceRow.ToString), then this: two
-                             devices of one name differ in it. -->
+                        <!-- A screen reader says a row's device (DeviceRow.ToString), then this. -->
                         <ListView.ItemContainerStyle>
                             <Style TargetType="ListViewItem"
                                    BasedOn="{StaticResource {x:Static GridView.GridViewItemContainerStyleKey}}">
-                                <Setter Property="AutomationProperties.ItemStatus">
-                                    <Setter.Value>
-                                        <MultiBinding StringFormat="{}{0}, {1}">
-                                            <Binding Path="Status" />
-                                            <Binding Path="Address" />
-                                        </MultiBinding>
-                                    </Setter.Value>
-                                </Setter>
+                                <Setter Property="AutomationProperties.ItemStatus" Value="{Binding SpokenStatus}" />
                             </Style>
                         </ListView.ItemContainerStyle>
                         <ListView.View>

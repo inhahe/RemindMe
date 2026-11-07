@@ -1,6 +1,5 @@
 using System.Collections.ObjectModel;
 using System.ComponentModel;
-using System.Runtime.CompilerServices;
 using System.Windows;
 using System.Windows.Input;
 using System.Windows.Interop;
@@ -9,7 +8,7 @@ using Forms = System.Windows.Forms;
 namespace RemindMe.Desktop;
 
 /// <summary>One row of the task list (R15).</summary>
-public sealed class TaskRow : INotifyPropertyChanged
+public sealed class TaskRow : Observable
 {
     public Guid Id { get; init; }
     private string _description = "", _schedule = "", _status = "", _next = "";
@@ -28,15 +27,6 @@ public sealed class TaskRow : INotifyPropertyChanged
     /// <summary>The task's description: what a screen reader says for its row, and the
     /// text typing in the list finds it by.</summary>
     public override string ToString() => Description;
-
-    public event PropertyChangedEventHandler? PropertyChanged;
-
-    private void Set<T>(ref T field, T value, [CallerMemberName] string? name = null)
-    {
-        if (EqualityComparer<T>.Default.Equals(field, value)) return;
-        field = value;
-        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
-    }
 }
 
 /// <summary>The task list, the tray icon, and the entry points to every other window.</summary>

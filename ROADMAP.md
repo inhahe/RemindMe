@@ -99,9 +99,15 @@ Suggestions, not requested. S1 is built; the rest wait for a yes:
 - [x] Boot, time-change and package-replaced receivers reschedule; missed alarms show with the late warning
 - [x] Sync foreground service (`connectedDevice`) for staying linked in the background
 - [x] Checked on the emulator (`inkdown_test`, API 36): every screen; a countdown ringing over the lock screen; Remind me later from the notification (sound stops, reminder set); ringing resumes after an app update. Linked to the desktop app through `10.0.2.2` with matching codes (722 135); tasks merged both ways; done on the PC showed on the phone; a countdown made on the PC rang on the phone, and dismissing it on the PC stopped the phone ringing.
+- [x] Hardened after review: several alarms at once, the alarm screen following alarms dealt with elsewhere, direct boot (alarms set before the first unlock after a restart), state kept across rotation, a safety net when Android refuses the ringing service
+- [x] Checked on the emulator under power restrictions: an alarm with the screen off and unplugged fires on the second; Android refuses deep Doze while an alarm clock is due (the guarantee), and the alarm is flagged to wake from idle; with background use set to Restricted it still rings on time
 - [ ] On a real phone: lock-screen alarm on Samsung's One UI, background sync with the screen off, LAN discovery
 
 ### Phase 5: polish and docs
 - [x] `README.md` (the user-facing document): features, settings, how to link devices
 - [x] `known-issues.md` kept current
-- [~] Independent code review of each batch (global rules). Core and desktop: Opus `xhigh`, 14 fixes (`ad3961e`). Sync: Opus `max`, 14 fixes (`8aa87eb`), then Fable `xhigh` on the reworked sync layer. Android: Opus `xhigh`, after the Fable review.
+- [~] Independent code review of each batch (global rules):
+  - Core and desktop: Opus `xhigh`, 14 fixes (`ad3961e`).
+  - Sync: Opus `max`, 14 fixes (`8aa87eb`); then Fable `xhigh` on the reworked sync layer, 15 fixes, including pairing that could be forced without the user's yes (`8ef0b5d`).
+  - Android and the pairing redesign: Opus `max`, 15 fixes (`4374ce7`).
+  - Opus `xhigh` on that last follow-up.

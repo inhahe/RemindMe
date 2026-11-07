@@ -17,7 +17,21 @@ each should list the other in Devices within a few seconds.
 Checked only on the emulator (API 36). Worth checking on the phone, a Samsung
 running One UI: that the alarm screen opens over the lock screen (One UI can
 restrict full-screen intents), that background sync survives with the screen off
-(battery optimization), and that the ringtone picker's choices play.
+(battery optimization), and that the ringtone picker's choices play. Samsung's
+"Deep sleeping apps" list can stop an app altogether; the app should be on
+"Never sleeping apps".
+
+### Paths the emulator couldn't reach
+- **An alarm firing from deep Doze.** Android refuses to enter deep Doze while
+  an alarm clock is due within about 30 minutes, which is the guarantee, and the
+  shell can't lower that threshold on API 36. The alarm is registered with
+  `FLAG_WAKE_FROM_IDLE`.
+- **A cold start under Restricted battery use.** The process couldn't be killed
+  without root, which the Play Store system image lacks. The alarm rang on time
+  under Restricted with the process alive.
+- **The safety net** (`RingingService.NotifyWithoutService`), which runs only
+  when Android refuses to start the ringing service.
+- **Direct boot**: the locked-boot path needs a device with a screen lock.
 
 ## Decisions waiting on the user
 

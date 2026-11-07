@@ -596,6 +596,14 @@ separately (see *Simplification opportunities*).
   `Content`, so screen readers name it and its access key works; `Icons.Glyph`,
   an attached property, gives the icon, which the `WithIcon` template puts
   before the text.
+- A screen reader names a list's row by its item's `ToString()`, unless told
+  otherwise: `TaskRow` and `DeviceRow` return the task's description and the
+  device's name (which typing in the list also finds rows by), and their
+  status goes in `AutomationProperties.ItemStatus`. The sound picker's items,
+  Core's `SoundRef` records, are named by `AutomationProperties.Name`. An item
+  whose content is a `TextBlock` (the calendar's day list) is named by its text.
+  A `ListView` with a `GridView` takes its rows' style `BasedOn`
+  `GridView.GridViewItemContainerStyleKey`: the plain list item has no columns.
 - The main window's toolbar is a `ToolBar` with a template of its own (`Bar`):
   too narrow for its buttons, it puts the last ones in a menu under a More
   button. The button keeps its room while hidden, since showing it would take

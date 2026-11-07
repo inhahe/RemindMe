@@ -11,7 +11,14 @@
                    Text="Follows the default sound in Settings, including later changes to it." />
 
         <RadioButton x:Name="SystemRadio" GroupName="Src" Style="{StaticResource PaneRadio}" Content="A _Windows sound:" />
-        <ComboBox x:Name="SystemList" Margin="20,0,0,8" DisplayMemberPath="Name" />
+        <ComboBox x:Name="SystemList" Margin="20,0,0,8" DisplayMemberPath="Name">
+            <!-- A screen reader names an item by its sound, not by its record's text. -->
+            <ComboBox.ItemContainerStyle>
+                <Style TargetType="ComboBoxItem" BasedOn="{StaticResource {x:Type ComboBoxItem}}">
+                    <Setter Property="AutomationProperties.Name" Value="{Binding Name}" />
+                </Style>
+            </ComboBox.ItemContainerStyle>
+        </ComboBox>
 
         <RadioButton x:Name="FileRadio" GroupName="Src" Style="{StaticResource PaneRadio}" Content="A sound _file:" />
         <DockPanel Margin="20,0,0,4">

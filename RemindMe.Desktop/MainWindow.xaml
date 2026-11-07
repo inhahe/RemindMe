@@ -10,8 +10,9 @@
         <Style x:Key="RowStyle" TargetType="ListViewItem"
                BasedOn="{StaticResource {x:Static GridView.GridViewItemContainerStyleKey}}">
             <Setter Property="HorizontalContentAlignment" Value="Stretch" />
-            <!-- What a screen reader says for the row, which would otherwise be its type's name. -->
-            <Setter Property="AutomationProperties.Name" Value="{Binding Description}" />
+            <!-- A screen reader says the task (TaskRow.ToString), then its status, which the
+                 row otherwise shows only by its colours. -->
+            <Setter Property="AutomationProperties.ItemStatus" Value="{Binding Status}" />
             <EventSetter Event="MouseDoubleClick" Handler="Row_DoubleClick" />
             <Style.Triggers>
                 <DataTrigger Binding="{Binding Ringing}" Value="True">

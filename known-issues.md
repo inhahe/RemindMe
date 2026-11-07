@@ -11,7 +11,10 @@ emulator linked by address). But no two machines on one LAN have discovered each
 other yet. That needs the app to listen on the network, which raises a Windows
 Firewall prompt for the debug build (`REMINDME_BIND=127.0.0.1` avoids that in
 tests). **To verify:** run the app on two PCs on one LAN, or a PC and the phone;
-each should list the other in Devices within a few seconds.
+each should list the other in Devices within a few seconds. While there, look at
+the Devices list's rows, which no test has shown since the restyle: they should
+look like the task list's, and a screen reader should name each by its device,
+then its status and address.
 
 ### Waking the computer from sleep (S3)
 Checked only as far as setting the timer: app.log says "Wake timer set for …",
@@ -65,9 +68,14 @@ click elsewhere or press Esc.
 
 ### Dark mode, set in Windows
 The windows were checked dark by building with the theme pinned to dark
-(`Fluent.Dark.xaml` in `App.xaml`), not by switching Windows to dark mode, and
-the switch while the app runs wasn't seen. **To verify:** with the app open,
-switch Settings → Personalization → Colors → "Choose your mode" to Dark and back.
+(`Fluent.Dark.xaml` in `App.xaml`). A test app with RemindMe's setup switched
+from light to dark while running, the way WPF does when Windows changes: styles
+`BasedOn` the theme's, captured when `App.xaml` loads, followed it (buttons, the
+accent button, check boxes, GridView rows), as did a menu set as a list's
+`ContextMenu`; a closed menu kept in resources didn't, hence the tray menu being
+made anew at each opening. Not seen: Windows' own switch reaching the app.
+**To verify:** with the app open, switch Settings → Personalization → Colors →
+"Choose your mode" to Dark and back.
 
 ### Android on a real phone
 Checked only on the emulator (API 36). Worth checking on the phone, a Samsung

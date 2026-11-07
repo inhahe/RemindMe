@@ -25,6 +25,10 @@ public sealed class TaskRow : INotifyPropertyChanged
     public bool Paused { get => _paused; set => Set(ref _paused, value); }
     public TaskStatus? Latest { get; set; }
 
+    /// <summary>The task's description: what a screen reader says for its row, and the
+    /// text typing in the list finds it by.</summary>
+    public override string ToString() => Description;
+
     public event PropertyChangedEventHandler? PropertyChanged;
 
     private void Set<T>(ref T field, T value, [CallerMemberName] string? name = null)

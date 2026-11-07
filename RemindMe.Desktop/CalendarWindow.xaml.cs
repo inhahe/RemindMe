@@ -1,6 +1,5 @@
 using System.Globalization;
 using System.Windows;
-using System.Windows.Automation;
 using System.Windows.Controls;
 using System.Windows.Documents;
 using System.Windows.Input;
@@ -194,10 +193,7 @@ public partial class CalendarWindow : Window
             if (e.Waiting) text.Inlines.Add(Ink(new Run(" · waiting to be marked done"), Waiting));
             text.Inlines.Add(new LineBreak());
             text.Inlines.Add(Ink(new Run(TextFormat.Schedule(t.Def, t.State, now, zone, culture)) { FontSize = 11 }, Quiet));
-            var item = new ListBoxItem { Content = text, Tag = e.TaskId };
-            // What a screen reader says: the text of its runs, which it doesn't read itself.
-            AutomationProperties.SetName(item, $"{e.Text} {e.Title}" + (e.Waiting ? ", waiting to be marked done" : ""));
-            DayList.Items.Add(item);
+            DayList.Items.Add(new ListBoxItem { Content = text, Tag = e.TaskId });
         }
     }
 

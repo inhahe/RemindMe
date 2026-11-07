@@ -7,7 +7,12 @@ namespace RemindMe.Desktop;
 /// sync settings. The device list is live; the settings take effect on Apply.</summary>
 public partial class DevicesWindow : Window
 {
-    public sealed record DeviceRow(string NodeId, string Name, string Status, string Address, bool CanLink);
+    public sealed record DeviceRow(string NodeId, string Name, string Status, string Address, bool CanLink)
+    {
+        /// <summary>The device's name: what a screen reader says for its row, and the text
+        /// typing in the list finds it by.</summary>
+        public override string ToString() => Name;
+    }
 
     public DevicesWindow()
     {

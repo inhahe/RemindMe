@@ -114,7 +114,8 @@ device or a linked one, the app writes a backup file. Marking done, snoozing and
 pausing don't count. Each backup is a new file, so a mistake can't overwrite the
 backup that still has what you lost:
 - Every backup from the last day is kept, then the newest of each day for 60
-  days, then the newest of each month for two years.
+  days, then the newest of each month for two years. The ten newest are always
+  kept, whatever the clock says.
 - On Windows they go to `Documents\Alarm Calendar backups` (Settings can name
   another folder, and **Open folder** shows it). On Android they go to
   `Download/Alarm Calendar backups`, where they stay even if the app is

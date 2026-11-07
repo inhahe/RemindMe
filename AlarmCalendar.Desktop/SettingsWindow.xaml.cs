@@ -32,7 +32,7 @@ public partial class SettingsWindow : Window
         CloseToTray.IsChecked = s.CloseToTray;
         WakeFromSleep.IsChecked = s.WakeFromSleep;
         AutoBackup.IsChecked = s.AutoBackup;
-        _backupFolder = s.BackupFolder;
+        _backupFolder = s.BackupFolder is { Length: > 0 } folder ? folder : null;
         ShowSound();
         ShowBackup();
         AppHost.Backup.Changed += ShowBackup;
@@ -41,17 +41,15 @@ public partial class SettingsWindow : Window
 
     private void ShowSound() => SoundButton.Content = (_sound ?? SoundService.BuiltIn).Name + "…";
 
-    private string BackupFolder => _backupFolder ?? AppHost.DefaultBackupFolder;
+    private string BackupFolder => AppHost.BackupFolderOf(_backupFolder);
 
     private void ShowBackup()
     {
         BackupFolderText.Text = _backupFolder ?? $"{AppHost.DefaultBackupFolder} (the default)";
         BackupFolderText.ToolTip = BackupFolder;
         var b = AppHost.Backup;
-        BackupStatus.Text = b.Problem
-            ?? (b.Newest is { } n
-                ? $"Last backup: {TextFormat.When(new DateTimeOffset(n.At), AppHost.Clock.UtcNow, AppHost.Clock.Zone)}, {System.IO.Path.GetFileName(n.Path)}."
-                : "No backup yet.");
+        BackupStatus.Text = TextFormat.BackupStatus(AppHost.Settings.AutoBackup, b.NewestAt, b.Problem,
+            AppHost.Clock.UtcNow, AppHost.Clock.Zone);
     }
 
     private void ChangeBackupFolder_Click(object sender, RoutedEventArgs e)
@@ -71,7 +69,8 @@ public partial class SettingsWindow : Window
             System.IO.Directory.CreateDirectory(BackupFolder);
             System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(BackupFolder) { UseShellExecute = true });
         }
-        catch (Exception ex) when (ex is System.IO.IOException or UnauthorizedAccessException or System.ComponentModel.Win32Exception)
+        catch (Exception ex) when (ex is System.IO.IOException or UnauthorizedAccessException or System.ComponentModel.Win32Exception
+                                       or ArgumentException or NotSupportedException)
         {
             BackupStatus.Text = $"Couldn't open the folder: {ex.Message}";
         }

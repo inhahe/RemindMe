@@ -110,6 +110,14 @@ public static class TextFormat
     public static string ExportSummary(int count, string? destination = null) =>
         $"Exported {Tasks(count)}{(destination is null ? "" : " to " + destination)}.";
 
+    /// <summary>The Settings line about automatic backups (S11).</summary>
+    /// <param name="on">Whether automatic backups are on.</param>
+    /// <param name="newest">When this device's newest backup was taken, if known.</param>
+    /// <param name="problem">Why the last attempt failed, if it did.</param>
+    public static string BackupStatus(bool on, DateTimeOffset? newest, string? problem, DateTimeOffset now, TimeZoneInfo zone) =>
+        !on ? "Automatic backups are off."
+        : problem ?? (newest is { } at ? $"Last backup: {When(at, now, zone)}." : "No backup yet.");
+
     /// <summary>"Imported 3 tasks; updated 1; 2 were already up to date.": what an import did.</summary>
     public static string ImportSummary(ImportResult r)
     {

@@ -52,15 +52,25 @@ public static class Json
     {
         Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(path))!);
         var tmp = path + ".tmp";
-        using (var fs = new FileStream(tmp, FileMode.Create, FileAccess.Write, FileShare.None))
-        using (var w = new StreamWriter(fs, new System.Text.UTF8Encoding(false)))
+        try
         {
-            w.Write(contents);
-            w.Flush();
-            fs.Flush(flushToDisk: true);
+            using (var fs = new FileStream(tmp, FileMode.Create, FileAccess.Write, FileShare.None))
+            using (var w = new StreamWriter(fs, new System.Text.UTF8Encoding(false)))
+            {
+                w.Write(contents);
+                w.Flush();
+                fs.Flush(flushToDisk: true);
+            }
+            if (File.Exists(path)) File.Replace(tmp, path, path + ".bak", ignoreMetadataErrors: true);
+            else File.Move(tmp, path);
         }
-        if (File.Exists(path)) File.Replace(tmp, path, path + ".bak", ignoreMetadataErrors: true);
-        else File.Move(tmp, path);
+        catch
+        {
+            // A disk that filled up mid-write leaves no partial file behind.
+            try { File.Delete(tmp); }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
+            throw;
+        }
     }
 
     /// <summary>

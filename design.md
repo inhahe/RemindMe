@@ -245,30 +245,55 @@ once the tasks have changed and nothing more has changed for 5 s
   `DefVersion`s. Adding, editing and deleting change it, whether made here or
   arriving by sync. Marking done, snoozing and pausing don't, so they write
   nothing. A backup is written only when the fingerprint differs from that of
-  this device's newest backup (read from the folder at startup), so a restart or
-  an import that changes nothing writes nothing.
+  this device's newest backup, so a restart or an import that changes nothing
+  writes nothing.
 - **A series, not one file**: overwriting a single file would make it a mirror.
   A task deleted by mistake (or by a linked device) would then be gone from the
-  backup within seconds. `Backups.ToDelete` keeps the newest backup whatever its
-  age, every one from the last day, the newest of each day for 60 days, and the
-  newest of each month for two years.
-- **Names**: `alarm-calendar-backup-2026-11-07-075300-de193e1e.json`, local time
-  then `Backups.DeviceTag` (the start of the sync node ID). Several devices can
-  share one folder (a Documents folder in the same cloud drive), and each thins
-  out only its own series.
+  backup within seconds. `Backups.ToDelete` keeps the ten newest backups
+  whatever their age, every one from the last day, the newest of each day for
+  60 days, and the newest of each month for two years. Ages come from the
+  clock, so the ten newest are kept regardless: a clock set days ahead to try
+  an alarm would otherwise thin out the day's backups for good.
+- **Names**: `alarm-calendar-backup-2026-11-07-075300-0500-de193e1e.json`. The
+  local time is the one people recognise; its UTC offset makes backups taken
+  across a clock change or a flight between time zones order by the moment they
+  were taken. Then comes `Backups.DeviceTag` (the start of the sync node ID).
+  Several devices can share one folder (a Documents folder in the same cloud
+  drive), and each thins out only its own series. `FileName` refuses a tag that
+  `Parse` wouldn't recognise.
+- **`BackupRunner`** (Core) makes every decision, for both apps, against an
+  `IBackupFolder` (list, read, write, delete; failures as `IOException`), so it
+  is all tested:
+  - The first attempt in a folder reads this device's newest backup. If that
+    file can't be read (a cloud file left online-only, say), a fresh backup is
+    written rather than none ever again.
+  - Old backups are thinned after a write, and once per folder, not on every
+    attempt.
+  - A failure goes into `Problem` (the Settings line) and is logged once per
+    message, and so is an old backup that can't be deleted.
+  - The apps only decide when to attempt and supply the folder.
+  - `TextFormat.BackupStatus` words the Settings line for both: off, the
+    failure, the last backup, or none yet.
 - **Desktop** (`BackupService`): the folder in Settings, by default
   `Documents\Alarm Calendar backups`, where people look for their files and
-  which a cloud drive often keeps. An instance with its own `--data-dir` uses
-  `<data dir>\backups` instead, keeping test data out of the real folder. A
-  write waiting to settle is done at exit (`AppHost.BeginExit`). Settings shows
-  the last backup or the failure; a failure is logged once per message.
+  which a cloud drive often keeps. `AppHost.BackupFolderOf` turns the setting
+  into the folder for both the service and the Settings window. An instance
+  with its own `--data-dir` uses `<data dir>\backups` instead, keeping test data
+  out of the real folder, and so does one whose Documents folder Windows can't
+  resolve. Attempts run on the thread pool: the folder may be a network share
+  that hangs, and the UI thread runs the alarms. An attempt still settling at
+  exit runs then, and exit waits for it 5 s at most. Files are written with
+  `Json.WriteAtomically`, which flushes to disk and leaves no temp file behind
+  when a write fails.
 - **Android** (`AutoBackup`): MediaStore's `Download/Alarm Calendar backups`.
   It needs no permission, shows in the Files app and the import's picker, and
   survives an uninstall. The app sees only the files it wrote itself, so after a
   reinstall it starts a new series and leaves the old one alone. Shared storage
-  opens only after the first unlock since a restart, so until then nothing is
-  written. Files are written with `IS_PENDING` until complete. The work runs off
-  the main thread, since MediaStore calls go to another process.
+  opens only after the first unlock since a restart, but the tasks can change
+  before then (they live in device storage, and sync runs). So an attempt while
+  locked registers for `ACTION_USER_UNLOCKED` and tries again then. Files are
+  written with `IS_PENDING` until complete. The work runs off the main thread,
+  since MediaStore calls go to another process.
 - **Limit**: Import merges, so restoring brings back deleted tasks but doesn't
   undo an edit made since the backup: the newer version wins.
 

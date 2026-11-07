@@ -70,6 +70,7 @@ public static class AppState
         DataDir = dir ?? "";
         Settings = dir is null ? new AppSettings { SyncEnabled = false } : AppSettings.Load(SettingsPath, DefaultDeviceName(), Log);
         Store = new TaskStore(dir is null ? null : Path.Combine(dir, "tasks.json"), Settings.NodeId, Clock, Log);
+        AutoBackup.Attach(Store, Settings.NodeId);
         Store.Changed += _ => OnMain(() =>
         {
             AlarmScheduler.Reschedule(Context);
@@ -92,7 +93,9 @@ public static class AppState
         if (Settings.SyncEnabled) SyncService.Start(Context);
     }
 
-    private static bool IsUnlocked(Context context) =>
+    /// <summary>The phone has been unlocked since it restarted: credential-protected and
+    /// shared storage are open.</summary>
+    internal static bool IsUnlocked(Context context) =>
         ((Android.OS.UserManager?)context.GetSystemService(Context.UserService))?.IsUserUnlocked == true;
 
     /// <summary>

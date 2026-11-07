@@ -81,10 +81,8 @@ public sealed class SettingsActivity : Screen
     }
 
     private void ShowBackup() =>
-        Find<TextView>(Resource.Id.backup_status).Text = AutoBackup.Problem
-            ?? (AutoBackup.NewestAt is { } at
-                ? $"Last backup: {TextFormat.When(new DateTimeOffset(at), AppState.Clock.UtcNow, AppState.Clock.Zone)}."
-                : "No backup yet.");
+        Find<TextView>(Resource.Id.backup_status).Text = TextFormat.BackupStatus(AppState.Settings.AutoBackup,
+            AutoBackup.NewestAt, AutoBackup.Problem, AppState.Clock.UtcNow, AppState.Clock.Zone);
 
 
     private void Show()

@@ -115,8 +115,12 @@ public static class AppHost
     /// <summary>Where backups go unless Settings names a folder: "Alarm Calendar backups" in
     /// Documents, where people look for their files (and which a cloud drive often keeps).
     /// An instance with a data folder of its own (<c>--data-dir</c>) keeps its backups
-    /// inside it instead, away from the real ones.</summary>
+    /// inside it instead, away from the real ones, and so does one whose Documents folder
+    /// Windows can't find (redirected to a share that is gone, say).</summary>
     public static string DefaultBackupFolder { get; private set; } = "";
+
+    /// <summary>The folder backups go to, given the setting (null or empty: the default).</summary>
+    public static string BackupFolderOf(string? setting) => setting is { Length: > 0 } folder ? folder : DefaultBackupFolder;
 
     public static BackupService Backup { get; private set; } = null!;
 
@@ -124,8 +128,10 @@ public static class AppHost
     {
         DataDir = dataDir;
         Directory.CreateDirectory(dataDir);
-        DefaultBackupFolder = string.Equals(Path.GetFullPath(dataDir).TrimEnd('\\'), DefaultDataDir, StringComparison.OrdinalIgnoreCase)
-            ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "Alarm Calendar backups")
+        var documents = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
+        DefaultBackupFolder = documents.Length > 0
+            && string.Equals(Path.GetFullPath(dataDir).TrimEnd('\\'), DefaultDataDir, StringComparison.OrdinalIgnoreCase)
+            ? Path.Combine(documents, "Alarm Calendar backups")
             : Path.Combine(dataDir, "backups");
         Settings = AppSettings.Load(SettingsPath, Environment.MachineName, Log);
         Store = new TaskStore(Path.Combine(dataDir, "tasks.json"), Settings.NodeId, Clock, Log);

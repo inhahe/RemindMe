@@ -1,0 +1,134 @@
+<Window x:Class="AlarmCalendar.Desktop.TaskEditorWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="New task" Icon="app.ico"
+        Width="620" SizeToContent="Height" MinWidth="520"
+        WindowStartupLocation="CenterOwner" ShowInTaskbar="True">
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+        <ScrollViewer VerticalScrollBarVisibility="Auto">
+            <StackPanel Margin="14,10,14,4">
+                <Label Content="_Description" Target="{Binding ElementName=Description}" Padding="0,0,0,3" />
+                <!-- AcceptsReturn: Enter adds a line; only the Save button saves (R2). -->
+                <TextBox x:Name="Description" AcceptsReturn="True" TextWrapping="Wrap"
+                         MinHeight="72" MaxHeight="200" VerticalScrollBarVisibility="Auto"
+                         SpellCheck.IsEnabled="True" />
+
+                <!-- R3: Scheduled vs Countdown, each with its own rounded pane. -->
+                <RadioButton x:Name="ScheduledRadio" GroupName="Top" Style="{StaticResource PaneRadio}"
+                             Content="_Scheduled" Margin="0,12,0,3" />
+                <Border Style="{StaticResource Pane}">
+                    <StackPanel Style="{StaticResource PaneBody}"
+                                IsEnabled="{Binding IsChecked, ElementName=ScheduledRadio}">
+
+                        <!-- R4: the nested choice, each option with a nested rounded pane. -->
+                        <RadioButton x:Name="IntervalRadio" GroupName="Schedule" Style="{StaticResource PaneRadio}"
+                                     Content="_Every N years, months, weeks, days, hours, minutes or seconds" />
+                        <Border Style="{StaticResource NestedPane}">
+                            <StackPanel Style="{StaticResource PaneBody}"
+                                        IsEnabled="{Binding IsChecked, ElementName=IntervalRadio}">
+                                <WrapPanel>
+                                    <TextBlock Text="Every " VerticalAlignment="Center" />
+                                    <TextBox x:Name="IntervalCount" Style="{StaticResource Small}" Width="56" />
+                                    <ComboBox x:Name="IntervalUnitBox" Width="110" Margin="6,0,0,0" />
+                                </WrapPanel>
+                                <WrapPanel Margin="0,6,0,0">
+                                    <TextBlock Text="Starting " VerticalAlignment="Center" />
+                                    <DatePicker x:Name="StartDate" Width="165" />
+                                    <TextBlock Text=" at " VerticalAlignment="Center" />
+                                    <TextBox x:Name="StartTime" Width="90" VerticalContentAlignment="Center" />
+                                    <Button Content="Now" MinWidth="0" Padding="8,1" Margin="6,0,0,0" Click="StartNow_Click"
+                                            ToolTip="Set the start to today and the current time" />
+                                </WrapPanel>
+                                <TextBlock Text="When it's marked done, the next time comes up:" Margin="0,8,0,2" />
+                                <RadioButton x:Name="FromDoneRadio" GroupName="Restart" Margin="12,2,0,0"
+                                             Content="N after it's marked _done (the timer restarts then)" />
+                                <RadioButton x:Name="OnScheduleRadio" GroupName="Restart" Margin="12,2,0,0"
+                                             Content="on the _original schedule, as soon as the time comes up" />
+                            </StackPanel>
+                        </Border>
+
+                        <RadioButton x:Name="WeeklyRadio" GroupName="Schedule" Style="{StaticResource PaneRadio}"
+                                     Content="On these days of the _week" />
+                        <Border Style="{StaticResource NestedPane}">
+                            <StackPanel Style="{StaticResource PaneBody}"
+                                        IsEnabled="{Binding IsChecked, ElementName=WeeklyRadio}">
+                                <WrapPanel x:Name="DayBoxes" />
+                                <WrapPanel Margin="0,6,0,0">
+                                    <TextBlock Text="At " VerticalAlignment="Center" />
+                                    <TextBox x:Name="WeeklyTime" Width="90" VerticalContentAlignment="Center" />
+                                </WrapPanel>
+                            </StackPanel>
+                        </Border>
+
+                        <RadioButton x:Name="OnceRadio" GroupName="Schedule" Style="{StaticResource PaneRadio}"
+                                     Content="O_nce" />
+                        <Border Style="{StaticResource NestedPane}">
+                            <WrapPanel Style="{StaticResource PaneBody}"
+                                       IsEnabled="{Binding IsChecked, ElementName=OnceRadio}">
+                                <TextBlock Text="On " VerticalAlignment="Center" />
+                                <DatePicker x:Name="OnceDate" Width="165" />
+                                <TextBlock Text=" at " VerticalAlignment="Center" />
+                                <TextBox x:Name="OnceTime" Width="90" VerticalContentAlignment="Center" />
+                            </WrapPanel>
+                        </Border>
+                    </StackPanel>
+                </Border>
+
+                <RadioButton x:Name="CountdownRadio" GroupName="Top" Style="{StaticResource PaneRadio}"
+                             Content="_Countdown timer (one-shot)" Margin="0,4,0,3" />
+                <Border Style="{StaticResource Pane}">
+                    <StackPanel Style="{StaticResource PaneBody}"
+                                IsEnabled="{Binding IsChecked, ElementName=CountdownRadio}">
+                        <WrapPanel>
+                            <TextBlock Text="Sound an alarm after " VerticalAlignment="Center" />
+                            <TextBox x:Name="CountdownHours" Style="{StaticResource Small}" />
+                            <TextBlock Text=" h " VerticalAlignment="Center" />
+                            <TextBox x:Name="CountdownMinutes" Style="{StaticResource Small}" />
+                            <TextBlock Text=" min " VerticalAlignment="Center" />
+                            <TextBox x:Name="CountdownSeconds" Style="{StaticResource Small}" />
+                            <TextBlock Text=" s" VerticalAlignment="Center" />
+                        </WrapPanel>
+                        <TextBlock x:Name="CountdownStatus" Margin="0,6,0,0" Style="{StaticResource Hint}" />
+                        <CheckBox x:Name="RestartCountdown" Margin="0,4,0,0"
+                                  Content="Start the countdown again from now when I save" />
+                    </StackPanel>
+                </Border>
+
+                <Border Style="{StaticResource Pane}" Background="White">
+                    <StackPanel>
+                        <WrapPanel>
+                            <TextBlock Text="If the alarm is closed without being marked done, remind again after "
+                                       VerticalAlignment="Center" />
+                            <TextBox x:Name="ReminderHours" Style="{StaticResource Small}" />
+                            <TextBlock Text=" h " VerticalAlignment="Center" />
+                            <TextBox x:Name="ReminderMinutes" Style="{StaticResource Small}" />
+                            <TextBlock Text=" min" VerticalAlignment="Center" />
+                        </WrapPanel>
+                        <TextBlock Style="{StaticResource Hint}" Margin="0,2,0,0"
+                                   Text="0 h 0 min: no more reminders until the next time it comes up." />
+                        <WrapPanel Margin="0,10,0,0">
+                            <TextBlock Text="Sound: " VerticalAlignment="Center" />
+                            <Button x:Name="SoundButton" Click="Sound_Click" MinWidth="180"
+                                    HorizontalContentAlignment="Left" ToolTip="Choose the sound for this task" />
+                        </WrapPanel>
+                        <WrapPanel Margin="0,6,0,0">
+                            <TextBlock Text="Play it " VerticalAlignment="Center" />
+                            <ComboBox x:Name="SoundModeBox" MinWidth="330" />
+                        </WrapPanel>
+                    </StackPanel>
+                </Border>
+                <TextBlock x:Name="ErrorText" Foreground="#FFB00020" TextWrapping="Wrap" Margin="0,2,0,0" />
+            </StackPanel>
+        </ScrollViewer>
+        <StackPanel Grid.Row="1" Orientation="Horizontal" HorizontalAlignment="Right" Margin="14,6,14,12">
+            <!-- No IsDefault button: Enter never saves; only a click (or Alt+S) does. -->
+            <Button Content="_Save" Click="Save_Click" FontWeight="SemiBold" />
+            <!-- IsCancel makes Esc press it; the window isn't modal, so Click closes it. -->
+            <Button Content="Cancel" IsCancel="True" Margin="8,0,0,0" Click="Cancel_Click" />
+        </StackPanel>
+    </Grid>
+</Window>

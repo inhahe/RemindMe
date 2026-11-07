@@ -72,14 +72,14 @@ Suggestions, not requested. S1 is built; the rest wait for a yes:
 - [x] Unit tests for all of the above (40 tests, `AlarmCalendar.Core.Tests`)
 
 ### Phase 2: Windows desktop app (R1–R15, D1, D2, D5)
-- [ ] Main window: task list (R15), New / Edit / Delete, double-click to edit, Delete key, context menu (Mark done, Show alarm)
-- [ ] Task editor dialog: R2–R10 and R14, laid out exactly as R3 and R4 describe
-- [ ] Sound picker: the Windows media sounds, a file, or "default"; preview
-- [ ] Alarm popup: description, scheduled time, late warning (R13), restart mode (R7), reminder interval (R8), **Mark done**, **Dismiss**, **Silence**; Esc dismisses
-- [ ] Sound playback: once or looping, one sound at a time across popups (D5)
-- [ ] Settings window: default sound, sound mode, reminder interval and time of day; start with Windows; close to tray
-- [ ] Single instance, tray icon, autostart, resume-from-sleep and time-change handling
-- [ ] Checked by driving the app on the desktop: screenshots of each window, and an alarm actually ringing
+- [x] Main window: task list (R15), New / Edit / Delete, double-click to edit, Delete key, context menu (Mark done, Show alarm, Restart countdown)
+- [x] Task editor window: R2–R10 and R14, laid out exactly as R3 and R4 describe. Not modal, because a modal WPF window disables every other window, alarm popups included.
+- [x] Sound picker: the Windows media sounds, a file, or "default"; preview
+- [x] Alarm popup: description, scheduled time, late warning (R13), restart mode (R7), reminder interval (R8), **Mark done**, **Close, remind me later**, **Silence**; Esc and the X dismiss
+- [x] Sound playback: once or looping, one sound at a time across popups (D5); a missing file falls back to the default, then the built-in sound
+- [x] Settings window: default sound, sound mode, reminder interval, time of day and restart mode; start with Windows; close to tray
+- [x] Single instance per data directory, tray icon, autostart, resume-from-sleep (1 s polling) and time-zone changes
+- [x] Checked by driving the app with UI Automation (`--data-dir` keeps test data separate): Enter adds a line in the description; a countdown rings; dismissing snoozes, with the popup's reminder interval saved; the list shows the reminder time and "in h:mm"; exiting and relaunching after a reminder was due shows "late by 24 seconds: the app wasn't running"; the log shows the sound played
 
 ### Phase 3: sync (R17, D3)
 - [ ] Networking derived from LanLink.Core: UDP discovery, framed TCP, the lower node ID dials, a fresh hello replaces a stale connection, keep-alive, the external-connection gate, remote addresses

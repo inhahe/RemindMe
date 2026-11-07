@@ -112,9 +112,10 @@ public static class TextFormat
             case ScheduleKind.Interval:
                 {
                     string every = d.IntervalCount == 1 ? $"Every {UnitName(d.Unit, 1)}" : $"Every {d.IntervalCount} {UnitName(d.Unit, d.IntervalCount)}";
-                    string from = When(TimeMath.ToInstant(d.Start, zone), now, zone, culture);
-                    string mode = d.Restart == RestartMode.FromDone ? ", counted from when done" : "";
-                    return $"{every} from {from}{mode}";
+                    // A FromDone grid moves with every mark-done, so its start says little;
+                    // the Next column shows when it actually comes up.
+                    if (d.Restart == RestartMode.FromDone) return $"{every}, restarts when done";
+                    return $"{every} from {When(TimeMath.ToInstant(d.Start, zone), now, zone, culture)}";
                 }
             case ScheduleKind.Weekly:
                 return $"{Weekdays(d.Days, culture)} at {WallTime(DateTime.Today + d.TimeOfDay.ToTimeSpan(), culture)}";
@@ -154,6 +155,16 @@ public static class TextFormat
         bool more = description.Trim().Contains('\n');
         if (line.Length > max) return line[..(max - 1)].TrimEnd() + "…";
         return more ? line + " …" : line;
+    }
+
+    /// <summary>The "next" column of a list row (R15): when the task next comes up.</summary>
+    public static string Next(TaskStatus st, DateTimeOffset now, TimeZoneInfo zone, CultureInfo? culture = null)
+    {
+        var d = st.Task.Def;
+        if (st.NextOccurrence is { } n) return When(n, now, zone, culture);
+        if (st.Triggered && d.Kind == ScheduleKind.Interval && d.Restart == RestartMode.FromDone)
+            return $"{d.IntervalCount} {UnitName(d.Unit, d.IntervalCount)} after it's marked done";
+        return "—";
     }
 
     /// <summary>The status column of a list row (R15): ringing, waiting with the next

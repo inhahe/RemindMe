@@ -1,4 +1,4 @@
-# Alarm & Calendar — design
+# RemindMe — design
 
 Reminders and alarms on Windows and Android, kept in sync between your devices.
 Progress and the full requirement list are in `ROADMAP.md`. This file covers how
@@ -8,10 +8,10 @@ it is built.
 
 | Project | Framework | Holds |
 |---|---|---|
-| `AlarmCalendar.Core` | `net10.0` | Everything that isn't UI: the model, schedule math, alarm evaluation, persistence, merging, and (Phase 3) the sync protocol and networking |
-| `AlarmCalendar.Core.Tests` | `net10.0`, xUnit | Tests for Core |
-| `AlarmCalendar.Desktop` | `net10.0-windows`, WPF, with WinForms interop for the tray icon | The Windows app |
-| `AlarmCalendar.Android` | `net10.0-android`, .NET for Android with AndroidX views. Not MAUI. | The Android app |
+| `RemindMe.Core` | `net10.0` | Everything that isn't UI: the model, schedule math, alarm evaluation, persistence, merging, and (Phase 3) the sync protocol and networking |
+| `RemindMe.Core.Tests` | `net10.0`, xUnit | Tests for Core |
+| `RemindMe.Desktop` | `net10.0-windows`, WPF, with WinForms interop for the tray icon | The Windows app |
+| `RemindMe.Android` | `net10.0-android`, .NET for Android with AndroidX views. Not MAUI. | The Android app |
 
 **Why a single C# Core.** Every device works out for itself when a task
 triggers, from the schedule alone (see *Alarm evaluation*). So both platforms
@@ -197,7 +197,7 @@ otherwise also give.
 
 ## Persistence (`TaskStore.cs`)
 
-`tasks.json` and `settings.json` live in `%LOCALAPPDATA%\AlarmCalendar\` on
+`tasks.json` and `settings.json` live in `%LOCALAPPDATA%\RemindMe\` on
 desktop and in the app's files directory on Android. Writes go to a temporary
 file, which then replaces the real one, so a crash can't leave half a file.
 `tasks.json.bak` keeps the previous good copy. An unreadable file is renamed
@@ -254,7 +254,7 @@ once the tasks have changed and nothing more has changed for 5 s
   60 days, and the newest of each month for two years. Ages come from the
   clock, so the ten newest are kept regardless: a clock set days ahead to try
   an alarm would otherwise thin out the day's backups for good.
-- **Names**: `alarm-calendar-backup-2026-11-07-075300-0500-de193e1e.json`. The
+- **Names**: `remindme-backup-2026-11-07-075300-0500-de193e1e.json`. The
   local time is the one people recognise; its UTC offset makes backups taken
   across a clock change or a flight between time zones order by the moment they
   were taken. Then comes `Backups.DeviceTag` (the start of the sync node ID).
@@ -289,7 +289,7 @@ once the tasks have changed and nothing more has changed for 5 s
   - `TextFormat.BackupStatus` words the Settings line for both: off, the
     failure, the last backup, or none yet.
 - **Desktop** (`BackupService`): the folder in Settings, by default
-  `Documents\Alarm Calendar backups`, where people look for their files and
+  `Documents\RemindMe backups`, where people look for their files and
   which a cloud drive often keeps. `AppHost.BackupFolderOf` turns the setting
   into the folder for both the service and the Settings window. An instance
   with its own `--data-dir` uses `<data dir>\backups` instead, keeping test data
@@ -299,7 +299,7 @@ once the tasks have changed and nothing more has changed for 5 s
   exit runs then, and exit waits for it 5 s at most. Files are written with
   `Json.WriteAtomically`, which flushes to disk and leaves no temp file behind
   when a write fails.
-- **Android** (`AutoBackup`): MediaStore's `Download/Alarm Calendar backups`.
+- **Android** (`AutoBackup`): MediaStore's `Download/RemindMe backups`.
   It needs no permission, shows in the Files app and the import's picker, and
   survives an uninstall. The app sees only the files it wrote itself, so after a
   reinstall it starts a new series and leaves the old one alone. Shared storage
@@ -469,7 +469,7 @@ separately (see *Simplification opportunities*).
 - **Remote addresses report their state** (`RemoteStates()`: connected,
   can't connect, doesn't have the key, not linked) in the Devices screens. A
   link's backoff resets only after a session that got into sync, or lasted 30 s.
-- **Code layout** (`AlarmCalendar.Core/Sync/`): `Protocol.cs` (messages,
+- **Code layout** (`RemindMe.Core/Sync/`): `Protocol.cs` (messages,
   framing, `SyncCrypto`), `Discovery.cs`, `PeerSession.cs` (one
   connection and its keys, and `PairRound`), `SyncEngine.cs` (listener, dialling, sessions,
   replication, pairing). The engine raises its events on pool threads; the apps
@@ -493,14 +493,14 @@ separately (see *Simplification opportunities*).
 
 ## Testing
 
-- `AlarmCalendar.Core.Tests`: schedule math, the engine, merging (including a
+- `RemindMe.Core.Tests`: schedule math, the engine, merging (including a
   randomized three-device gossip test), persistence, and sync between real
   engines over loopback TCP (pairing, bridging, a wrong secret, a rejected
   pairing).
 - The desktop app is driven with UI Automation from PowerShell, in a throwaway
   `--data-dir` whose `settings.json` sets `autostartInitialized: true` and
   `startWithWindows: false`, so no `Run` entry is written.
-- **`ALARMCAL_BIND=127.0.0.1`** (an environment variable, for development
+- **`REMINDME_BIND=127.0.0.1`** (an environment variable, for development
   only) makes the desktop app listen on loopback with no LAN discovery. Two
   instances on one machine can then be linked through remote addresses
   (`127.0.0.1:<port>`) without raising a Windows Firewall prompt for the debug
@@ -572,8 +572,8 @@ separately (see *Simplification opportunities*).
 
 Plain .NET for Android (`net10.0-android`) with AndroidX views and XML layouts;
 it runs on Android 10 (API 29) and up. The root namespace is
-`AlarmCalendar.Droid`, because inside a namespace called `AlarmCalendar.Android`,
-`Android.App` would resolve to `AlarmCalendar.Android.App`.
+`RemindMe.Droid`, because inside a namespace called `RemindMe.Android`,
+`Android.App` would resolve to `RemindMe.Android.App`.
 
 - `AppState` (with `App`, the `Application` class, which initializes it before
   any component runs) is the counterpart of the desktop's `AppHost`: settings,
@@ -731,12 +731,12 @@ is a command separator to `cmd`.
   `AllowSameVersionUpgrades` makes a fourth-part bump an upgrade anyway. The
   price: an older MSI that differs only in the fourth part installs over a
   newer one without the downgrade message.
-- **`build-msi.ps1`**: a self-contained single-file `AlarmCalendar.exe`
-  (win-x64), then `installer/AlarmCalendar.wxs` with WiX 7 and its UI and
+- **`build-msi.ps1`**: a self-contained single-file `RemindMe.exe`
+  (win-x64), then `installer/RemindMe.wxs` with WiX 7 and its UI and
   Firewall extensions.
-  - Per machine, into `Program Files\AlarmCalendar`, with no `&` in the folder
-    name. The install folder is remembered for upgrades, and the `UpgradeCode`
-    is fixed forever.
+  - Per machine, into `Program Files\RemindMe`. The install folder is
+    remembered for upgrades, and the `UpgradeCode` is fixed forever (it
+    predates the rename from Alarm & Calendar, which nothing released had).
   - A Start menu shortcut.
   - Firewall exceptions for the exe on private and domain networks (not
     public), which replace the first-run prompt.
@@ -746,7 +746,7 @@ is a command separator to `cmd`.
     running copy (through a named event per data folder, like the existing
     "show" one) and waits until it has exited, so the exe can be replaced.
 - **`build-apk.ps1`**: the Release APK with that version. It is signed with the
-  key the `ALARMCAL_*` environment variables name (passwords passed as
+  key the `REMINDME_*` environment variables name (passwords passed as
   `env:NAME`, so they appear on no command line), or this machine's debug key.
 - **`release-github.ps1`**: builds both and creates the GitHub release
   `v<version>` with `gh`, unless it exists already. The APK is optional.

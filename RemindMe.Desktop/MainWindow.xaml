@@ -1,0 +1,102 @@
+<Window x:Class="RemindMe.Desktop.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="RemindMe" Icon="app.ico"
+        Width="980" Height="520" MinWidth="560" MinHeight="260">
+    <Window.Resources>
+        <Style x:Key="ToolButton" TargetType="Button">
+            <Setter Property="Padding" Value="10,3" />
+            <Setter Property="Margin" Value="0,0,6,0" />
+            <Setter Property="MinWidth" Value="0" />
+        </Style>
+        <Style x:Key="RowStyle" TargetType="ListViewItem">
+            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+            <EventSetter Event="MouseDoubleClick" Handler="Row_DoubleClick" />
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding Ringing}" Value="True">
+                    <Setter Property="Background" Value="#FFFFE5E5" />
+                    <Setter Property="FontWeight" Value="SemiBold" />
+                </DataTrigger>
+                <DataTrigger Binding="{Binding Waiting}" Value="True">
+                    <Setter Property="Background" Value="#FFFFF6E0" />
+                </DataTrigger>
+                <DataTrigger Binding="{Binding Finished}" Value="True">
+                    <Setter Property="Foreground" Value="#FF8A949E" />
+                </DataTrigger>
+                <DataTrigger Binding="{Binding Paused}" Value="True">
+                    <Setter Property="Foreground" Value="#FF8A949E" />
+                    <Setter Property="FontStyle" Value="Italic" />
+                </DataTrigger>
+            </Style.Triggers>
+        </Style>
+    </Window.Resources>
+    <DockPanel>
+        <Border DockPanel.Dock="Top" Padding="8,6" BorderBrush="#FFDDE2E7" BorderThickness="0,0,0,1" Background="#FFF7F9FB">
+            <DockPanel LastChildFill="False">
+                <Button Style="{StaticResource ToolButton}" Content="_New task…" Click="New_Click" FontWeight="SemiBold" />
+                <Button Style="{StaticResource ToolButton}" x:Name="EditButton" Content="_Edit…" Click="Edit_Click" />
+                <Button Style="{StaticResource ToolButton}" x:Name="DoneButton" Content="_Mark done" Click="Done_Click" />
+                <Button Style="{StaticResource ToolButton}" x:Name="ShowAlarmButton" Content="Show _alarm" Click="ShowAlarm_Click" />
+                <Button Style="{StaticResource ToolButton}" x:Name="PauseButton" Content="_Pause" Click="PauseResume_Click"
+                        ToolTip="A paused task doesn't ring until it is resumed; a paused countdown keeps the time it has left" />
+                <Button Style="{StaticResource ToolButton}" x:Name="DeleteButton" Content="_Delete" Click="Delete_Click" />
+                <Button Style="{StaticResource ToolButton}" DockPanel.Dock="Right" Content="E_xit" Click="Exit_Click" Margin="0" />
+                <Button Style="{StaticResource ToolButton}" DockPanel.Dock="Right" Content="_Settings…" Click="Settings_Click" />
+                <Button Style="{StaticResource ToolButton}" DockPanel.Dock="Right" Content="Ca_lendar…" Click="Calendar_Click"
+                        ToolTip="A month of your tasks" />
+                <Button Style="{StaticResource ToolButton}" DockPanel.Dock="Right" Content="De_vices…" Click="Devices_Click"
+                        ToolTip="Sync with your other computers and phone" />
+            </DockPanel>
+        </Border>
+        <StatusBar DockPanel.Dock="Bottom">
+            <StatusBarItem>
+                <TextBlock x:Name="StatusText" />
+            </StatusBarItem>
+        </StatusBar>
+        <Grid>
+            <ListView x:Name="List" ItemContainerStyle="{StaticResource RowStyle}" SelectionMode="Extended"
+                      SelectionChanged="List_SelectionChanged" KeyDown="List_KeyDown" BorderThickness="0">
+                <ListView.ContextMenu>
+                    <ContextMenu>
+                        <MenuItem Header="_Edit…" Click="Edit_Click" />
+                        <MenuItem Header="_Mark done" Click="Done_Click" />
+                        <MenuItem Header="Show _alarm" Click="ShowAlarm_Click" />
+                        <MenuItem x:Name="PauseMenuItem" Header="_Pause" Click="PauseResume_Click" />
+                        <MenuItem Header="_Restart countdown" Click="RestartCountdown_Click" />
+                        <Separator />
+                        <MenuItem Header="_Delete" Click="Delete_Click" />
+                    </ContextMenu>
+                </ListView.ContextMenu>
+                <ListView.View>
+                    <GridView>
+                        <GridViewColumn Header="Description" Width="250">
+                            <GridViewColumn.CellTemplate>
+                                <DataTemplate>
+                                    <TextBlock Text="{Binding Description}" TextTrimming="CharacterEllipsis" ToolTip="{Binding Description}" />
+                                </DataTemplate>
+                            </GridViewColumn.CellTemplate>
+                        </GridViewColumn>
+                        <GridViewColumn Header="Schedule" Width="250">
+                            <GridViewColumn.CellTemplate>
+                                <DataTemplate>
+                                    <TextBlock Text="{Binding Schedule}" TextTrimming="CharacterEllipsis" ToolTip="{Binding Schedule}" />
+                                </DataTemplate>
+                            </GridViewColumn.CellTemplate>
+                        </GridViewColumn>
+                        <GridViewColumn Header="Status" Width="270">
+                            <GridViewColumn.CellTemplate>
+                                <DataTemplate>
+                                    <TextBlock Text="{Binding Status}" TextWrapping="Wrap" />
+                                </DataTemplate>
+                            </GridViewColumn.CellTemplate>
+                        </GridViewColumn>
+                        <GridViewColumn Header="Next" Width="170" DisplayMemberBinding="{Binding Next}" />
+                    </GridView>
+                </ListView.View>
+            </ListView>
+            <TextBlock x:Name="EmptyHint" HorizontalAlignment="Center" VerticalAlignment="Center"
+                       Foreground="#FF8A949E" TextAlignment="Center" FontSize="14"
+                       Text="No tasks yet.&#x0a;Click &quot;New task…&quot; to add one." />
+        </Grid>
+    </DockPanel>
+</Window>

@@ -1,4 +1,4 @@
-# Alarm & Calendar — roadmap
+# RemindMe — roadmap
 
 This roadmap is the project's memory. The request (in `todo.txt`) is too long to
 keep in mind at once, so every requirement in it has an ID below, and every phase
@@ -60,7 +60,7 @@ user asked for all the rest (Phase 6):
 
 ### Phase 0: groundwork
 - [x] `ROADMAP.md`, `design.md`, `CLAUDE.md`, git, `.gitignore`
-- [x] Solution layout (`AlarmCalendar.slnx`): `AlarmCalendar.Core` (net10.0), `AlarmCalendar.Core.Tests` (xUnit), `AlarmCalendar.Desktop` (WPF), `AlarmCalendar.Android` (.NET for Android, no MAUI). The Android template builds here despite the `&` in the path.
+- [x] Solution layout (`RemindMe.slnx`): `RemindMe.Core` (net10.0), `RemindMe.Core.Tests` (xUnit), `RemindMe.Desktop` (WPF), `RemindMe.Android` (.NET for Android, no MAUI). The Android template builds here despite the `&` in the path.
 
 ### Phase 1: Core, shared by both apps (R5–R9, R11–R14, D2)
 - [x] Model: `AlarmTask` = definition + state, each with its own version (see design.md → *Data model*)
@@ -71,7 +71,7 @@ user asked for all the rest (Phase 6):
 - [x] Sound reference model: default, a system sound or a file, kept per platform. Falling back to the default when a file is missing is each app's job (Phases 2 and 4).
 - [x] Persistence: JSON store, atomic writes, tolerant of a corrupt file (keeps a backup)
 - [x] Hybrid logical clock and merge rules (design.md → *Sync merge*)
-- [x] Unit tests for all of the above (40 tests, `AlarmCalendar.Core.Tests`)
+- [x] Unit tests for all of the above (40 tests, `RemindMe.Core.Tests`)
 
 ### Phase 2: Windows desktop app (R1–R15, D1, D2, D5)
 - [x] Main window: task list (R15), New / Edit / Delete, double-click to edit, Delete key, context menu (Mark done, Show alarm, Restart countdown)
@@ -90,12 +90,12 @@ user asked for all the rest (Phase 6):
 - [x] Replication: digest exchange on connect, change broadcast, gossip forwarding (which gives LAN bridging with no routing table), tombstones
 - [x] Desktop UI: a Devices window listing nearby, linked and remembered devices, with Link, Leave the sync group, remote addresses, the port and the external-connection gate; a pairing prompt showing the code
 - [x] Tests: in-process engines on loopback (pairing, bridging, a wrong secret, a rejected pairing), plus the merge tests from Phase 1
-- [x] Checked in the real app: two instances (`ALARMCAL_BIND=127.0.0.1`) linked through the Devices window with matching codes, then merged their tasks. A countdown made on one rang on both, and marking it done on one closed the other's popup.
+- [x] Checked in the real app: two instances (`REMINDME_BIND=127.0.0.1`) linked through the Devices window with matching codes, then merged their tasks. A countdown made on one rang on both, and marking it done on one closed the other's popup.
 - [x] Hardened after review: commit-then-reveal pairing, the device linked with fewer others joins, sessions take over only by authenticating, untrusted input bounded and validated, first-sync-based startup settling (design.md → *Sync network*)
 - [ ] LAN discovery between two real machines. Not testable here without a Windows Firewall prompt; the code is LanLink's, adapted.
 
 ### Phase 4: Android (R2–R17 on the phone, D4)
-- [x] Project builds to an APK; package `com.inhahe.alarmcalendar`; Android 10 (API 29) and up; Release trims, with Core rooted for its JSON
+- [x] Project builds to an APK; package `com.inhahe.remindme`; Android 10 (API 29) and up; Release trims, with Core rooted for its JSON
 - [x] Main list, task editor, settings and sound picker (ringtones, alarms, notifications, a file), devices screen
 - [x] AlarmManager `setAlarmClock` for the next wake-up; receiver → evaluation → `RingingService` (media playback, full-screen-intent notification with Mark done and Remind me later) → `AlarmActivity` over the lock screen
 - [x] Boot, time-change and package-replaced receivers reschedule; missed alarms show with the late warning
@@ -134,4 +134,4 @@ user asked for all the rest (Phase 6):
 - [x] S3: **Wake the PC from sleep** for the next alarm (waitable timer with resume, 20 s ahead), screen kept on while its sound plays, with a setting; not testable here without putting the machine to sleep (known-issues.md says how to check it)
 - [x] S9: **Releases**: `VERSION`, `build-msi.ps1` (WiX MSI with firewall rules, launch-now, upgrade-in-place via `--exit`; self-contained exe), `build-apk.ps1` (versionCode from `VERSION`, release key from the environment), `release-github.ps1` with `-DryRun`. The repository, the release key and the license are the user's to settle (known-issues.md)
 - [x] Reviewed: Opus `max` on S2–S10, 15 findings (`81cdebe`, `beced82`); then Fable `xhigh` on those and the fixes, 9 findings (`83442f6`)
-- [x] S11: **Automatic backups** after every add, edit or delete (here or synced), thinned with age; `Documents\Alarm Calendar backups` on Windows (changeable), `Download/Alarm Calendar backups` on Android; restored with Import
+- [x] S11: **Automatic backups** after every add, edit or delete (here or synced), thinned with age; `Documents\RemindMe backups` on Windows (changeable), `Download/RemindMe backups` on Android; restored with Import

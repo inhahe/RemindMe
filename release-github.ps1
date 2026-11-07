@@ -32,7 +32,7 @@ if (-not $Repo) {
     if ($url -match 'github\.com[:/](?<repo>[^/]+/[^/]+?)(\.git)?$') { $Repo = $Matches.repo }
     else { throw 'No GitHub repository: add a remote called origin, or pass -Repo owner/name.' }
 }
-Write-Host "=== Alarm & Calendar $tag -> $Repo ==="
+Write-Host "=== RemindMe $tag -> $Repo ==="
 
 if (-not $DryRun) {
     if (-not (Get-Command gh -ErrorAction SilentlyContinue)) { throw 'The GitHub CLI (gh) is missing: https://cli.github.com/' }
@@ -46,18 +46,18 @@ if (-not $DryRun) {
 }
 
 & (Join-Path $root 'build-msi.ps1')
-$assets = @((Join-Path $root "release\AlarmCalendar-$version.exe"), (Join-Path $root "release\AlarmCalendar-$version.msi"))
-$notes = "Alarm & Calendar $version. Windows: the installer (AlarmCalendar-$version.msi), or the program on its own (AlarmCalendar-$version.exe)."
+$assets = @((Join-Path $root "release\RemindMe-$version.exe"), (Join-Path $root "release\RemindMe-$version.msi"))
+$notes = "RemindMe $version. Windows: the installer (RemindMe-$version.msi), or the program on its own (RemindMe-$version.exe)."
 try {
     & (Join-Path $root 'build-apk.ps1')
-    $assets += Join-Path $root "release\AlarmCalendar-$version.apk"
-    $notes += " Android: AlarmCalendar-$version.apk, to install by hand (Android 10 or later)."
+    $assets += Join-Path $root "release\RemindMe-$version.apk"
+    $notes += " Android: RemindMe-$version.apk, to install by hand (Android 10 or later)."
 }
 catch {
     Write-Warning "The APK didn't build ($_); releasing without it."
 }
 
-$command = @('release', 'create', $tag) + $assets + @('--repo', $Repo, '--title', "Alarm & Calendar $version", '--notes', $notes)
+$command = @('release', 'create', $tag) + $assets + @('--repo', $Repo, '--title', "RemindMe $version", '--notes', $notes)
 if ($DryRun) {
     Write-Host "Would run: gh $($command -join ' ')"
     return

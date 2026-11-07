@@ -9,7 +9,7 @@ Discovery is LanLink's design, adapted, and the sessions behind it are tested
 (in-process engines over loopback, and two desktop instances plus the Android
 emulator linked by address). But no two machines on one LAN have discovered each
 other yet. That needs the app to listen on the network, which raises a Windows
-Firewall prompt for the debug build (`ALARMCAL_BIND=127.0.0.1` avoids that in
+Firewall prompt for the debug build (`REMINDME_BIND=127.0.0.1` avoids that in
 tests). **To verify:** run the app on two PCs on one LAN, or a PC and the phone;
 each should list the other in Devices within a few seconds.
 
@@ -90,7 +90,7 @@ Checked on the emulator:
 - **A GitHub repository.** The project has no remote yet; `release-github.ps1`
   needs one (`origin`, or `-Repo owner/name`), and publishes nothing until then.
 - **A release key for the APK.** `build-apk.ps1` signs with your key when the
-  `ALARMCAL_*` variables point at one, and with this machine's debug key
+  `REMINDME_*` variables point at one, and with this machine's debug key
   otherwise. Whatever key the first published APK uses, every update must use
   too, so it is worth making a real one (the script's header says how) before
   publishing, and keeping it safe.

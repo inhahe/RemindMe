@@ -1,6 +1,6 @@
 <#
-  Builds the Windows installer, release\AlarmCalendar-<version>.msi, and the
-  self-contained exe beside it, release\AlarmCalendar-<version>.exe (S9).
+  Builds the Windows installer, release\RemindMe-<version>.msi, and the
+  self-contained exe beside it, release\RemindMe-<version>.exe (S9).
 
   The version comes from the VERSION file next to this script, the single source
   of truth: bump it for every release, so Windows sees an upgrade.
@@ -18,10 +18,10 @@ $publish = Join-Path $root 'installer\publish'
 $out = Join-Path $root 'release'
 New-Item -ItemType Directory -Force $out | Out-Null
 
-Write-Host "=== Alarm & Calendar ${version}: Windows installer ==="
+Write-Host "=== RemindMe ${version}: Windows installer ==="
 
 Write-Host '[1/3] Publishing the self-contained single-file exe...'
-dotnet publish (Join-Path $root 'AlarmCalendar.Desktop\AlarmCalendar.Desktop.csproj') -c Release -r win-x64 --self-contained true `
+dotnet publish (Join-Path $root 'RemindMe.Desktop\RemindMe.Desktop.csproj') -c Release -r win-x64 --self-contained true `
     -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:EnableCompressionInSingleFile=true `
     -p:Version=$version -o $publish
 if ($LASTEXITCODE) { throw 'dotnet publish failed.' }
@@ -43,12 +43,12 @@ foreach ($ext in 'WixToolset.UI.wixext', 'WixToolset.Firewall.wixext') {
 }
 
 Write-Host '[3/3] Building the MSI...'
-$msi = Join-Path $out "AlarmCalendar-$version.msi"
-wix build (Join-Path $root 'installer\AlarmCalendar.wxs') -arch x64 `
+$msi = Join-Path $out "RemindMe-$version.msi"
+wix build (Join-Path $root 'installer\RemindMe.wxs') -arch x64 `
     -d "Version=$version" -d "PublishDir=$publish" `
-    -b (Join-Path $root 'installer') -b (Join-Path $root 'AlarmCalendar.Desktop') `
+    -b (Join-Path $root 'installer') -b (Join-Path $root 'RemindMe.Desktop') `
     -ext WixToolset.UI.wixext -ext WixToolset.Firewall.wixext -pdbtype none -o $msi
 if ($LASTEXITCODE) { throw 'wix build failed (if it mentions the EULA: wix eula accept wix7).' }
-Copy-Item (Join-Path $publish 'AlarmCalendar.exe') (Join-Path $out "AlarmCalendar-$version.exe") -Force
+Copy-Item (Join-Path $publish 'RemindMe.exe') (Join-Path $out "RemindMe-$version.exe") -Force
 
 Write-Host "=== Done: $msi ==="

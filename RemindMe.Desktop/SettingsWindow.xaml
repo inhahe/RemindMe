@@ -1,0 +1,88 @@
+<Window x:Class="RemindMe.Desktop.SettingsWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Settings" Icon="app.ico"
+        Width="560" SizeToContent="Height" ResizeMode="NoResize"
+        WindowStartupLocation="CenterOwner">
+    <StackPanel Margin="14,10,14,12">
+        <TextBlock Text="Defaults for tasks" FontWeight="SemiBold" Margin="0,0,0,3" />
+        <Border Style="{StaticResource Pane}" Background="White">
+            <StackPanel>
+                <WrapPanel>
+                    <TextBlock Text="Sound: " VerticalAlignment="Center" />
+                    <Button x:Name="SoundButton" MinWidth="180" HorizontalContentAlignment="Left" Click="Sound_Click" />
+                </WrapPanel>
+                <TextBlock Style="{StaticResource Hint}" Margin="0,2,0,8"
+                           Text="Every task left on &quot;Default&quot; plays this, including tasks made before the change." />
+                <TextBlock Text="Play the sound:" />
+                <RadioButton x:Name="ModeOnce" GroupName="Mode" Margin="12,3,0,0" Content="_once each time an alarm appears" />
+                <RadioButton x:Name="ModeRepeat" GroupName="Mode" Margin="12,2,0,8"
+                             Content="over and over until the alarm is _closed or marked done" />
+                <WrapPanel Margin="0,0,0,8">
+                    <TextBlock Text="Volume: " VerticalAlignment="Center" />
+                    <ComboBox x:Name="VolumeBox" MinWidth="80" />
+                    <ComboBox x:Name="FadeInBox" MinWidth="200" Margin="8,0,0,0" />
+                </WrapPanel>
+                <WrapPanel>
+                    <TextBlock Text="Remind again after " VerticalAlignment="Center" />
+                    <TextBox x:Name="ReminderHours" Style="{StaticResource Small}" />
+                    <TextBlock Text=" h " VerticalAlignment="Center" />
+                    <TextBox x:Name="ReminderMinutes" Style="{StaticResource Small}" />
+                    <TextBlock Text=" min" VerticalAlignment="Center" />
+                </WrapPanel>
+                <TextBlock Style="{StaticResource Hint}" Margin="0,2,0,0"
+                           Text="For new tasks: how long after an alarm is closed without being marked done it comes back." />
+                <WrapPanel Margin="0,8,0,0">
+                    <TextBlock Text="Time of day for new days-of-the-week tasks: " VerticalAlignment="Center" />
+                    <TextBox x:Name="TimeOfDay" Width="90" VerticalContentAlignment="Center" />
+                </WrapPanel>
+                <TextBlock Text="For new &quot;every N&quot; tasks, the next time comes up:" Margin="0,8,0,0" />
+                <RadioButton x:Name="RestartFromDone" GroupName="Restart" Margin="12,3,0,0"
+                             Content="N after it's marked _done" />
+                <RadioButton x:Name="RestartOnSchedule" GroupName="Restart" Margin="12,2,0,0"
+                             Content="on the _original schedule" />
+            </StackPanel>
+        </Border>
+
+        <TextBlock Text="Startup and sleep" FontWeight="SemiBold" Margin="0,6,0,3" />
+        <Border Style="{StaticResource Pane}" Background="White">
+            <StackPanel>
+                <CheckBox x:Name="StartWithWindows" Content="Start with _Windows (in the tray)" />
+                <TextBlock Style="{StaticResource Hint}" Margin="20,2,0,6"
+                           Text="Alarms only ring while the app is running. Alarms missed while it wasn't appear when it starts, marked as late." />
+                <CheckBox x:Name="CloseToTray" Content="Closing the main window keeps the app running in the _tray" />
+                <CheckBox x:Name="WakeFromSleep" Content="Wake the computer from sleep for _alarms" Margin="0,6,0,0" />
+                <TextBlock Style="{StaticResource Hint}" Margin="20,2,0,0" TextWrapping="Wrap"
+                           Text="Only while the app is running, and only if Windows allows wake timers (Power Options → Change advanced power settings → Sleep → Allow wake timers); many laptops don't on battery. The screen stays on while an alarm's sound plays." />
+            </StackPanel>
+        </Border>
+
+        <TextBlock Text="Your tasks" FontWeight="SemiBold" Margin="0,6,0,3" />
+        <Border Style="{StaticResource Pane}" Background="White">
+            <StackPanel>
+                <WrapPanel>
+                    <Button Content="_Export tasks…" Click="Export_Click" Padding="10,2" />
+                    <Button Content="_Import tasks…" Click="Import_Click" Padding="10,2" Margin="8,0,0,0" />
+                </WrapPanel>
+                <TextBlock Style="{StaticResource Hint}" Margin="0,4,0,0" TextWrapping="Wrap"
+                           Text="Export saves every task to a file, as a backup or to move them to a device that isn't linked. Importing a file adds the tasks it has that this device doesn't (deleted ones included), and updates any it holds a newer version of; nothing that came up in the past rings. These act at once, without Save." />
+                <TextBlock x:Name="TransferText" Margin="0,4,0,0" TextWrapping="Wrap" />
+                <CheckBox x:Name="AutoBackup" Content="_Back up automatically after every change" Margin="0,10,0,0" />
+                <DockPanel Margin="20,4,0,0">
+                    <Button DockPanel.Dock="Right" Content="O_pen folder" Click="OpenBackupFolder_Click" Padding="10,2" Margin="6,0,0,0" />
+                    <Button DockPanel.Dock="Right" Content="Change _folder…" Click="ChangeBackupFolder_Click" Padding="10,2" Margin="6,0,0,0" />
+                    <TextBlock x:Name="BackupFolderText" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                </DockPanel>
+                <TextBlock x:Name="BackupStatus" Style="{StaticResource Hint}" Margin="20,4,0,0" TextWrapping="Wrap" />
+                <TextBlock Style="{StaticResource Hint}" Margin="20,2,0,0" TextWrapping="Wrap"
+                           Text="A new file a few seconds after a task is added, changed or deleted, here or on a linked device (marking done doesn't count). Every backup from the last day is kept, then one a day for 60 days, then one a month for two years. To restore, import one: it brings back deleted tasks, and doesn't undo changes made since." />
+            </StackPanel>
+        </Border>
+
+        <TextBlock x:Name="ErrorText" Foreground="#FFB00020" TextWrapping="Wrap" />
+        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,8,0,0">
+            <Button Content="_Save" Click="Save_Click" FontWeight="SemiBold" />
+            <Button Content="Cancel" IsCancel="True" Margin="8,0,0,0" Click="Cancel_Click" />
+        </StackPanel>
+    </StackPanel>
+</Window>

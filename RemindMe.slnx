@@ -1,0 +1,6 @@
+<Solution>
+  <Project Path="RemindMe.Android/RemindMe.Android.csproj" />
+  <Project Path="RemindMe.Core.Tests/RemindMe.Core.Tests.csproj" />
+  <Project Path="RemindMe.Core/RemindMe.Core.csproj" />
+  <Project Path="RemindMe.Desktop/RemindMe.Desktop.csproj" />
+</Solution>

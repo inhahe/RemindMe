@@ -1,4 +1,4 @@
-# Alarm & Calendar
+# RemindMe
 
 Reminders and alarms that keep nagging until you mark them done, on Windows and
 Android, kept in sync between your computers and your phone.
@@ -116,9 +116,9 @@ backup that still has what you lost:
 - Every backup from the last day is kept, then the newest of each day for 60
   days, then the newest of each month for two years. The ten newest are always
   kept, whatever the clock says.
-- On Windows they go to `Documents\Alarm Calendar backups` (Settings can name
+- On Windows they go to `Documents\RemindMe backups` (Settings can name
   another folder, and **Open folder** shows it). On Android they go to
-  `Download/Alarm Calendar backups`, where they stay even if the app is
+  `Download/RemindMe backups`, where they stay even if the app is
   uninstalled.
 - To restore, import one (above). It brings back deleted tasks, but doesn't undo
   edits made since, since the newer version of a task wins.
@@ -163,7 +163,7 @@ private networks.
 | `--data-dir <folder>` | Keep tasks and settings in another folder; that folder gets its own instance. |
 | `--exit` | Tell the running copy (of that data folder) to exit, and wait until it has. The installer uses this before an upgrade. |
 
-Tasks and settings live in `%LOCALAPPDATA%\AlarmCalendar` (`tasks.json`,
+Tasks and settings live in `%LOCALAPPDATA%\RemindMe` (`tasks.json`,
 `settings.json`, each with a `.bak` of the previous version) along with `app.log`.
 
 ## Android
@@ -200,13 +200,13 @@ Needs Android 10 or later. The APK is installed by hand (it isn't in an app stor
 Needs the .NET 10 SDK (with the Android workload for the phone app).
 
 ```
-dotnet build AlarmCalendar.slnx
-dotnet test AlarmCalendar.Core.Tests
-dotnet publish AlarmCalendar.Android -c Release -f net10.0-android
+dotnet build RemindMe.slnx
+dotnet test RemindMe.Core.Tests
+dotnet publish RemindMe.Android -c Release -f net10.0-android
 ```
 
-The APK lands in `AlarmCalendar.Android/bin/Release/net10.0-android/publish/`
-(`com.inhahe.alarmcalendar-Signed.apk`). It is signed with the debug key, which
+The APK lands in `RemindMe.Android/bin/Release/net10.0-android/publish/`
+(`com.inhahe.remindme-Signed.apk`). It is signed with the debug key, which
 is fine for installing by hand.
 
 ### Releases
@@ -217,12 +217,12 @@ output in `release/`:
 
 | Script | Builds |
 |---|---|
-| `build-msi.ps1` | `AlarmCalendar-<version>.msi`, the Windows installer, and `AlarmCalendar-<version>.exe`, the program on its own (self-contained, no .NET needed). Needs the WiX Toolset (`dotnet tool install --global wix`, done for you) with its EULA accepted once (`wix eula accept wix7`). |
-| `build-apk.ps1` | `AlarmCalendar-<version>.apk`. Sign it with your own key by setting `ALARMCAL_KEYSTORE`, `ALARMCAL_KEY_ALIAS`, `ALARMCAL_STORE_PASS` and `ALARMCAL_KEY_PASS` (the script's header says how to make one); otherwise it uses this machine's debug key, and an APK built elsewhere won't install over it. |
+| `build-msi.ps1` | `RemindMe-<version>.msi`, the Windows installer, and `RemindMe-<version>.exe`, the program on its own (self-contained, no .NET needed). Needs the WiX Toolset (`dotnet tool install --global wix`, done for you) with its EULA accepted once (`wix eula accept wix7`). |
+| `build-apk.ps1` | `RemindMe-<version>.apk`. Sign it with your own key by setting `REMINDME_KEYSTORE`, `REMINDME_KEY_ALIAS`, `REMINDME_STORE_PASS` and `REMINDME_KEY_PASS` (the script's header says how to make one); otherwise it uses this machine's debug key, and an APK built elsewhere won't install over it. |
 | `release-github.ps1` (or `release-github.bat`) | Both of the above, then a GitHub release `v<version>` with them attached, using the GitHub CLI (`gh`). `-DryRun` builds everything and shows the release command without running it; `-Repo owner/name` names the repository if `origin` isn't it. |
 
-The installer puts the program in `Program Files\AlarmCalendar`, adds it to the
+The installer puts the program in `Program Files\RemindMe`, adds it to the
 Start menu, and lets it through Windows Firewall on private and domain networks,
 so sync works without the first-run prompt. It can start it when it finishes. An
-upgrade closes the running copy first (`AlarmCalendar.exe --exit`) and installs
+upgrade closes the running copy first (`RemindMe.exe --exit`) and installs
 over the previous version. Tasks and settings stay where they are, per user.

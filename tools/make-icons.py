@@ -2,8 +2,8 @@
 
 Run from the repository root:  python tools/make-icons.py
 Outputs:
-  AlarmCalendar.Desktop/app.ico                       Windows exe, window and tray icon
-  AlarmCalendar.Android/Resources/mipmap-*/appicon*.png  launcher icons (legacy + adaptive layers)
+  RemindMe.Desktop/app.ico                       Windows exe, window and tray icon
+  RemindMe.Android/Resources/mipmap-*/appicon*.png  launcher icons (legacy + adaptive layers)
 """
 from pathlib import Path
 from PIL import Image, ImageDraw
@@ -61,13 +61,13 @@ def clock(size_frac=1.0, cx=0.5, cy=0.54):
 def windows_ico():
     img = clock(size_frac=1.0, cy=0.56)
     sizes = [16, 20, 24, 32, 40, 48, 64, 128, 256]
-    out = ROOT / "AlarmCalendar.Desktop" / "app.ico"
+    out = ROOT / "RemindMe.Desktop" / "app.ico"
     img.save(out, sizes=[(s, s) for s in sizes])
     print("wrote", out)
 
 
 def android():
-    res = ROOT / "AlarmCalendar.Android" / "Resources"
+    res = ROOT / "RemindMe.Android" / "Resources"
     dens = {"mdpi": 1, "hdpi": 1.5, "xhdpi": 2, "xxhdpi": 3, "xxxhdpi": 4}
     # Adaptive icon layers are 108dp with the central 72dp safe zone.
     fg = clock(size_frac=0.62, cy=0.53)

@@ -60,15 +60,12 @@
                   ExeCommand="&quot;[INSTALLFOLDER]RemindMe.exe&quot;"
                   Execute="immediate" Return="asyncNoWait" Impersonate="yes" />
 
+    <!-- Welcome, the license (MIT, as in LICENSE), the install folder, then installing. -->
     <ui:WixUI Id="WixUI_InstallDir" InstallDirectory="INSTALLFOLDER" />
+    <WixVariable Id="WixUILicenseRtf" Value="License.rtf" />
     <Property Id="WIXUI_EXITDIALOGOPTIONALCHECKBOXTEXT" Value="Launch RemindMe now" />
     <Property Id="WIXUI_EXITDIALOGOPTIONALCHECKBOX" Value="1" />
     <UI>
-      <!-- No license page: the project has no license chosen yet. Welcome goes straight
-           to the install folder. -->
-      <Publish Dialog="WelcomeDlg" Control="Next" Event="NewDialog" Value="InstallDirDlg"
-               Order="10" Condition="NOT Installed" />
-      <Publish Dialog="InstallDirDlg" Control="Back" Event="NewDialog" Value="WelcomeDlg" Order="10" />
       <Publish Dialog="ExitDialog" Control="Finish" Event="DoAction" Value="LaunchApp"
                Order="10" Condition="WIXUI_EXITDIALOGOPTIONALCHECKBOX = 1 AND NOT Installed" />
     </UI>

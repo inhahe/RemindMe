@@ -109,11 +109,6 @@ Checked on the emulator:
   release key later (the script's header says how to make one) means users
   uninstall first. Their tasks then come back from the automatic backups in
   `Download/RemindMe backups`, which survive the uninstall.
-- **A license.** None is chosen. The installer shows no license page, and the
-  GitHub repository has no `LICENSE` file, so by default nobody may reuse the
-  code. LanLink's repository is MIT, and its installer shows a "do whatever you
-  want with it" text. Say if this project should carry the same: a `LICENSE`
-  file, plus `installer/License.rtf` and one line in the `.wxs`.
 - **Not tried: an actual install.** The MSI was built and its payload unpacked
   (`msiexec /a`), and the exe it contains starts and exits; installing it for
   real would change this machine (Program Files, firewall rules), so that, and

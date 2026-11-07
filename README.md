@@ -245,3 +245,7 @@ Start menu, and lets it through Windows Firewall on private and domain networks,
 so sync works without the first-run prompt. It can start it when it finishes. An
 upgrade closes the running copy first (`RemindMe.exe --exit`) and installs
 over the previous version. Tasks and settings stay where they are, per user.
+
+## License
+
+MIT: see [`LICENSE`](LICENSE).

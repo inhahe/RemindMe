@@ -758,7 +758,7 @@ command separator to `cmd`.
   - A Start menu shortcut.
   - Firewall exceptions for the exe on private and domain networks (not
     public), which replace the first-run prompt.
-  - No license page, since none is chosen.
+  - A license page: the MIT license of `LICENSE`, as `installer/License.rtf`.
   - "Launch now" on the last page, run as the installing user.
   - An upgrade first runs the installed exe with `--exit`, which signals the
     running copy (through a named event per data folder, like the existing

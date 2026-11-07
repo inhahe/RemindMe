@@ -1,4 +1,5 @@
 using System.Net;
+using System.Net.Sockets;
 using System.Security.Cryptography;
 using AlarmCalendar.Sync;
 
@@ -41,6 +42,48 @@ public sealed class SyncTests : IDisposable
     }
 
     private static string Addr(SyncEngine e) => $"127.0.0.1:{e.ListenPort}";
+
+    /// <summary>This device's user accepts every pairing (after comparing the codes).</summary>
+    private static void AutoAccept(SyncEngine e) => e.PairRequested += p => _ = p.AcceptAsync();
+
+    /// <summary>A hand-driven protocol client, to play a hostile device.</summary>
+    private sealed class RawPeer : IDisposable
+    {
+        private readonly TcpClient _c;
+        private readonly NetworkStream _s;
+        public string Node { get; } = Guid.NewGuid().ToString("N");
+
+        private RawPeer(TcpClient c) { _c = c; _s = c.GetStream(); }
+
+        public static async Task<RawPeer> ConnectAsync(SyncEngine to)
+        {
+            var c = new TcpClient();
+            await c.ConnectAsync(IPAddress.Loopback, to.ListenPort);
+            return new RawPeer(c);
+        }
+
+        public Task SendAsync(SyncMessage m) => Protocol.WriteFrameAsync(_s, Protocol.Serialize(m), default);
+
+        /// <returns>The next message, or null when the other side closed the connection.</returns>
+        public async Task<SyncMessage?> ReceiveAsync()
+        {
+            using var t = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+            try
+            {
+                var f = await Protocol.ReadFrameAsync(_s, Protocol.MaxFrame, t.Token);
+                return f is null ? null : Protocol.Deserialize(f);
+            }
+            catch (IOException) { return null; }
+        }
+
+        public Task HelloAsync(string group, int proto = Protocol.Version) => SendAsync(new SyncMessage
+        {
+            Type = MessageTypes.Hello, App = Protocol.App, Proto = proto, Node = Node, Name = "Evil",
+            Group = group, Nonce = Convert.ToBase64String(RandomNumberGenerator.GetBytes(16)), Port = 1,
+        });
+
+        public void Dispose() => _c.Dispose();
+    }
 
     private static async Task WaitFor(Func<bool> condition, string what, int timeoutMs = 10_000)
     {
@@ -131,6 +174,7 @@ public sealed class SyncTests : IDisposable
         var (eb, _) = Node(b, 2, null, Addr(ea));
         PairPrompt? prompt = null;
         eb.PairRequested += p => prompt = p;
+        AutoAccept(ea);
         SyncIdentity? aAdopted = null;
         ea.IdentityChanged += id => aAdopted = id;
         await WaitFor(() => ea.Peers().Any(p => p.NodeId == b.NodeId), "A sees B");
@@ -148,6 +192,7 @@ public sealed class SyncTests : IDisposable
         var (ed, _) = Node(NewIdentity("D"), 3, null, Addr(ec));
         PairPrompt? prompt2 = null;
         ec.PairRequested += p => prompt2 = p;
+        AutoAccept(ed);
         await WaitFor(() => ed.Peers().Any(p => p.NodeId == c.NodeId), "D sees C");
         var dGroup = ed.Identity.GroupId;
         await ed.RequestPairingAsync(c.NodeId);
@@ -168,6 +213,7 @@ public sealed class SyncTests : IDisposable
         var (ed, sd) = Node(NewIdentity("D"), 2, null, TimeSpan.FromSeconds(30), IPAddress.Parse("127.0.0.2"), Addr(ec));
         PairPrompt? prompt = null;
         ec.PairRequested += p => prompt = p;
+        AutoAccept(ed);
         await WaitFor(() => ed.Peers().Any(p => p.Name == "C"), "D connected to C");
         await ed.RequestPairingAsync(ec.Identity.NodeId);
         await WaitFor(() => prompt is not null, "C asked");
@@ -175,6 +221,131 @@ public sealed class SyncTests : IDisposable
         var t = Add(sd, "after linking");
         // Well inside the 30 s backoff: the link redialled as soon as the pairing closed it.
         await WaitFor(() => sc.Get(t.Id) is not null, "D's task reaching C", timeoutMs: 8000);
+    }
+
+    [Fact]
+    public async Task NoDeviceCanBePulledIntoAGroupWithoutItsUsersYes()
+    {
+        var a = NewIdentity("A");
+        var (ea, _) = Node(a, 2, null);
+        PairPrompt? prompt = null;
+        ea.PairRequested += p => prompt = p;
+        using var evil = await RawPeer.ConnectAsync(ea);
+        var evilGroup = Guid.NewGuid().ToString("N");
+        var evilKey = Convert.ToBase64String(RandomNumberGenerator.GetBytes(32));
+        await evil.HelloAsync(evilGroup);
+        Assert.Equal(MessageTypes.Hello, (await evil.ReceiveAsync())!.Type);
+
+        // Claim to be linked with many devices, so that A is the one to join.
+        using var key = SyncCrypto.NewPairingKey();
+        var pub = key.ExportSubjectPublicKeyInfo();
+        await evil.SendAsync(new SyncMessage { Type = MessageTypes.PairRequest, Commit = Convert.ToBase64String(SyncCrypto.Commitment(pub, 10_000)), Members = 10_000 });
+        var challenge = (await evil.ReceiveAsync())!;
+        var theirs = Convert.FromBase64String(challenge.PairKey!);
+        var (secret, _) = SyncCrypto.PairingSecret(key, theirs, pub, theirs, 10_000, challenge.Members!.Value);
+        await evil.SendAsync(new SyncMessage { Type = MessageTypes.PairReveal, PairKey = Convert.ToBase64String(pub) });
+        await WaitFor(() => prompt is not null, "A asked");
+        Assert.True(prompt!.ThisDeviceJoins);
+
+        // Push a group before A's user has answered.
+        var sealedGroup = SyncCrypto.Seal(secret, SyncCrypto.RequesterGroupCounter,
+            System.Text.Json.JsonSerializer.SerializeToUtf8Bytes([evilGroup, evilKey], Json.Wire.StringArray));
+        await evil.SendAsync(new SyncMessage { Type = MessageTypes.PairGroup, Sealed = Convert.ToBase64String(sealedGroup) });
+        Assert.Null(await evil.ReceiveAsync());   // A hangs up on it
+        Assert.Equal(a.GroupId, ea.Identity.GroupId);
+    }
+
+    [Fact]
+    public async Task ADigestLargerThanThePreAuthenticationLimitStillSyncs()
+    {
+        var a = NewIdentity("A");
+        var (ea, sa) = Node(a);
+        for (int i = 0; i < 400; i++)
+        {
+            var t = Add(sa, $"task {i}");
+            if (i % 2 == 0) sa.Delete(t.Id);   // tombstones count too
+        }
+        var (_, sb) = Node(NewIdentity("B", a.GroupId, a.GroupKeyBase64), Addr(ea));
+        await WaitFor(() => sb.All().Count == 400, "all 400 records reaching B");
+    }
+
+    [Fact]
+    public async Task LeavingAGroupDoesNotRememberItsDevicesAgain()
+    {
+        var a = NewIdentity("A");
+        var (ea, _) = Node(a);
+        var (eb, _) = Node(NewIdentity("B", a.GroupId, a.GroupKeyBase64), Addr(ea));
+        await WaitFor(() => ea.Peers().Any(p => p.Connected && p.Linked), "A and B in sync");
+        var seen = new List<string>();
+        ea.PeerSeen += (_, name) => { lock (seen) seen.Add(name); };
+        ea.LeaveGroup(Guid.NewGuid().ToString("N"), Convert.ToBase64String(RandomNumberGenerator.GetBytes(32)));
+        await Task.Delay(500);
+        lock (seen) Assert.Empty(seen);
+    }
+
+    [Fact]
+    public async Task APairingWhoseRequesterLeavesFreesTheAccepter()
+    {
+        var (ea, _) = Node(NewIdentity("A"));
+        PairPrompt? first = null;
+        bool withdrawn = false;
+        ea.PairRequested += p => { first ??= p; p.Withdrawn += () => withdrawn = true; };
+        var (eb, _) = Node(NewIdentity("B"), Addr(ea));
+        await WaitFor(() => eb.Peers().Any(p => p.Connected), "B connected to A");
+        await eb.RequestPairingAsync(ea.Identity.NodeId);
+        await WaitFor(() => first is not null, "A asked");
+        eb.Dispose();
+        await WaitFor(() => withdrawn, "A's prompt withdrawn");
+
+        // A takes another pairing at once: the first one no longer holds it "busy".
+        var c = NewIdentity("C");
+        var (ec, _) = Node(c, Addr(ea));
+        AutoAccept(ec);
+        PairPrompt? second = null;
+        ea.PairRequested += p => { if (p != first) second = p; };
+        await WaitFor(() => ec.Peers().Any(p => p.Connected), "C connected to A");
+        await ec.RequestPairingAsync(ea.Identity.NodeId);
+        await WaitFor(() => second is not null, "A asked again");
+    }
+
+    [Fact]
+    public async Task AfterARejectionTheSameConnectionCanTryAgain()
+    {
+        var (ea, _) = Node(NewIdentity("A"));
+        var (eb, _) = Node(NewIdentity("B"), Addr(ea));
+        AutoAccept(eb);
+        int asked = 0;
+        ea.PairRequested += p => { if (Interlocked.Increment(ref asked) == 1) _ = p.RejectAsync(); else _ = p.AcceptAsync(); };
+        var stages = new List<PairStage>();
+        eb.PairProgressed += p => { lock (stages) stages.Add(p.Stage); };
+        await WaitFor(() => eb.Peers().Any(p => p.Connected), "B connected to A");
+        await eb.RequestPairingAsync(ea.Identity.NodeId);
+        await WaitFor(() => { lock (stages) return stages.Contains(PairStage.Rejected); }, "the first try rejected");
+        await eb.RequestPairingAsync(ea.Identity.NodeId);
+        await WaitFor(() => eb.Identity.GroupId == ea.Identity.GroupId, "the second try linking them");
+    }
+
+    [Fact]
+    public async Task AnotherProtocolVersionIsRefused()
+    {
+        var (ea, _) = Node(NewIdentity("A"));
+        using var other = await RawPeer.ConnectAsync(ea);
+        await other.HelloAsync(Guid.NewGuid().ToString("N"), proto: Protocol.Version + 1);
+        Assert.Equal(MessageTypes.Hello, (await other.ReceiveAsync())!.Type);
+        Assert.Null(await other.ReceiveAsync());
+    }
+
+    [Fact]
+    public void AFloodOfAnnouncedDevicesIsCapped()
+    {
+        var (ea, _) = Node(NewIdentity("A"));
+        for (int i = 0; i < 1000; i++)
+            ea.OnAnnounced(new SyncMessage
+            {
+                Type = MessageTypes.Announce, App = Protocol.App, Node = Guid.NewGuid().ToString("N"),
+                Group = Guid.NewGuid().ToString("N"), Port = 9,
+            }, IPAddress.Loopback);
+        Assert.True(ea.Peers().Count <= 256);
     }
 
     [Fact]
@@ -215,8 +386,9 @@ public sealed class SyncTests : IDisposable
         var (eb, sb) = Node(b, Addr(ea));
         Add(sb, "B's task");
 
-        PairPrompt? prompt = null;
+        PairPrompt? prompt = null, bPrompt = null;
         ea.PairRequested += p => prompt = p;
+        eb.PairRequested += p => bPrompt = p;
         var progress = new List<PairProgress>();
         eb.PairProgressed += p => { lock (progress) progress.Add(p); };
         SyncIdentity? adopted = null;
@@ -233,8 +405,16 @@ public sealed class SyncTests : IDisposable
         lock (progress) bCode = progress.First(p => p.Stage == PairStage.CodeShown).Code!;
         Assert.Equal(prompt!.Code, bCode);
         Assert.Matches("^[0-9]{6}$", bCode);
+        await WaitFor(() => bPrompt is not null, "B asked too");
+        Assert.True(bPrompt!.IsRequester);
+        Assert.False(prompt.IsRequester);
+        Assert.Equal(prompt.Code, bPrompt.Code);
 
+        // A's yes alone links nothing: B's user must compare the codes and say yes too.
         await prompt.AcceptAsync();
+        await Task.Delay(500);
+        Assert.Null(adopted);
+        await bPrompt.AcceptAsync();
         await WaitFor(() => adopted is not null, "B adopting A's group");
         Assert.Equal(a.GroupId, adopted!.GroupId);
         Assert.Equal(a.GroupKeyBase64, adopted.GroupKeyBase64);
@@ -249,6 +429,7 @@ public sealed class SyncTests : IDisposable
         var b = NewIdentity("B");
         var (eb, _) = Node(b, Addr(ea));
         ea.PairRequested += p => _ = p.RejectAsync();
+        AutoAccept(eb);
         var done = new TaskCompletionSource<PairProgress>();
         eb.PairProgressed += p => { if (p.Stage is PairStage.Rejected or PairStage.Accepted) done.TrySetResult(p); };
         await WaitFor(() => eb.Peers().Any(p => p.Connected), "B connected to A");

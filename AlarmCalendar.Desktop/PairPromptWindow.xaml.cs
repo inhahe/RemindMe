@@ -17,7 +17,16 @@ public partial class PairPromptWindow : Window
         _prompt = prompt;
         Question.Text = PairText.Question(prompt);
         CodeText.Text = $"{prompt.Code[..3]} {prompt.Code[3..]}";
+        // The other device said no or went away: nothing left to answer.
+        prompt.Withdrawn += OnWithdrawn;
+        Closed += (_, _) => prompt.Withdrawn -= OnWithdrawn;
     }
+
+    private void OnWithdrawn() => AppHost.OnUi(() =>
+    {
+        _answered = true;
+        Close();
+    });
 
     private void Accept_Click(object sender, RoutedEventArgs e)
     {

@@ -38,11 +38,17 @@ internal sealed class PeerSession : IDisposable
     public bool Authenticated { get; private set; }
     /// <summary>Keys are derived: the peer claims the same group, and frames are now sealed.</summary>
     public bool Sealed => _sendKey is not null;
-    /// <summary>The peer's tasks have all arrived once: it sent <c>digest_done</c>.</summary>
-    public bool FirstSyncDone { get; set; }
 
-    // Pairing (a session between different groups). One pairing per session.
+    // Pairing (a session between different groups); see SyncEngine's pairing section.
     public bool PairStarted { get; set; }
+    /// <summary>This device's user accepted, after comparing the codes.</summary>
+    public bool LocalAccepted { get; set; }
+    /// <summary>The other device's user accepted (it sent <c>pair_accept</c>).</summary>
+    public bool PeerAccepted { get; set; }
+    /// <summary>The accepter's group, sealed, held until this device's user accepts too.</summary>
+    public string? PeerSealedGroup { get; set; }
+    /// <summary>The question shown on this device, withdrawn if the pairing ends unanswered.</summary>
+    public PairPrompt? Prompt { get; set; }
     public bool PairInitiator { get; set; }
     public ECDiffieHellman? PairKey { get; set; }
     public byte[]? PairPublic { get; set; }
@@ -60,6 +66,18 @@ internal sealed class PeerSession : IDisposable
     /// <summary>The pairing went through; this session is about to be replaced by one
     /// under the joined group, so whoever dialled it should redial at once.</summary>
     public bool PairCompleted { get; set; }
+
+    /// <summary>Forgets a pairing that ended without linking, so the two can try again
+    /// on this same connection.</summary>
+    public void ResetPairing()
+    {
+        PairKey?.Dispose();
+        PairKey = null;
+        PairStarted = PairInitiator = LocalAccepted = PeerAccepted = false;
+        PairPublic = PairCommit = PairPeerPublic = PairSecret = null;
+        PairCode = PeerSealedGroup = null;
+        Prompt = null;
+    }
 
     public event Action<PeerSession, SyncMessage>? Received;
     /// <summary>Raised once, when the peer's first sealed frame opens.</summary>
@@ -89,10 +107,12 @@ internal sealed class PeerSession : IDisposable
 
     /// <summary>Records the peer's hello and, for a peer claiming our group, derives the
     /// session keys so every later frame is sealed.</summary>
-    /// <returns>False if the hello is malformed or claims this node's own ID.</returns>
+    /// <returns>False if the hello is malformed, from another protocol version, or claims
+    /// this node's own ID.</returns>
     public bool AcceptHello(SyncMessage hello, string myNode, string myGroup, byte[] groupKey)
     {
         if (!Protocol.IsValidNodeId(hello.Node) || hello.Node == myNode || hello.Nonce is null) return false;
+        if (hello.Proto != Protocol.Version) return false;
         byte[] peerNonce;
         try { peerNonce = Convert.FromBase64String(hello.Nonce); }
         catch (FormatException) { return false; }

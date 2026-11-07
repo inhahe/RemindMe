@@ -68,10 +68,9 @@ public sealed class DevicesActivity : AppCompatActivity
         var now = AppState.Clock.UtcNow;
         var live = AppState.Sync?.Peers() ?? [];
         foreach (var p in live)
-            AddRow(list, p.Name, p.Linked ? (p.Connected ? "Linked, in sync" : "Linked, connecting…") : "Not linked",
-                p.Linked ? null : p.NodeId);
+            AddRow(list, p.Name, PairText.DeviceStatus(p), p.Linked ? null : p.NodeId);
         foreach (var k in AppState.Settings.KnownPeers.Where(k => live.All(p => p.NodeId != k.NodeId)))
-            AddRow(list, k.Name, $"Linked, last in sync {TextFormat.Span(TimeMath.ToWall(k.LastSeenUtc, AppState.Clock.Zone), TimeMath.ToWall(now, AppState.Clock.Zone), 2)} ago", null);
+            AddRow(list, k.Name, PairText.LastInSync(k, now, AppState.Clock.Zone), null);
         if (list.ChildCount == 0)
             list.AddView(new TextView(this) { Text = AppState.Sync is null ? "Sync is off." : "No other devices found yet." });
     }
@@ -97,20 +96,22 @@ public sealed class DevicesActivity : AppCompatActivity
 
     private void OnPairProgress(PairProgress p) => Find<TextView>(Resource.Id.pair_text).Text = PairText.Progress(p);
 
-    /// <summary>Asks whether another device may join this one's group (D3).</summary>
+    /// <summary>Asks whether to link (D3); on either device, both users must accept.</summary>
     private void Ask(PairPrompt p)
     {
         AppState.PendingPrompt = null;
         Notifications.Cancel(this, Notifications.PairId);
-        new AlertDialog.Builder(this)
+        var dialog = new AlertDialog.Builder(this)
             .SetTitle("Link a device?")!
             .SetMessage($"{PairText.Question(p)}\n\n"
-                + $"It should be showing this code:\n\n{p.Code[..3]} {p.Code[3..]}\n\n"
+                + $"Both devices should be showing this code:\n\n{p.Code[..3]} {p.Code[3..]}\n\n"
                 + "Accept only if the codes match.")!
             .SetPositiveButton("Link", (_, _) => _ = p.AcceptAsync())!
             .SetNegativeButton("Don't link", (_, _) => _ = p.RejectAsync())!
             .SetCancelable(false)!
-            .Show();
+            .Show()!;
+        // The other device said no or went away: nothing left to answer.
+        p.Withdrawn += () => AppState.OnMain(() => { if (dialog.IsShowing) dialog.Dismiss(); });
     }
 
     private void Apply()

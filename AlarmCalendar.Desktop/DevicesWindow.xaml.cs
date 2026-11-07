@@ -37,13 +37,9 @@ public partial class DevicesWindow : Window
         StatusText.Text = AppHost.SyncStatus + string.Concat(remotes.Select(r => $"\n{r.Address}: {r.State}"));
         var now = AppHost.Clock.UtcNow;
         var live = AppHost.Sync?.Peers() ?? [];
-        var rows = live.Select(p => new DeviceRow(p.NodeId, p.Name,
-            p.Linked ? (p.Connected ? "Linked, in sync" : "Linked, connecting…") : "Not linked",
-            p.Address ?? "", !p.Linked)).ToList();
+        var rows = live.Select(p => new DeviceRow(p.NodeId, p.Name, AlarmCalendar.PairText.DeviceStatus(p), p.Address ?? "", !p.Linked)).ToList();
         foreach (var k in AppHost.Settings.KnownPeers.Where(k => rows.All(r => r.NodeId != k.NodeId)))
-            rows.Add(new DeviceRow(k.NodeId, k.Name,
-                $"Linked, last in sync {TextFormat.Span(TimeMath.ToWall(k.LastSeenUtc, AppHost.Clock.Zone), TimeMath.ToWall(now, AppHost.Clock.Zone), 2)} ago",
-                "", false));
+            rows.Add(new DeviceRow(k.NodeId, k.Name, AlarmCalendar.PairText.LastInSync(k, now, AppHost.Clock.Zone), "", false));
         var selected = (DeviceList.SelectedItem as DeviceRow)?.NodeId;
         DeviceList.ItemsSource = rows;
         DeviceList.SelectedItem = rows.FirstOrDefault(r => r.NodeId == selected);

@@ -187,30 +187,51 @@ separately (see *Simplification opportunities*).
   the higher ID dials too, in case a firewall refuses the lower one), TCP
   keep-alive is on with `NoDelay`, and inbound connections from outside the LAN
   are refused unless `AcceptExternalConnections` is set.
-- **Hello proves nothing; the first sealed frame does.** A session is
-  `Authenticated` once its peer's first sealed frame opens. A fresh `hello`
-  replaces a stale session (as in LanLink), but never an authenticated one: a
-  session claiming the group takes over only when it authenticates. A claimed-
-  but-unproven session is closed after 15 s. Otherwise anyone on the LAN could
-  say hello as one linked device and cut it off from another. Only authenticated
-  sessions receive broadcasts. Node IDs must be 32 hex digits, which makes the key
-  labels unambiguous. Frames are limited to 64 KB until a peer authenticates (32
-  MB after), and at most 32 unproven connections are accepted at a time.
-- **Pairing (linking)**: commit, then reveal. The requester sends
-  `pair_request {commit = SHA-256(its ECDH P-256 key), members}`, the accepter
-  answers `pair_challenge {its key, members}`, and the requester reveals its key
-  in `pair_reveal`, which must match the commitment. Each side's key is fixed
-  before it sees the other's, so a man in the middle can't search for a key that
-  makes the two 6-digit codes agree (without the commitment it could, in seconds).
-  The user compares the codes and accepts on the accepting device. **The device
-  linked with fewer others joins the other's group** (`members` comes from the
-  app's remembered peers; on a tie, the requester joins). Linking a new device
-  from an established one therefore brings the new one in. When the joiner is
-  the requester, `pair_accept` carries the accepter's group sealed under the ECDH
-  secret; otherwise `pair_accept` is empty and the requester sends its own group
-  in `pair_group`. Both prompts say which way it goes, and warn when the joiner
-  will leave devices behind. One pairing per session and one prompt at a time;
-  further requests get `pair_reject {reason: busy}`.
+- **Hello proves nothing; the first sealed frame does.** That frame is a tiny
+  `ready`, and a session is `Authenticated` once its peer's `ready` opens. The
+  digest goes out only after that. It can be any size, while frames from a peer
+  that hasn't authenticated are limited to 64 KB (32 MB after), and at most 32
+  unproven connections are accepted at a time.
+- **Takeover rules.** A fresh `hello` replaces a stale session (as in LanLink),
+  but only one that is unsealed, unauthenticated and not pairing. A session
+  claiming the group takes over only when it authenticates, and one that hasn't
+  authenticated within 15 s is closed. An inbound hello that gives the node ID of
+  a remembered linked device without the group (`IsLinkedPeer`) is refused.
+  Otherwise anyone on the LAN could knock a linked device off its connection, or
+  make it appear "not linked" and invite a re-link. Only authenticated sessions
+  receive broadcasts. Node IDs must be 32 hex digits, which makes the key labels
+  unambiguous. The protocol version in `hello` must match.
+- **Bounded noise.** At most 256 devices are remembered from announcements, and
+  `PeersChanged` is coalesced to about four a second. The listener is dual-mode
+  (IPv4 and IPv6) when bound to `Any`, so IPv6 remote addresses work.
+- **Pairing (linking)**: commit, then reveal, then **both users accept**. The
+  requester sends `pair_request {commit = SHA-256(its ECDH P-256 key, members),
+  members}`, the accepter answers `pair_challenge {its key, members}`, and the
+  requester reveals its key in `pair_reveal`, which must match the commitment.
+  Each side's key is fixed before it sees the other's, so a man in the middle
+  can't search for a key that makes the two 6-digit codes agree (without the
+  commitment it could, in seconds). The code covers both keys and both member
+  counts. Both devices then show the code and ask their user (`PairRequested`
+  fires on both), and **each links only on its own user's yes**. The accepter's
+  yes sends `pair_accept`. The requester completes only when it has both
+  `pair_accept` and its own user's yes, and the accepter adopts a `pair_group`
+  only after its own user's yes. So no device can be pulled into a group, or
+  hand over its group's key, without the person in front of it comparing the
+  codes.
+  **The device linked with fewer others joins the other's group** (`members`
+  comes from the app's remembered peers; on a tie, the requester joins), so
+  linking a new device from an established one brings the new one in. When the
+  requester joins, `pair_accept` carries the accepter's group, sealed under the
+  ECDH secret with counter 0. Otherwise the requester sends its own group in
+  `pair_group` with counter 1. The two never share a nonce, whatever either side
+  is told. Both prompts say which way it goes, and warn when the joiner will
+  leave devices behind.
+  One pairing at a time on each side; further requests get
+  `pair_reject {reason: busy}`. When a pairing ends unanswered (the other side
+  said no or went away), its prompt is `Withdrawn` and the screens close it. A
+  pairing that ends without linking is forgotten, so the same connection can try
+  again, and the requester always hears Accepted, Rejected or Failed. Unanswered
+  pairings are dropped after 5 minutes.
 - **Replication**: when a session starts, both sides send a `digest`:
   `{id, defVersion, stateVersion, doneThrough}` for every task. Each then pushes
   `tasks` for every record where it is newer in any of those three, or that the
@@ -247,7 +268,11 @@ separately (see *Simplification opportunities*).
   Settings windows change only their own fields, through `UpdateSettings(edit)`
   (`AppHost` on desktop, `AppState` on Android), on the settings as they are at
   save time. A window that saved the copy it took on opening would silently
-  undo a pairing made while it was open.
+  undo a pairing made while it was open. Remembered linked devices
+  (`KnownPeers`, which drive the Devices list, `members`, `IsLinkedPeer` and
+  startup settling) are updated from `PeerSeen`, which fires only for sessions
+  of the current group. So leaving a group, which closes its sessions, doesn't
+  bring its devices straight back.
 - **Merge across revisions**: `DoneThroughUtc` takes the maximum only between
   states of the same schedule revision. A newer revision replaces it outright,
   which is the one way a `DoneThrough` left in the future by a wrong clock

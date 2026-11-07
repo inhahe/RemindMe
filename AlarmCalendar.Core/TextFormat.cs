@@ -8,19 +8,29 @@ public static class PairText
 {
     private static string Devices(int n) => n == 1 ? "1 other device" : $"{n} other devices";
 
-    /// <summary>The question on the device asked to accept a link.</summary>
-    public static string Question(Sync.PairPrompt p) => p.ThisDeviceJoins
-        ? $"\"{p.PeerName}\" wants to link with this device. This device will join its sync group"
-          + (p.MyLinkedDevices > 0 ? $" and stop syncing with the {Devices(p.MyLinkedDevices)} it is linked with now." : ".")
-        : $"\"{p.PeerName}\" wants to link with this device and sync tasks with it.";
+    /// <summary>The question on either device: both must accept after comparing the codes.</summary>
+    public static string Question(Sync.PairPrompt p)
+    {
+        string who = p.IsRequester
+            ? $"Linking with \"{p.PeerName}\": check that it shows this same code, then accept on both devices."
+            : $"\"{p.PeerName}\" wants to link with this device and sync tasks with it.";
+        if (!p.ThisDeviceJoins) return who;
+        return who + " This device will join its sync group"
+            + (p.MyLinkedDevices > 0 ? $" and stop syncing with the {Devices(p.MyLinkedDevices)} it is linked with now." : ".");
+    }
+
+    /// <summary>A device's line in the Devices list.</summary>
+    public static string DeviceStatus(Sync.PeerInfo p) =>
+        p.Linked ? (p.Connected ? "Linked, in sync" : "Linked, connecting…") : "Not linked";
+
+    /// <summary>The line of a linked device that isn't connected now.</summary>
+    public static string LastInSync(KnownPeer k, DateTimeOffset now, TimeZoneInfo zone) =>
+        $"Linked, last in sync {TextFormat.Span(TimeMath.ToWall(k.LastSeenUtc, zone), TimeMath.ToWall(now, zone), 2)} ago";
 
     /// <summary>The requesting device's line while it waits for the other to accept.</summary>
     public static string Progress(Sync.PairProgress p) => p.Stage switch
     {
-        Sync.PairStage.CodeShown => $"On {p.PeerName}, check that it shows {p.Code![..3]} {p.Code[3..]} and accept."
-            + (p.ThisDeviceJoins && p.MyLinkedDevices > 0
-                ? $" This device will then join {p.PeerName}'s group and stop syncing with the {Devices(p.MyLinkedDevices)} it is linked with now."
-                : ""),
+        Sync.PairStage.CodeShown => $"Check that {p.PeerName} shows {p.Code![..3]} {p.Code[3..]}, then accept on both devices.",
         Sync.PairStage.Accepted when p.Message is not null => p.Message,
         Sync.PairStage.Accepted => $"Linked with {p.PeerName}.",
         Sync.PairStage.Rejected => p.Message ?? $"{p.PeerName} said no.",

@@ -56,6 +56,7 @@ public static class AppHost
             AcceptExternalConnections = s.AcceptExternalConnections,
             RemoteAddresses = s.RemoteAddresses.ToList(),
             LinkedDeviceCount = () => Settings.KnownPeers.Count,
+            IsLinkedPeer = node => Settings.IsKnownPeer(node),
         }, Log);
         engine.IdentityChanged += id => OnUi(() =>
         {
@@ -131,10 +132,7 @@ public static class AppHost
         Settings = updated;
         Settings.Save(SettingsPath, Log);
         Autostart.Apply(Settings.StartWithWindows);
-        bool syncChanged = old.SyncEnabled != updated.SyncEnabled || old.DeviceName != updated.DeviceName
-            || old.Port != updated.Port || old.AcceptExternalConnections != updated.AcceptExternalConnections
-            || !old.RemoteAddresses.SequenceEqual(updated.RemoteAddresses);
-        if (syncChanged) RestartSync();
+        if (old.SyncSettingsDiffer(updated)) RestartSync();
         SettingsChanged?.Invoke();
     }
 

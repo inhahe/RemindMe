@@ -15,7 +15,8 @@ public sealed record SyncIdentity(string NodeId, string Name, string GroupId, st
 public sealed record SyncOptions
 {
     public int Port { get; init; } = Protocol.DefaultPort;
-    /// <summary>Address the TCP listener binds; tests use loopback.</summary>
+    /// <summary>Address the TCP listener binds; tests use loopback. <see cref="IPAddress.Any"/>
+    /// listens on IPv4 and IPv6 both.</summary>
     public IPAddress BindAddress { get; init; } = IPAddress.Any;
     public bool EnableDiscovery { get; init; } = true;
     public int DiscoveryPort { get; init; } = Protocol.DiscoveryPort;
@@ -28,6 +29,9 @@ public sealed record SyncOptions
     /// <summary>How many other devices this one is linked with (the app's remembered
     /// peers). When two devices pair, the one with fewer joins the other's group.</summary>
     public Func<int>? LinkedDeviceCount { get; init; }
+    /// <summary>Whether a node ID belongs to a device this one has been in sync with. An
+    /// inbound connection claiming such an ID but not the group is refused.</summary>
+    public Func<string, bool>? IsLinkedPeer { get; init; }
 }
 
 /// <summary>A device this node knows of, for the Devices screen.</summary>
@@ -36,18 +40,27 @@ public sealed record SyncOptions
 /// <param name="Address">Where it was last seen.</param>
 public sealed record PeerInfo(string NodeId, string Name, bool Linked, bool Connected, string? Address);
 
-/// <summary>A pairing request awaiting the user's answer on the accepting device.</summary>
+/// <summary>
+/// A pairing waiting for this device's user, on either side: both users compare the codes
+/// and both must accept before anything is linked.
+/// </summary>
 public sealed class PairPrompt
 {
     internal Func<bool, Task> Answer { get; init; } = _ => Task.CompletedTask;
     public required string PeerNode { get; init; }
     public required string PeerName { get; init; }
-    /// <summary>Must match the code the requesting device shows.</summary>
+    /// <summary>Must match the code the other device shows.</summary>
     public required string Code { get; init; }
-    /// <summary>This device would join the requester's group, rather than the other way
-    /// round, leaving <see cref="MyLinkedDevices"/> devices behind.</summary>
+    /// <summary>This device clicked Link; otherwise the other one did.</summary>
+    public bool IsRequester { get; init; }
+    /// <summary>This device joins the other's group (rather than the other way round),
+    /// leaving <see cref="MyLinkedDevices"/> devices behind.</summary>
     public bool ThisDeviceJoins { get; init; }
     public int MyLinkedDevices { get; init; }
+    /// <summary>Raised when the pairing ends before this prompt is answered (the other
+    /// device said no or went away); the screen showing it should close it.</summary>
+    public event Action? Withdrawn;
+    internal void Withdraw() => Withdrawn?.Invoke();
     public Task AcceptAsync() => Answer(true);
     public Task RejectAsync() => Answer(false);
 }
@@ -69,11 +82,16 @@ public sealed class SyncEngine : IDisposable
     private static readonly TimeSpan PeerExpiry = TimeSpan.FromSeconds(12);
     private static readonly TimeSpan HandshakeTimeout = TimeSpan.FromSeconds(15);
     private static readonly TimeSpan UnlinkedIdleTimeout = TimeSpan.FromMinutes(3);
+    /// <summary>A pairing left unanswered this long is abandoned.</summary>
+    private static readonly TimeSpan PairingTimeout = TimeSpan.FromMinutes(5);
     /// <summary>A same-group peer that announces but never connects is dialled by the
     /// higher ID too after this long: the lower one's dials may be blocked by a firewall.</summary>
     private static readonly TimeSpan HigherIdFallback = TimeSpan.FromSeconds(10);
     /// <summary>Connections that haven't proved the group key, at most.</summary>
     private const int MaxUnprovenSessions = 32;
+    /// <summary>Devices remembered from announcements, at most: anyone on the LAN can
+    /// announce any number of made-up devices.</summary>
+    private const int MaxNearby = 256;
 
     private readonly TaskStore _store;
     private readonly SyncOptions _options;
@@ -91,24 +109,21 @@ public sealed class SyncEngine : IDisposable
     private SyncIdentity _id;
     private TcpListener? _listener;
     private Discovery? _discovery;
-    private int _pendingPrompts;
+    /// <summary>The one pairing in progress on each side, if any.</summary>
+    private PeerSession? _accepting, _requesting;
+    private int _peersChangedQueued;
     private int _disposed;
-    /// <summary>Completed (and replaced) to make every remote link redial at once.</summary>
-    private TaskCompletionSource _kick = new(TaskCreationOptions.RunContinuationsAsynchronously);
-
-    /// <summary>Makes every remote link redial now, without waiting out its backoff: after
-    /// a pairing or a change of group, the next connection is expected to succeed.</summary>
-    private void KickRemoteLinks() =>
-        Interlocked.Exchange(ref _kick, new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously)).TrySetResult();
 
     private sealed record Nearby(SyncMessage Msg, IPEndPoint Ep, DateTimeOffset Seen, DateTimeOffset FirstSeen);
 
     public event Action? PeersChanged;
+    /// <summary>A pairing needs this device's user: on the accepting device when the
+    /// request arrives, on the requesting one once the codes are known.</summary>
     public event Action<PairPrompt>? PairRequested;
     public event Action<PairProgress>? PairProgressed;
     /// <summary>This node joined another group by pairing; the app must persist the new identity.</summary>
     public event Action<SyncIdentity>? IdentityChanged;
-    /// <summary>(node, name): a linked device was in sync just now (its session
+    /// <summary>(node, name): a device of this group was in sync just now (its session
     /// authenticated, or closed after being in sync).</summary>
     public event Action<string, string>? PeerSeen;
     /// <summary>The first complete exchange with a linked device finished (see <see cref="FirstSyncDone"/>).</summary>
@@ -135,7 +150,12 @@ public sealed class SyncEngine : IDisposable
     /// <exception cref="SocketException">The port is in use.</exception>
     public void Start()
     {
-        _listener = new TcpListener(_options.BindAddress, _options.Port);
+        if (_options.BindAddress.Equals(IPAddress.Any))
+        {
+            _listener = new TcpListener(IPAddress.IPv6Any, _options.Port);
+            _listener.Server.DualMode = true;   // IPv4 and IPv6 both, so v6 remote addresses work
+        }
+        else _listener = new TcpListener(_options.BindAddress, _options.Port);
         _listener.Start();
         ListenPort = ((IPEndPoint)_listener.LocalEndpoint).Port;
         _ = AcceptLoopAsync(_cts.Token);
@@ -177,7 +197,7 @@ public sealed class SyncEngine : IDisposable
             {
                 bool linked = s.PeerGroup == group;
                 result[node] = new PeerInfo(node, s.PeerName ?? node, linked, !linked || s.Authenticated,
-                    s.RemoteAddress ?? s.RemoteEndPoint?.Address.ToString());
+                    s.RemoteAddress ?? (s.RemoteEndPoint is { } ep ? Plain(ep.Address).ToString() : null));
             }
         }
         return result.Values.OrderByDescending(p => p.Linked).ThenBy(p => p.Name, StringComparer.CurrentCultureIgnoreCase).ToList();
@@ -205,7 +225,23 @@ public sealed class SyncEngine : IDisposable
         return result;
     }
 
+    /// <summary>Raises <see cref="PeersChanged"/> at most about four times a second, however
+    /// fast announcements or connections come and go.</summary>
+    private void RaisePeersChanged()
+    {
+        if (Interlocked.Exchange(ref _peersChangedQueued, 1) != 0) return;
+        _ = Task.Delay(250).ContinueWith(_ =>
+        {
+            Volatile.Write(ref _peersChangedQueued, 0);
+            if (_disposed == 0) PeersChanged?.Invoke();
+        }, TaskScheduler.Default);
+    }
+
     // ---- Connections -------------------------------------------------------------------
+
+    /// <summary>An IPv4 address as itself, not in its IPv6-mapped form (which the dual-mode
+    /// listener reports).</summary>
+    private static IPAddress Plain(IPAddress a) => a.IsIPv4MappedToIPv6 ? a.MapToIPv4() : a;
 
     /// <summary>This node's announcement or hello: the same fields, different type.</summary>
     private SyncMessage Presence(string type)
@@ -230,12 +266,12 @@ public sealed class SyncEngine : IDisposable
 
             if (!_options.AcceptExternalConnections && client.Client.RemoteEndPoint is IPEndPoint ep && !Protocol.IsPrivateOrLan(ep.Address))
             {
-                _log?.Invoke($"Refused a connection from {ep.Address}, outside the LAN (Accept connections from outside the LAN is off).");
+                _log?.Invoke($"Refused a connection from {Plain(ep.Address)}, outside the LAN (Accept connections from outside the LAN is off).");
                 client.Dispose();
                 continue;
             }
             int unproven;
-            lock (_lock) unproven = _allSessions.Count(s => !s.Authenticated && !s.PairStarted);
+            lock (_lock) unproven = _allSessions.Count(s => !s.Authenticated);
             if (unproven >= MaxUnprovenSessions)
             {
                 client.Dispose();
@@ -296,20 +332,29 @@ public sealed class SyncEngine : IDisposable
             _allSessions.Remove(s);
             wasCurrent = s.PeerNode is not null && _sessions.TryGetValue(s.PeerNode, out var cur) && cur == s && _sessions.Remove(s.PeerNode);
         }
+        if (s.PairStarted && !s.PairCompleted)
+        {
+            if (s.PairInitiator)
+                PairProgressed?.Invoke(new PairProgress(s.PeerNode ?? "", s.PeerName ?? "?", PairStage.Failed, s.PairCode, "The connection was lost."));
+            EndPairing(s);
+        }
         if (!wasCurrent) return;
         _log?.Invoke($"Disconnected from {s.Describe()}.");
-        if (s.Authenticated) PeerSeen?.Invoke(s.PeerNode!, s.PeerName!);
-        PeersChanged?.Invoke();
+        // Only for this group: sessions closed by leaving a group must not bring the old
+        // group's devices back into the list of linked ones.
+        if (s.Authenticated && s.PeerGroup == Identity.GroupId) PeerSeen?.Invoke(s.PeerNode!, s.PeerName!);
+        RaisePeersChanged();
     }
 
-    private void OnAnnounced(SyncMessage msg, IPAddress from)
+    internal void OnAnnounced(SyncMessage msg, IPAddress from)
     {
         var node = msg.Node!;
         var now = DateTimeOffset.UtcNow;
         var ep = new IPEndPoint(from, msg.Port!.Value);
-        var first = _nearby.TryGetValue(node, out var old) ? old.FirstSeen : now;
-        _nearby[node] = new Nearby(msg, ep, now, first);
-        if (old is null) PeersChanged?.Invoke();
+        bool known = _nearby.TryGetValue(node, out var old);
+        if (!known && _nearby.Count >= MaxNearby) return;
+        _nearby[node] = new Nearby(msg, ep, now, old?.FirstSeen ?? now);
+        if (!known) RaisePeersChanged();
 
         // As in LanLink, the node with the lower ID dials, so two peers don't open two
         // connections to each other; but if nothing connects for a while (a firewall may be
@@ -318,7 +363,7 @@ public sealed class SyncEngine : IDisposable
         var id = Identity;
         if (msg.Group != id.GroupId) return;
         lock (_lock) if (_sessions.ContainsKey(node)) { _nearby[node] = _nearby[node] with { FirstSeen = now }; return; }
-        if (string.CompareOrdinal(id.NodeId, node) < 0 || now - first > HigherIdFallback)
+        if (string.CompareOrdinal(id.NodeId, node) < 0 || now - (old?.FirstSeen ?? now) > HigherIdFallback)
             _ = DialNodeAsync(node, ep);
     }
 
@@ -380,10 +425,8 @@ public sealed class SyncEngine : IDisposable
                     delay = TimeSpan.FromSeconds(Math.Min(60, Math.Max(delay.TotalSeconds * 2, first.TotalSeconds)));
                 }
             }
-            var kick = Volatile.Read(ref _kick).Task;
-            await Task.WhenAny(Task.Delay(delay, ct), kick).ConfigureAwait(false);
-            if (ct.IsCancellationRequested) break;
-            if (kick.IsCompleted) delay = first;
+            try { await Task.Delay(delay, ct).ConfigureAwait(false); }
+            catch (OperationCanceledException) { break; }
         }
     }
 
@@ -397,13 +440,14 @@ public sealed class SyncEngine : IDisposable
             bool expired = false;
             foreach (var (node, entry) in _nearby)
                 if (now - entry.Seen > PeerExpiry && _nearby.TryRemove(node, out _)) expired = true;
-            List<PeerSession> idle;
+            List<PeerSession> stale;
             var group = Identity.GroupId;
             lock (_lock)
-                idle = _allSessions.Where(s => !s.IsOutgoing && s.PeerGroup != group && s.PairSecret is null
-                    && now - s.Opened > UnlinkedIdleTimeout).ToList();
-            foreach (var s in idle) s.Close();
-            if (expired) PeersChanged?.Invoke();
+                stale = _allSessions.Where(s => s.PeerGroup != group && (s.PairStarted
+                    ? now - s.Opened > PairingTimeout
+                    : !s.IsOutgoing && now - s.Opened > UnlinkedIdleTimeout)).ToList();
+            foreach (var s in stale) s.Close();
+            if (expired) RaisePeersChanged();
         }
     }
 
@@ -421,13 +465,14 @@ public sealed class SyncEngine : IDisposable
             }
             switch (m.Type)
             {
+                case MessageTypes.Ready when s.Authenticated:
+                    break;   // its opening already proved the key (OnAuthenticated)
                 case MessageTypes.Digest when s.Authenticated:
                     var newer = _store.NewerThan(m.Digest ?? []);
                     if (newer.Count > 0) _ = s.SendAsync(new SyncMessage { Type = MessageTypes.Tasks, Tasks = newer.ToList() });
                     _ = s.SendAsync(new SyncMessage { Type = MessageTypes.DigestDone });
                     break;
                 case MessageTypes.DigestDone when s.Authenticated:
-                    s.FirstSyncDone = true;
                     if (!FirstSyncDone) { FirstSyncDone = true; FirstSyncCompleted?.Invoke(); }
                     break;
                 case MessageTypes.Tasks when s.Authenticated:
@@ -440,20 +485,24 @@ public sealed class SyncEngine : IDisposable
                 case MessageTypes.PairChallenge when !s.Sealed && s.PairInitiator && s.PairPeerPublic is null:
                     OnPairChallenge(s, m);
                     break;
-                case MessageTypes.PairReveal when !s.Sealed && !s.PairInitiator && s.PairCommit is not null && s.PairPeerPublic is null:
+                case MessageTypes.PairReveal when !s.Sealed && s.PairStarted && !s.PairInitiator && s.PairPeerPublic is null:
                     OnPairReveal(s, m);
                     break;
-                case MessageTypes.PairAccept when !s.Sealed && s.PairInitiator && s.PairSecret is not null:
-                    OnPairAccept(s, m);
+                case MessageTypes.PairAccept when !s.Sealed && s.PairInitiator && s.PairSecret is not null && !s.PeerAccepted:
+                    s.PeerAccepted = true;
+                    s.PeerSealedGroup = m.Sealed;
+                    TryCompleteAsRequester(s);
                     break;
-                case MessageTypes.PairGroup when !s.Sealed && !s.PairInitiator && s.PairSecret is not null && !s.RequesterJoins:
-                    Adopt(s, m.Sealed);
+                case MessageTypes.PairGroup when !s.Sealed && s.PairStarted && !s.PairInitiator && s.LocalAccepted && !s.RequesterJoins:
+                    // Only ever after this device's user accepted: a group pushed at any other
+                    // moment would let anyone pull this device into their group unasked.
+                    Adopt(s, m.Sealed, SyncCrypto.RequesterGroupCounter);
                     break;
-                case MessageTypes.PairReject when !s.Sealed:
+                case MessageTypes.PairReject when !s.Sealed && s.PairStarted:
                     if (s.PairInitiator)
                         PairProgressed?.Invoke(new PairProgress(s.PeerNode, s.PeerName!, PairStage.Rejected, s.PairCode,
-                            m.Reason == "busy" ? "The other device is already busy linking." : "The other device said no."));
-                    if (s.RemoteAddress is null) s.Close();
+                            m.Reason == "busy" ? $"{s.PeerName} is busy linking another device." : $"{s.PeerName} said no."));
+                    EndPairing(s);
                     break;
                 default:
                     _log?.Invoke($"Unexpected {m.Type} from {s.Describe()}; closing.");
@@ -472,17 +521,29 @@ public sealed class SyncEngine : IDisposable
     private void OnHello(PeerSession s, SyncMessage hello)
     {
         var id = Identity;
+        if (hello.Proto != Protocol.Version)
+            _log?.Invoke($"A device speaking sync protocol {hello.Proto} connected from {s.RemoteEndPoint}; this one speaks {Protocol.Version}. Update both to the same version.");
         if (!s.AcceptHello(hello, id.NodeId, id.GroupId, id.GroupKey)) { s.Close(); return; }
+        if (!s.Sealed && !s.IsOutgoing && _options.IsLinkedPeer?.Invoke(s.PeerNode!) == true)
+        {
+            // Claims to be one of our devices but isn't in the group: an impostor angling to
+            // be shown as "not linked" (and re-linked), or a device that left; either way,
+            // not one to talk to unasked.
+            _log?.Invoke($"Refused a connection from {s.RemoteEndPoint} claiming to be linked device {s.PeerName}, without the group.");
+            s.Close();
+            return;
+        }
         bool installed;
         PeerSession? replaced = null;
         lock (_lock)
         {
             _sessions.TryGetValue(s.PeerNode!, out var old);
             // A fresh hello replaces a stale session (the peer restarted without a FIN), as in
-            // LanLink, but never one that has proved the group key: a hello proves nothing, so
-            // anyone could otherwise cut two linked devices apart by claiming one's ID. A
-            // session claiming the group takes over only once it proves the key (OnAuthenticated).
-            installed = old is null || old.IsClosed || (!old.Authenticated && !(old.Sealed && !s.Sealed));
+            // LanLink, but never one that is proving the key, has proved it, or is pairing: a
+            // hello proves nothing, so anyone could otherwise knock a linked device (or a
+            // pairing) off its connection. A session claiming the group takes over only once
+            // it proves the key (OnAuthenticated).
+            installed = old is null || old.IsClosed || (!old.Authenticated && !old.Sealed && !old.PairStarted);
             if (installed)
             {
                 if (old is not null && old != s) replaced = old;
@@ -492,18 +553,15 @@ public sealed class SyncEngine : IDisposable
         replaced?.Close();
         if (!installed && !s.Sealed)
         {
-            // Not linked, yet claiming the ID of a device that is: an impostor, or a stale copy.
             s.Close();
             return;
         }
         _dialFailLogged.TryRemove(s.PeerNode!, out _);
-        if (s.Sealed)
-        {
-            // The digest is the first sealed frame each way; its opening proves the key.
-            _ = s.SendAsync(new SyncMessage { Type = MessageTypes.Digest, Digest = _store.Digest().ToList() });
-        }
+        // The first sealed frame each way is tiny: opening it proves the key; the digest
+        // follows once the peer has proved it too (OnAuthenticated).
+        if (s.Sealed) _ = s.SendAsync(new SyncMessage { Type = MessageTypes.Ready });
         else _log?.Invoke($"Connected to {s.Describe()}, which isn't linked to this device.");
-        if (installed) PeersChanged?.Invoke();
+        if (installed) RaisePeersChanged();
     }
 
     private void OnAuthenticated(PeerSession s)
@@ -518,8 +576,9 @@ public sealed class SyncEngine : IDisposable
         replaced?.Close();
         _remoteErrors.TryRemove(s.RemoteAddress ?? "", out _);
         _log?.Invoke($"In sync with {s.Describe()}.");
+        _ = s.SendAsync(new SyncMessage { Type = MessageTypes.Digest, Digest = _store.Digest().ToList() });
         PeerSeen?.Invoke(s.PeerNode!, s.PeerName!);
-        PeersChanged?.Invoke();
+        RaisePeersChanged();
     }
 
     private void OnStoreChanged(StoreChange change)
@@ -542,24 +601,27 @@ public sealed class SyncEngine : IDisposable
 
     // ---- Pairing ------------------------------------------------------------------------
     //
-    // requester R                         accepter A
-    //   pair_request {commit = H(R.pub), members} →
-    //                                     ← pair_challenge {A.pub, members}
-    //   pair_reveal {R.pub} →             (checks H(R.pub) = commit)
-    //   shows the code                    shows the code, asks the user
-    //                                     ← pair_accept {sealed: A's group}   when R joins
-    //                                     ← pair_accept {}                    when A joins
-    //   pair_group {sealed: R's group} →  (when A joins)
+    // requester R (clicked Link)              accepter A
+    //   pair_request {commit = H(R.pub, R.members), R.members} →
+    //                                          ← pair_challenge {A.pub, A.members}
+    //   pair_reveal {R.pub} →                  (checks the commitment)
+    //   both show the code (it covers both keys and both member counts) and ask their user
+    //                                          ← pair_accept {A's group, sealed} if R joins,
+    //                                                        {} if A joins   (A's user said yes)
+    //   when R's user says yes too:
+    //     R joins: adopts A's group;  A joins: pair_group {R's group, sealed} →
     //
-    // R commits to its key before seeing A's, and A reveals its key before seeing R's, so
-    // nobody in the middle can choose a key to make the two codes agree. The device linked
-    // with fewer others joins, so linking a new device from an established one brings the
-    // new one in rather than pulling the established one out of its group.
+    // R commits before seeing A's key and A reveals before seeing R's, so nobody in the
+    // middle can choose a key that makes the two codes agree. Each side links only on its
+    // own user's yes, so no device can be pulled into a group, or handed its group's key,
+    // without the person in front of it comparing the codes. The device linked with fewer
+    // others joins, so linking a new device from an established one brings the new one in.
+    // One pairing at a time on each side.
 
-    private int LinkedCount() => Math.Max(0, _options.LinkedDeviceCount?.Invoke() ?? 0);
+    private int LinkedCount() => Math.Clamp(_options.LinkedDeviceCount?.Invoke() ?? 0, 0, 10_000);
 
     /// <summary>Starts pairing with the device <paramref name="node"/>. Progress arrives
-    /// through <see cref="PairProgressed"/>.</summary>
+    /// through <see cref="PairProgressed"/>, and the code through <see cref="PairRequested"/>.</summary>
     public async Task RequestPairingAsync(string node)
     {
         PeerSession? s;
@@ -582,35 +644,43 @@ public sealed class SyncEngine : IDisposable
             PairProgressed?.Invoke(new PairProgress(node, s.PeerName!, PairStage.Accepted, null, "Already linked."));
             return;
         }
-        if (s.PairStarted)
+        lock (_lock)
         {
-            PairProgressed?.Invoke(new PairProgress(node, s.PeerName!, PairStage.Failed, null, "Linking with it is already under way."));
-            return;
+            if (s.PairStarted || (_requesting is { IsClosed: false } r && r != s))
+            {
+                PairProgressed?.Invoke(new PairProgress(node, s.PeerName!, PairStage.Failed, null, "Another link is already under way."));
+                return;
+            }
+            _requesting = s;
+            s.PairStarted = true;
+            s.PairInitiator = true;
         }
-        s.PairStarted = true;
-        s.PairInitiator = true;
         s.MyMembers = LinkedCount();
         s.PairKey = SyncCrypto.NewPairingKey();
         s.PairPublic = s.PairKey.ExportSubjectPublicKeyInfo();
         await s.SendAsync(new SyncMessage
         {
             Type = MessageTypes.PairRequest,
-            Commit = Convert.ToBase64String(SyncCrypto.Commitment(s.PairPublic)),
+            Commit = Convert.ToBase64String(SyncCrypto.Commitment(s.PairPublic, s.MyMembers)),
             Members = s.MyMembers,
         }).ConfigureAwait(false);
     }
 
-    /// <summary>Accepter: answer with our key. One pairing per session, and one prompt at a
-    /// time, so nobody can flood the screen with requests.</summary>
+    /// <summary>Accepter: answer with our key, if no other pairing is under way.</summary>
     private void OnPairRequest(PeerSession s, SyncMessage m)
     {
         var commit = Convert.FromBase64String(m.Commit ?? "");
-        if (s.PairStarted || Volatile.Read(ref _pendingPrompts) > 0 || commit.Length != 32)
+        bool busy;
+        lock (_lock)
+        {
+            busy = s.PairStarted || commit.Length != 32 || (_accepting is { IsClosed: false } a && a != s);
+            if (!busy) { _accepting = s; s.PairStarted = true; }
+        }
+        if (busy)
         {
             _ = s.SendAsync(new SyncMessage { Type = MessageTypes.PairReject, Reason = "busy" });
             return;
         }
-        s.PairStarted = true;
         s.PairCommit = commit;
         s.PeerMembers = Math.Clamp(m.Members ?? 0, 0, 10_000);
         s.MyMembers = LinkedCount();
@@ -619,91 +689,127 @@ public sealed class SyncEngine : IDisposable
         _ = s.SendAsync(new SyncMessage { Type = MessageTypes.PairChallenge, PairKey = Convert.ToBase64String(s.PairPublic), Members = s.MyMembers });
     }
 
-    /// <summary>Requester: reveal our key, work out the code, show it.</summary>
+    /// <summary>Requester: reveal our key, work out the code, and ask our user.</summary>
     private void OnPairChallenge(PeerSession s, SyncMessage m)
     {
         var theirs = Convert.FromBase64String(m.PairKey ?? "");
         s.PairPeerPublic = theirs;
         s.PeerMembers = Math.Clamp(m.Members ?? 0, 0, 10_000);
-        (s.PairSecret, s.PairCode) = SyncCrypto.PairingSecret(s.PairKey!, theirs, requesterKey: s.PairPublic!, accepterKey: theirs);
+        (s.PairSecret, s.PairCode) = SyncCrypto.PairingSecret(s.PairKey!, theirs,
+            requesterKey: s.PairPublic!, accepterKey: theirs, requesterMembers: s.MyMembers, accepterMembers: s.PeerMembers);
         s.RequesterJoins = s.MyMembers <= s.PeerMembers;
         _ = s.SendAsync(new SyncMessage { Type = MessageTypes.PairReveal, PairKey = Convert.ToBase64String(s.PairPublic!) });
         PairProgressed?.Invoke(new PairProgress(s.PeerNode!, s.PeerName!, PairStage.CodeShown, s.PairCode, null,
             ThisDeviceJoins: s.RequesterJoins, MyLinkedDevices: s.MyMembers));
+        Ask(s, isRequester: true, thisDeviceJoins: s.RequesterJoins);
     }
 
     /// <summary>Accepter: check the revealed key against the commitment, work out the code,
-    /// and ask the user.</summary>
+    /// and ask our user.</summary>
     private void OnPairReveal(PeerSession s, SyncMessage m)
     {
         var theirs = Convert.FromBase64String(m.PairKey ?? "");
-        if (!CryptographicOperations.FixedTimeEquals(SyncCrypto.Commitment(theirs), s.PairCommit))
+        if (!CryptographicOperations.FixedTimeEquals(SyncCrypto.Commitment(theirs, s.PeerMembers), s.PairCommit))
             throw new CryptographicException("The revealed pairing key doesn't match its commitment.");
         s.PairPeerPublic = theirs;
-        (s.PairSecret, s.PairCode) = SyncCrypto.PairingSecret(s.PairKey!, theirs, requesterKey: theirs, accepterKey: s.PairPublic!);
+        (s.PairSecret, s.PairCode) = SyncCrypto.PairingSecret(s.PairKey!, theirs,
+            requesterKey: theirs, accepterKey: s.PairPublic!, requesterMembers: s.PeerMembers, accepterMembers: s.MyMembers);
         s.RequesterJoins = s.PeerMembers <= s.MyMembers;
-        Interlocked.Increment(ref _pendingPrompts);
+        Ask(s, isRequester: false, thisDeviceJoins: !s.RequesterJoins);
+    }
+
+    private void Ask(PeerSession s, bool isRequester, bool thisDeviceJoins)
+    {
         int answered = 0;
-        PairRequested?.Invoke(new PairPrompt
+        var prompt = new PairPrompt
         {
             PeerNode = s.PeerNode!,
             PeerName = s.PeerName!,
-            Code = s.PairCode,
-            ThisDeviceJoins = !s.RequesterJoins,
+            Code = s.PairCode!,
+            IsRequester = isRequester,
+            ThisDeviceJoins = thisDeviceJoins,
             MyLinkedDevices = s.MyMembers,
-            Answer = accept =>
-            {
-                if (Interlocked.Exchange(ref answered, 1) != 0) return Task.CompletedTask;
-                Interlocked.Decrement(ref _pendingPrompts);
-                return AnswerPairingAsync(s, accept);
-            },
-        });
+            Answer = accept => Interlocked.Exchange(ref answered, 1) != 0 ? Task.CompletedTask : AnswerAsync(s, accept),
+        };
+        s.Prompt = prompt;
+        PairRequested?.Invoke(prompt);
     }
 
-    private async Task AnswerPairingAsync(PeerSession s, bool accept)
+    /// <summary>This device's user answered (on either side).</summary>
+    private async Task AnswerAsync(PeerSession s, bool accept)
     {
         if (s.IsClosed || s.PairSecret is null) return;
+        s.Prompt = null;
         if (!accept)
         {
             await s.SendAsync(new SyncMessage { Type = MessageTypes.PairReject }).ConfigureAwait(false);
+            if (s.PairInitiator) PairProgressed?.Invoke(new PairProgress(s.PeerNode!, s.PeerName!, PairStage.Rejected, s.PairCode, "Linking cancelled."));
+            EndPairing(s);
             return;
         }
+        s.LocalAccepted = true;
+        if (s.PairInitiator)
+        {
+            TryCompleteAsRequester(s);
+            return;
+        }
+        // Accepter: say yes, and if the requester is the one joining, hand it our group.
+        var sealedGroup = s.RequesterJoins ? SealGroup(s, SyncCrypto.AccepterGroupCounter) : null;
+        await s.SendAsync(new SyncMessage { Type = MessageTypes.PairAccept, Sealed = sealedGroup }).ConfigureAwait(false);
         if (s.RequesterJoins)
         {
-            await s.SendAsync(new SyncMessage { Type = MessageTypes.PairAccept, Sealed = SealGroup(s) }).ConfigureAwait(false);
+            s.PairCompleted = true;
+            EndPairing(s);
             _log?.Invoke($"Linked {s.Describe()} to this device.");
         }
-        else await s.SendAsync(new SyncMessage { Type = MessageTypes.PairAccept }).ConfigureAwait(false);
     }
 
-    /// <summary>Requester: join the accepter's group, or send ours for it to join.</summary>
-    private void OnPairAccept(PeerSession s, SyncMessage m)
+    /// <summary>Requester: once both users have said yes, join the accepter's group or send ours.</summary>
+    private void TryCompleteAsRequester(PeerSession s)
     {
+        if (!s.LocalAccepted || !s.PeerAccepted) return;
+        var (node, name, code) = (s.PeerNode!, s.PeerName!, s.PairCode);
         if (s.RequesterJoins)
         {
-            var (node, name, code) = (s.PeerNode!, s.PeerName!, s.PairCode);
-            Adopt(s, m.Sealed);
+            Adopt(s, s.PeerSealedGroup, SyncCrypto.AccepterGroupCounter);
             PairProgressed?.Invoke(new PairProgress(node, name, PairStage.Accepted, code, null));
             return;
         }
         s.PairCompleted = true;
-        _ = s.SendAsync(new SyncMessage { Type = MessageTypes.PairGroup, Sealed = SealGroup(s) });
+        _ = s.SendAsync(new SyncMessage { Type = MessageTypes.PairGroup, Sealed = SealGroup(s, SyncCrypto.RequesterGroupCounter) });
+        EndPairing(s);
         _log?.Invoke($"{s.Describe()} joins this device's sync group.");
-        PairProgressed?.Invoke(new PairProgress(s.PeerNode!, s.PeerName!, PairStage.Accepted, s.PairCode, null, ThisDeviceJoins: false));
+        PairProgressed?.Invoke(new PairProgress(node, name, PairStage.Accepted, code, null, ThisDeviceJoins: false));
     }
 
-    private string SealGroup(PeerSession s)
+    /// <summary>Ends a pairing on <paramref name="s"/>: frees the one-at-a-time slot,
+    /// withdraws a prompt nobody answered, and (unless it linked) forgets the pairing so the
+    /// two can try again.</summary>
+    private void EndPairing(PeerSession s)
+    {
+        var prompt = s.Prompt;
+        lock (_lock)
+        {
+            if (_accepting == s) _accepting = null;
+            if (_requesting == s) _requesting = null;
+        }
+        prompt?.Withdraw();
+        if (!s.PairCompleted) s.ResetPairing();
+        else s.Prompt = null;
+    }
+
+    private string SealGroup(PeerSession s, ulong counter)
     {
         var id = Identity;
         var payload = JsonSerializer.SerializeToUtf8Bytes([id.GroupId, id.GroupKeyBase64], Json.Wire.StringArray);
-        return Convert.ToBase64String(SyncCrypto.Seal(s.PairSecret!, 0, payload));
+        return Convert.ToBase64String(SyncCrypto.Seal(s.PairSecret!, counter, payload));
     }
 
     /// <summary>Joins the group sealed in <paramref name="sealedGroup"/>, then reconnects
     /// everything under it.</summary>
-    private void Adopt(PeerSession s, string? sealedGroup)
+    private void Adopt(PeerSession s, string? sealedGroup, ulong counter)
     {
-        var plain = SyncCrypto.Open(s.PairSecret!, 0, Convert.FromBase64String(sealedGroup ?? ""));
+        var plain = SyncCrypto.Open(s.PairSecret!, counter, Convert.FromBase64String(sealedGroup ?? ""));
         var parts = JsonSerializer.Deserialize(plain, Json.Wire.StringArray);
         if (parts is not [var groupId, var groupKey] || !Protocol.IsValidNodeId(groupId) || Convert.FromBase64String(groupKey).Length != 32)
             throw new CryptographicException("Malformed group.");
@@ -711,16 +817,16 @@ public sealed class SyncEngine : IDisposable
         var peerPort = s.PeerPort;
         var remote = s.RemoteAddress;
         s.PairCompleted = true;
+        EndPairing(s);
         SyncIdentity adopted;
         lock (_lock) adopted = _id = _id with { GroupId = groupId, GroupKeyBase64 = groupKey };
         IdentityChanged?.Invoke(adopted);
         _log?.Invoke($"Joined the sync group of {s.Describe()}.");
         ResetSessions();
         _discovery?.AnnounceNow();
-        KickRemoteLinks();
         // Reconnect at once rather than waiting for discovery (or a remote link's backoff).
         if (remote is null && peerEp is not null && peerPort is { } port)
-            _ = DialAsync(peerEp.Address.ToString(), port, null, _cts.Token);
+            _ = DialAsync(Plain(peerEp.Address).ToString(), port, null, _cts.Token);
     }
 
     /// <summary>Leaves the current group for a new one of this device alone.</summary>
@@ -731,7 +837,6 @@ public sealed class SyncEngine : IDisposable
         IdentityChanged?.Invoke(changed);
         ResetSessions();
         _discovery?.AnnounceNow();
-        KickRemoteLinks();
     }
 
     /// <summary>Closes every session; they reconnect under the current identity (remote
@@ -741,7 +846,7 @@ public sealed class SyncEngine : IDisposable
         List<PeerSession> all;
         lock (_lock) all = _allSessions.ToList();
         foreach (var x in all) x.Close();
-        PeersChanged?.Invoke();
+        RaisePeersChanged();
     }
 
     public void Dispose()

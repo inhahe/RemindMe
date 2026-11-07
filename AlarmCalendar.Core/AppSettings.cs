@@ -96,6 +96,14 @@ public sealed class AppSettings
         }
     }
 
+    /// <summary>True when a setting the sync engine starts with differs, so it must restart.</summary>
+    public bool SyncSettingsDiffer(AppSettings o) =>
+        SyncEnabled != o.SyncEnabled || DeviceName != o.DeviceName || Port != o.Port
+        || AcceptExternalConnections != o.AcceptExternalConnections || !RemoteAddresses.SequenceEqual(o.RemoteAddresses);
+
+    /// <summary>Whether <paramref name="node"/> is a device this one has been in sync with.</summary>
+    public bool IsKnownPeer(string node) => KnownPeers.Any(k => k.NodeId == node);
+
     public AppSettings Clone() =>
         JsonSerializer.Deserialize(JsonSerializer.Serialize(this, Json.Files.AppSettings), Json.Files.AppSettings)!;
 

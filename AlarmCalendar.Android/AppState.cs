@@ -75,10 +75,7 @@ public static class AppState
         edit(updated);
         Settings = updated;
         SaveSettings();
-        bool syncChanged = old.SyncEnabled != updated.SyncEnabled || old.DeviceName != updated.DeviceName
-            || old.Port != updated.Port || old.AcceptExternalConnections != updated.AcceptExternalConnections
-            || !old.RemoteAddresses.SequenceEqual(updated.RemoteAddresses);
-        if (syncChanged)
+        if (old.SyncSettingsDiffer(updated))
         {
             if (Settings.SyncEnabled) { StopSync(); SyncService.Start(Context); }
             else SyncService.Stop(Context);
@@ -101,6 +98,7 @@ public static class AppState
             RemoteAddresses = s.RemoteAddresses.ToList(),
             AcquireMulticastLock = AcquireMulticastLock,
             LinkedDeviceCount = () => Settings.KnownPeers.Count,
+            IsLinkedPeer = node => Settings.IsKnownPeer(node),
         }, Log);
         // Missed alarms wait for the first exchange; ring them as soon as it is done.
         engine.FirstSyncCompleted += () => OnMain(() => AlarmScheduler.Reschedule(Context));
@@ -120,6 +118,12 @@ public static class AppState
         });
         engine.PairRequested += p => OnMain(() =>
         {
+            p.Withdrawn += () => OnMain(() =>
+            {
+                if (PendingPrompt != p) return;
+                PendingPrompt = null;
+                Notifications.Cancel(Context, Notifications.PairId);
+            });
             PendingPrompt = p;
             PairRequested?.Invoke(p);
             if (PendingPrompt == p) Notifications.ShowPairRequest(Context, p);

@@ -18,6 +18,9 @@ public static class MessageTypes
     public const string PairGroup = "pair_group";
     public const string PairReject = "pair_reject";
     // Encrypted, within a group.
+    /// <summary>The first sealed frame each way: tiny, so the peer can open it (proving the
+    /// key) under the small pre-authentication frame limit, whatever the size of the digest.</summary>
+    public const string Ready = "ready";
     public const string Digest = "digest";
     public const string Tasks = "tasks";
     /// <summary>Sent after answering a peer's digest: every record the peer lacked has
@@ -196,10 +199,21 @@ public static class SyncCrypto
         return iAmLow ? (lowToHigh, highToLow) : (highToLow, lowToHigh);
     }
 
-    /// <summary>The requester's commitment to its pairing key, sent before it has seen the
-    /// other side's key. Without it, a man in the middle could try keys until both screens
-    /// showed the same code; with it, every choice is fixed before the code can be known.</summary>
-    public static byte[] Commitment(byte[] publicKey) => SHA256.HashData(publicKey);
+    /// <summary>The requester's commitment to its pairing key and its member count, sent
+    /// before it has seen the other side's key. Without it, a man in the middle could try
+    /// keys until both screens showed the same code; with it, every choice is fixed before
+    /// the code can be known.</summary>
+    public static byte[] Commitment(byte[] publicKey, int members)
+    {
+        var data = new byte[publicKey.Length + 4];
+        publicKey.CopyTo(data, 0);
+        BinaryPrimitives.WriteInt32BigEndian(data.AsSpan(publicKey.Length), members);
+        return SHA256.HashData(data);
+    }
+
+    /// <summary>Counters for the two group payloads a pairing may seal under its secret, so
+    /// no (key, nonce) pair is ever used twice, whatever either side is told.</summary>
+    public const ulong AccepterGroupCounter = 0, RequesterGroupCounter = 1;
 
     /// <summary>Encrypts <paramref name="plain"/> as frame number <paramref name="counter"/>:
     /// [8-byte counter][ciphertext][16-byte tag].</summary>
@@ -231,15 +245,21 @@ public static class SyncCrypto
         return plain;
     }
 
-    /// <summary>The secret and the confirmation code of a pairing, from the ECDH agreement.</summary>
-    /// <param name="requesterKey">The joining device's public key (SPKI).</param>
+    /// <summary>The secret and the confirmation code of a pairing, from the ECDH agreement.
+    /// The member counts go into the code too: they decide which device joins which, so a
+    /// tampered count shows up as codes that differ.</summary>
+    /// <param name="requesterKey">The requesting device's public key (SPKI).</param>
     /// <param name="accepterKey">The accepting device's public key (SPKI).</param>
-    public static (byte[] secret, string code) PairingSecret(ECDiffieHellman mine, byte[] theirPublic, byte[] requesterKey, byte[] accepterKey)
+    public static (byte[] secret, string code) PairingSecret(ECDiffieHellman mine, byte[] theirPublic, byte[] requesterKey, byte[] accepterKey,
+        int requesterMembers, int accepterMembers)
     {
         using var other = ECDiffieHellman.Create();
         other.ImportSubjectPublicKeyInfo(theirPublic, out _);
         byte[] raw = mine.DeriveRawSecretAgreement(other.PublicKey);
-        var salt = Concat(requesterKey, accepterKey);
+        var counts = new byte[8];
+        BinaryPrimitives.WriteInt32BigEndian(counts, requesterMembers);
+        BinaryPrimitives.WriteInt32BigEndian(counts.AsSpan(4), accepterMembers);
+        var salt = Concat(Concat(requesterKey, accepterKey), counts);
         byte[] secret = HKDF.DeriveKey(HashAlgorithmName.SHA256, raw, 32, salt, "alarmcal pair key"u8.ToArray());
         byte[] codeBytes = HKDF.DeriveKey(HashAlgorithmName.SHA256, raw, 8, salt, "alarmcal pair code"u8.ToArray());
         ulong n = BinaryPrimitives.ReadUInt64BigEndian(codeBytes) % 1_000_000;

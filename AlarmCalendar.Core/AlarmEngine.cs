@@ -120,12 +120,16 @@ public static class AlarmEngine
     /// <summary>The earliest moment any of <paramref name="tasks"/> needs attention: an
     /// untriggered task's next occurrence or a snoozed task's next reminder. Android hands
     /// this to AlarmManager. Null when nothing is scheduled.</summary>
-    public static DateTimeOffset? NextWakeUp(IEnumerable<AlarmTask> tasks, DateTimeOffset now, TimeZoneInfo zone)
+    public static DateTimeOffset? NextWakeUp(IEnumerable<AlarmTask> tasks, DateTimeOffset now, TimeZoneInfo zone) =>
+        NextWakeUp(tasks.Select(t => Evaluate(t, now, zone)));
+
+    /// <summary><see cref="NextWakeUp(IEnumerable{AlarmTask}, DateTimeOffset, TimeZoneInfo)"/>
+    /// from statuses already evaluated.</summary>
+    public static DateTimeOffset? NextWakeUp(IEnumerable<TaskStatus> statuses)
     {
         DateTimeOffset? best = null;
-        foreach (var t in tasks)
+        foreach (var st in statuses)
         {
-            var st = Evaluate(t, now, zone);
             var when = st.Triggered ? (st.Snoozed ? st.NextReminder : null) : st.NextOccurrence;
             if (when is { } w && (best is null || w < best)) best = w;
         }

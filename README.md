@@ -96,6 +96,7 @@ plays instead and the alarm window says so.
 | For new "every N" tasks | Which restart choice new tasks start with. |
 | Start with Windows (in the tray) | On by default: alarms only ring while the app runs. |
 | Closing the main window keeps the app running in the tray | On by default. Use **Exit** (toolbar or tray menu) to quit. |
+| Wake the computer from sleep for alarms | On by default: a sleeping computer wakes just before an alarm, and the screen stays on while it rings. Windows must allow wake timers (Power Options → Change advanced power settings → Sleep → Allow wake timers); many laptops don't on battery. A computer that is shut down or hibernating doesn't wake. |
 
 **Your tasks** (in Settings, on Windows and Android): **Export tasks** saves every
 task to a file, as a backup or to move them to a device you haven't linked.

@@ -7,13 +7,15 @@ namespace AlarmCalendar.Desktop;
 /// for each that should be alerting, refreshes it when a new alert begins, and closes it
 /// when the task stops alerting for any other reason (marked done or dismissed on
 /// another device, edited, deleted). Polling rather than timers makes sleep, resume and
-/// clock changes need no special handling: the first tick after them sees the truth.
+/// clock changes need no special handling: the first tick after them sees the truth. It
+/// also keeps the wake timer (S3) set for the next thing due.
 /// </summary>
 public sealed class AlarmCoordinator : IDisposable
 {
     private readonly TaskStore _store;
     private readonly SoundService _sounds;
     private readonly DispatcherTimer _timer;
+    private readonly WakeTimer _wake = new();
     private readonly Dictionary<Guid, AlarmWindow> _windows = new();
     /// <summary>Snoozed tasks the user asked to see again from the list. Local to this
     /// device: re-opening a window here shouldn't make the others ring.</summary>
@@ -78,6 +80,9 @@ public sealed class AlarmCoordinator : IDisposable
         foreach (var (id, w) in _windows.Where(kv => !live.Contains(kv.Key)).ToList())
             CloseWindow(id, w);
 
+        _wake.WakeFor(AppHost.Settings.WakeFromSleep ? AlarmEngine.NextWakeUp(statuses) : null, now);
+        _wake.KeepAwake(_windows.Values.Any(w => w.Alerting));
+
         Current = statuses;
         Evaluated?.Invoke(statuses);
     }
@@ -123,6 +128,7 @@ public sealed class AlarmCoordinator : IDisposable
         _timer.Stop();
         foreach (var w in _windows.Values.ToList()) w.CloseQuietly();
         _windows.Clear();
+        _wake.Dispose();
     }
 
     internal SoundService Sounds => _sounds;

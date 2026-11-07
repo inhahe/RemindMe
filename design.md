@@ -435,6 +435,16 @@ separately (see *Simplification opportunities*).
   A fade-in (`SoundLevels.FadeLevel`) rises with the square of the time, from 2%
   of the target, in 200 ms steps. It counts from when the alarm began, so a
   sound resumed after another alarm interrupted it doesn't start quiet again.
+- `WakeTimer` (S3): one waitable timer (`CreateWaitableTimerExW`,
+  `SetWaitableTimer` with `fResume`), kept set by the coordinator 20 s before
+  the next wake-up (`AlarmEngine.NextWakeUp`), so the computer wakes from sleep
+  and the app is up when the alarm is due. It is re-armed only when that time
+  changes, and closing the app destroys it. Windows must allow wake timers, which
+  many laptops don't on battery; a system that can't resume this way is logged.
+  While an alarm window is sounding, `SetThreadExecutionState` keeps the system
+  and the display on, since after a timer wake Windows leaves the display off
+  and goes back to sleep within about two minutes. The **Wake the computer from
+  sleep for alarms** setting (on by default) turns the timer off.
 - `Autostart.cs`: a single per-user `HKCU\...\Run` entry, as in LanLink. An
   instance with its own `--data-dir` gets an entry of its own name, and is never
   enabled on its first run.

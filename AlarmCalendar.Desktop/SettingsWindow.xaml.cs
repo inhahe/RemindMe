@@ -28,6 +28,7 @@ public partial class SettingsWindow : Window
         RestartOnSchedule.IsChecked = s.DefaultRestartMode == RestartMode.OnSchedule;
         StartWithWindows.IsChecked = Autostart.IsEnabled();
         CloseToTray.IsChecked = s.CloseToTray;
+        WakeFromSleep.IsChecked = s.WakeFromSleep;
         ShowSound();
     }
 
@@ -97,6 +98,7 @@ public partial class SettingsWindow : Window
         int fadeIn = SoundLevels.FadeIns[Math.Max(0, FadeInBox.SelectedIndex)];
         var restart = RestartOnSchedule.IsChecked == true ? RestartMode.OnSchedule : RestartMode.FromDone;
         bool startWithWindows = StartWithWindows.IsChecked == true, closeToTray = CloseToTray.IsChecked == true;
+        bool wake = WakeFromSleep.IsChecked == true;
         AppHost.UpdateSettings(s =>
         {
             s.DefaultSound = sound;
@@ -108,6 +110,7 @@ public partial class SettingsWindow : Window
             s.DefaultRestartMode = restart;
             s.StartWithWindows = startWithWindows;
             s.CloseToTray = closeToTray;
+            s.WakeFromSleep = wake;
         });
         Close();
     }

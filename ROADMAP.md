@@ -130,5 +130,5 @@ user asked for all the rest (Phase 6):
 - [x] S10: **Volume** (10–100% of the system or alarm volume) and **fade-in** (10 s to 5 min) per task, with defaults in Settings, on both platforms
 - [x] S8: **Export and import** tasks as a JSON file, in Settings on both platforms; import merges, restores deleted tasks, and rings nothing from the past
 - [x] S2: **Calendar**: a month grid of what is still to come or waiting, with each day's list, on both platforms
-- [ ] S3: wake the PC from sleep for an alarm
+- [x] S3: **Wake the PC from sleep** for the next alarm (waitable timer with resume, 20 s ahead), screen kept on while it rings, with a setting; not testable here without putting the machine to sleep
 - [ ] S9: releases (version, MSI, signed APK, release script)

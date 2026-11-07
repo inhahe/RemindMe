@@ -44,13 +44,16 @@
             </StackPanel>
         </Border>
 
-        <TextBlock Text="Startup" FontWeight="SemiBold" Margin="0,6,0,3" />
+        <TextBlock Text="Startup and sleep" FontWeight="SemiBold" Margin="0,6,0,3" />
         <Border Style="{StaticResource Pane}" Background="White">
             <StackPanel>
                 <CheckBox x:Name="StartWithWindows" Content="Start with _Windows (in the tray)" />
                 <TextBlock Style="{StaticResource Hint}" Margin="20,2,0,6"
                            Text="Alarms only ring while the app is running. Alarms missed while it wasn't appear when it starts, marked as late." />
                 <CheckBox x:Name="CloseToTray" Content="Closing the main window keeps the app running in the _tray" />
+                <CheckBox x:Name="WakeFromSleep" Content="Wake the computer from sleep for _alarms" Margin="0,6,0,0" />
+                <TextBlock Style="{StaticResource Hint}" Margin="20,2,0,0" TextWrapping="Wrap"
+                           Text="Only while the app is running, and only if Windows allows wake timers (Power Options → Change advanced power settings → Sleep → Allow wake timers); many laptops don't on battery. The screen stays on while an alarm rings." />
             </StackPanel>
         </Border>
 

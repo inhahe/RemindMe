@@ -31,6 +31,8 @@ public sealed class AppSettings
     /// <summary>The window's close button hides it to the tray rather than exiting, so
     /// alarms keep ringing.</summary>
     public bool CloseToTray { get; set; } = true;
+    /// <summary>Wake the computer from sleep for alarms (S3).</summary>
+    public bool WakeFromSleep { get; set; } = true;
     /// <summary>Set once the first-run autostart choice has been applied, so a later
     /// manual change sticks.</summary>
     public bool AutostartInitialized { get; set; }

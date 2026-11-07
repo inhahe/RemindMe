@@ -42,6 +42,7 @@ public partial class MainWindow : Window
     private readonly Dictionary<Guid, TaskEditorWindow> _editors = new();
     private SettingsWindow? _settings;
     private DevicesWindow? _devices;
+    private CalendarWindow? _calendar;
     private bool _exiting;
     private bool _trayHintShown;
 
@@ -60,6 +61,7 @@ public partial class MainWindow : Window
         };
         _tray.ContextMenuStrip.Items.Add("Show", null, (_, _) => ShowFromTray());
         _tray.ContextMenuStrip.Items.Add("New task…", null, (_, _) => OpenEditor(null));
+        _tray.ContextMenuStrip.Items.Add("Calendar…", null, (_, _) => OpenCalendar());
         _tray.ContextMenuStrip.Items.Add("Devices and sync…", null, (_, _) => OpenDevices());
         _tray.ContextMenuStrip.Items.Add("Settings…", null, (_, _) => OpenSettings());
         _tray.ContextMenuStrip.Items.Add(new Forms.ToolStripSeparator());
@@ -213,6 +215,17 @@ public partial class MainWindow : Window
     private void Settings_Click(object sender, RoutedEventArgs e) => OpenSettings();
 
     private void Devices_Click(object sender, RoutedEventArgs e) => OpenDevices();
+
+    private void Calendar_Click(object sender, RoutedEventArgs e) => OpenCalendar();
+
+    private void OpenCalendar()
+    {
+        ShowFromTray();
+        if (_calendar is not null) { _calendar.Activate(); return; }
+        _calendar = new CalendarWindow(this) { Owner = this };
+        _calendar.Closed += (_, _) => _calendar = null;
+        _calendar.Show();
+    }
 
     private void OpenDevices()
     {

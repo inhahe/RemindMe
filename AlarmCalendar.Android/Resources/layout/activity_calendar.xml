@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent" android:layout_height="match_parent"
+    android:orientation="vertical" android:fitsSystemWindows="true">
+
+    <com.google.android.material.appbar.MaterialToolbar
+        android:id="@+id/toolbar" android:layout_width="match_parent" android:layout_height="?attr/actionBarSize" />
+
+    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:gravity="center_vertical" android:paddingHorizontal="8dp">
+        <Button android:id="@+id/prev" style="@style/Widget.Material3.Button.TextButton"
+            android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="◀"
+            android:contentDescription="Previous month" />
+        <TextView android:id="@+id/month" android:layout_width="0dp" android:layout_weight="1"
+            android:layout_height="wrap_content" android:gravity="center" android:textSize="18sp" android:textStyle="bold" />
+        <Button android:id="@+id/next" style="@style/Widget.Material3.Button.TextButton"
+            android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="▶"
+            android:contentDescription="Next month" />
+        <Button android:id="@+id/today" style="@style/Widget.Material3.Button.TextButton"
+            android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Today" />
+    </LinearLayout>
+
+    <GridLayout android:id="@+id/grid" android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:columnCount="7" android:paddingHorizontal="4dp" />
+
+    <TextView android:id="@+id/day_title" android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:textStyle="bold" android:textSize="16sp" android:paddingHorizontal="12dp" android:paddingTop="10dp" />
+    <ScrollView android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1">
+        <LinearLayout android:id="@+id/day_list" android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:orientation="vertical" android:paddingHorizontal="12dp" android:paddingBottom="12dp" />
+    </ScrollView>
+    <TextView android:layout_width="match_parent" android:layout_height="wrap_content" style="@style/Hint"
+        android:paddingHorizontal="12dp" android:paddingBottom="8dp"
+        android:text="Red: came up, not marked done yet. ~: an estimate, for a task that restarts when marked done. Paused tasks aren't shown. Tap a task to edit it." />
+</LinearLayout>

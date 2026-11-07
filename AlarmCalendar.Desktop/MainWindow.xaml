@@ -42,6 +42,8 @@
                 <Button Style="{StaticResource ToolButton}" x:Name="DeleteButton" Content="_Delete" Click="Delete_Click" />
                 <Button Style="{StaticResource ToolButton}" DockPanel.Dock="Right" Content="E_xit" Click="Exit_Click" Margin="0" />
                 <Button Style="{StaticResource ToolButton}" DockPanel.Dock="Right" Content="_Settings…" Click="Settings_Click" />
+                <Button Style="{StaticResource ToolButton}" DockPanel.Dock="Right" Content="Ca_lendar…" Click="Calendar_Click"
+                        ToolTip="A month of your tasks" />
                 <Button Style="{StaticResource ToolButton}" DockPanel.Dock="Right" Content="De_vices…" Click="Devices_Click"
                         ToolTip="Sync with your other computers and phone" />
             </DockPanel>

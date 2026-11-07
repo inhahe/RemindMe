@@ -124,6 +124,7 @@ public sealed class MainActivity : Screen
 
     public override bool OnOptionsItemSelected(IMenuItem item)
     {
+        if (item.ItemId == Resource.Id.menu_calendar) { StartActivity(new Intent(this, typeof(CalendarActivity))); return true; }
         if (item.ItemId == Resource.Id.menu_devices) { StartActivity(new Intent(this, typeof(DevicesActivity))); return true; }
         if (item.ItemId == Resource.Id.menu_settings) { StartActivity(new Intent(this, typeof(SettingsActivity))); return true; }
         return base.OnOptionsItemSelected(item);

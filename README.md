@@ -63,6 +63,16 @@ come up meanwhile is skipped, not rung all at once. A paused countdown keeps the
 time it had left and carries on from there. Editing a paused task keeps it
 paused; **Restart countdown** starts it running again.
 
+## Calendar
+
+**Calendar…** (toolbar or tray menu; on Android, the ⋮ menu) shows a month of
+your tasks: each day lists when its tasks come up. Click a day to see its tasks
+in full, and double-click one (tap it, on Android) to edit it. It shows what is
+still to come, and in red what has come up but isn't marked done yet. A task
+that comes up several times a day shows once, as "every 15 min". For a task that
+restarts when marked done, only its next time is certain; the later ones,
+marked "~", assume you mark it done on time. Paused tasks aren't shown.
+
 ## Sounds
 
 The **Sound** button in the task editor shows the task's sound; click it to pick

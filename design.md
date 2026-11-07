@@ -157,6 +157,27 @@ sync: each device reaches the same answer independently.
   device was asleep or busy" otherwise. A late re-reminder is measured from
   `SnoozeUntil` instead.
 
+## Calendar (`CalendarMonth.cs`, S2)
+
+`CalendarMonth.Build` lays out a month for both apps: six weeks from the
+culture's first day of the week, each day with its tasks' times. It is built
+from the schedules alone, like everything else, and nothing records a history.
+So it shows what is still to come or still waiting (`Waiting`: came up, not
+marked done), and nothing at or before a task's `DoneThrough`: times already
+dealt with, and times before the schedule was saved, which the schedule would
+otherwise also give.
+
+- **Paused tasks** don't show.
+- **Several times a day** (a fixed-length interval under a day) shows as one
+  line a day ("every 15 min"), at its first time.
+- **Restarts when done:** only the next time is known; the later ones assume
+  the task is marked done on time and are marked `Estimated` ("~9:00 AM").
+- **The desktop window** (`CalendarWindow`) has a grid of up to four lines a
+  day, plus "+N more", and the chosen day's full list beside it, which opens
+  the editor. It rebuilds on every store change and when the date changes.
+- **Android** (`CalendarActivity`, from the ⋮ menu) shows each day's first
+  time and "+N", with the chosen day's list below it.
+
 ## Persistence (`TaskStore.cs`)
 
 `tasks.json` and `settings.json` live in `%LOCALAPPDATA%\AlarmCalendar\` on

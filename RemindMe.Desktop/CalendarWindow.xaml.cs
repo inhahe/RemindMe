@@ -38,16 +38,18 @@ public partial class CalendarWindow : Window
         return element;
     }
 
+    /// <summary>What keeps a day-list row from one update to the next: its task, and the
+    /// time it comes up, or for an estimate (whose time moves as the day goes on), which of
+    /// the task's estimates on the day it is, counted from the last (0), since marking a time
+    /// done takes the first away.</summary>
+    public readonly record struct DayKey(Guid TaskId, DateTimeOffset? At, int EstimateFromEnd);
+
     /// <summary>One time a task comes up on the chosen day, as the day's list shows it.</summary>
-    public sealed class DayEntry(Guid taskId, int fromEnd) : Observable
+    public sealed class DayEntry(DayKey key) : Observable
     {
         private string _time = "", _title = "", _waitingNote = "", _schedule = "";
 
-        public Guid TaskId { get; } = taskId;
-        /// <summary>Which of the task's times on the day this is, counted from its last (0).
-        /// With the task, it keeps the row from one update to the next: the time itself can
-        /// move (an estimate), and marking a time done takes the task's first time away.</summary>
-        public int FromEnd { get; } = fromEnd;
+        public DayKey Key { get; } = key;
         public string Time => _time;
         public string Title => _title;
         /// <summary>" · waiting to be marked done", or nothing.</summary>
@@ -182,11 +184,8 @@ public partial class CalendarWindow : Window
         if (_chosen.Year != month.Year || _chosen.Month != month.Month) _chosen = DateOnly.FromDateTime(month);
         bool inGrid = MonthGrid.IsKeyboardFocusWithin;
         Build();
-        if (!inGrid || CellOf(_chosen) is not { } cell) return;
-        if (!cell.IsKeyboardFocused) { cell.Focus(); return; }
-        // The button with the focus now shows the chosen day (the buttons stay; their dates
-        // change): no focus change to tell a screen reader of it, so say so.
-        UIElementAutomationPeer.CreatePeerForElement(cell)?.RaiseAutomationEvent(AutomationEvents.AutomationFocusChanged);
+        // Already focused, the button now shows the chosen day, which Fill told a screen reader.
+        if (inGrid && CellOf(_chosen) is { IsKeyboardFocused: false } cell) cell.Focus();
     }
 
     /// <summary>Fills the grid with <see cref="_month"/>'s six weeks, and the list with the
@@ -277,8 +276,16 @@ public partial class CalendarWindow : Window
         cell.Tag = day.Date;
         MarkChosen(cell);
         int count = day.Entries.Count;
-        AutomationProperties.SetName(cell, LongDate(day.Date) + (day.IsToday ? ", today" : "")
-            + ", " + (count == 0 ? "nothing comes up" : TextFormat.Tasks(count)));
+        string before = AutomationProperties.GetName(cell);
+        string name = LongDate(day.Date) + (day.IsToday ? ", today" : "")
+            + ", " + (count == 0 ? "nothing comes up" : TextFormat.Tasks(count));
+        AutomationProperties.SetName(cell, name);
+        // The buttons stay as the month turns, their dates changing: tell a screen reader
+        // when the focused one comes to read differently (a focus event for the element
+        // already focused, screen readers drop as a repeat).
+        if (cell.IsKeyboardFocused && name != before)
+            UIElementAutomationPeer.CreatePeerForElement(cell)?.RaisePropertyChangedEvent(
+                AutomationElementIdentifiers.NameProperty, before, name);
     }
 
     /// <summary>The chosen day's tasks, in full, beside the grid.</summary>
@@ -288,18 +295,17 @@ public partial class CalendarWindow : Window
         var now = AppHost.Clock.UtcNow;
         var zone = AppHost.Clock.Zone;
         DayTitle.Text = LongDate(_chosen);
-        // Each time with its task, and which of the task's times on the day it is, from the end.
         var entries = _days.FirstOrDefault(d => d.Date == _chosen)?.Entries ?? [];
-        var left = entries.GroupBy(e => e.TaskId).ToDictionary(g => g.Key, g => g.Count());
-        var shown = new List<(CalendarEntry Entry, AlarmTask Task, int FromEnd)>();
+        // Estimates are counted from each task's last one on the day.
+        var estimatesLeft = entries.Where(e => e.Estimated).GroupBy(e => e.TaskId).ToDictionary(g => g.Key, g => g.Count());
+        var shown = new List<(CalendarEntry Entry, AlarmTask Task, DayKey Key)>();
         foreach (var e in entries)
         {
-            int fromEnd = --left[e.TaskId];
-            if (AppHost.Store.Get(e.TaskId) is { } task) shown.Add((e, task, fromEnd));
+            var key = e.Estimated ? new DayKey(e.TaskId, null, --estimatesLeft[e.TaskId]) : new DayKey(e.TaskId, e.At, -1);
+            if (AppHost.Store.Get(e.TaskId) is { } task) shown.Add((e, task, key));
         }
         // With the list emptied, the focus passes from it to the chosen day.
-        Rows.Update(DayList, _entries, shown, x => (x.Entry.TaskId, x.FromEnd), r => (r.TaskId, r.FromEnd),
-            x => new DayEntry(x.Entry.TaskId, x.FromEnd),
+        Rows.Update(DayList, _entries, shown, x => x.Key, r => r.Key, x => new DayEntry(x.Key),
             (row, x) => row.Show(x.Entry.Text, x.Entry.Title, x.Entry.Waiting,
                 TextFormat.Schedule(x.Task.Def, x.Task.State, now, zone, culture)),
             whenEmpty: () => CellOf(_chosen));
@@ -308,17 +314,17 @@ public partial class CalendarWindow : Window
         NothingText.Visibility = empty ? Visibility.Visible : Visibility.Collapsed;
     }
 
-    private void OpenChosen()
+    private void DayList_DoubleClick(object sender, MouseButtonEventArgs e)
     {
-        if (DayList.SelectedItem is DayEntry entry) _main.OpenEditor(entry.TaskId);
+        if (DayList.SelectedItem is DayEntry entry) _main.OpenEditor(entry.Key.TaskId);
     }
 
-    private void DayList_DoubleClick(object sender, MouseButtonEventArgs e) => OpenChosen();
-
+    /// <summary>Enter opens the task of the row with the focus, which, after the row it was on
+    /// went, may not be the selected one.</summary>
     private void DayList_KeyDown(object sender, KeyEventArgs e)
     {
         if (e.Key != Key.Enter) return;
-        OpenChosen();
+        if ((Keyboard.FocusedElement as FrameworkElement)?.DataContext is DayEntry entry) _main.OpenEditor(entry.Key.TaskId);
         e.Handled = true;
     }
 }

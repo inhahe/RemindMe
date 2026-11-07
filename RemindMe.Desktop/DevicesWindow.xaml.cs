@@ -34,8 +34,7 @@ public partial class DevicesWindow : Window
             if (spoken) Changed(nameof(SpokenStatus));
         }
 
-        /// <summary>The device's name: what a screen reader says for its row, and the text
-        /// typing in the list finds it by.</summary>
+        /// <summary>The device's name: the text typing in the list finds its row by.</summary>
         public override string ToString() => Name;
     }
 

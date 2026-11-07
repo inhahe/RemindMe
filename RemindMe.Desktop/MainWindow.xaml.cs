@@ -24,8 +24,7 @@ public sealed class TaskRow : Observable
     public bool Paused { get => _paused; set => Set(ref _paused, value); }
     public TaskStatus? Latest { get; set; }
 
-    /// <summary>The task's description: what a screen reader says for its row, and the
-    /// text typing in the list finds it by.</summary>
+    /// <summary>The task's description: the text typing in the list finds its row by.</summary>
     public override string ToString() => Description;
 }
 

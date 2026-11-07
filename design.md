@@ -198,14 +198,16 @@ otherwise also give.
   shown.
   The 42 buttons are made once and filled anew on each update (a task
   changing, a time coming up, the month turning), and the list's rows
-  (`DayEntry`, kept by their task and which of its times on the day they are,
+  (`DayEntry`, kept by their `DayKey`: the task and the time, or for an
+  estimate, whose time moves, which of the task's estimates on the day it is,
   counted from the last, since marking a time done takes the first away) are
   updated in place: the focus and the selection stay where they are, and a
   screen reader isn't sent back to the start. Store changes arriving together
   rebuild once. Turning the month with the focus in the grid moves it to the
-  chosen day, or, if the focused button now shows that day, tells a screen
-  reader so; a list row with the focus that goes passes it to the row now in
-  its place, or to the chosen day.
+  chosen day; a focused button whose name changes (its date, as the month
+  turns) raises a name change for screen readers, which drop a repeated focus
+  event. A list row with the focus that goes passes it to the row now in its
+  place, or to the chosen day, and Enter opens the focused row's task.
 - **Android** (`CalendarActivity`, from the ⋮ menu) shows each day's first
   time, in short ("9:00a", "~6:30p", or "18:30" with a 24-hour clock), and
   "+N", with the chosen day's list below it.
@@ -545,10 +547,14 @@ separately (see *Simplification opportunities*).
   `ListSync.Reconcile` (unit-tested): rows whose key is gone are removed, the
   longest run of rows already in order stays, and every other row moves once,
   so one task re-ranked is one move, not a row-by-row shuffle a screen reader
-  would hear; a key given twice is an error. If the row with the window's
-  focus goes, `Rows.Update` passes the focus, and the selection if it had it,
-  to the row now in its place (or a fallback), taking the keyboard focus only
-  in the active window, and setting the logical focus otherwise.
+  would hear; a key given twice is an error, before anything changes. If the
+  row with the window's logical focus goes (which is also where it is while the
+  keyboard is in the toolbar, whose Delete keeps it), `Rows.Update` passes the
+  focus to the row now in its place (or a fallback), once the list is laid out,
+  scrolling it into view if need be; updates in between (one per task deleted)
+  move it on. It takes the keyboard focus only in the active window, setting
+  the logical focus otherwise. The selection doesn't follow: an action on it
+  would then act on a row nobody chose.
 - `TaskEditorWindow`, `SettingsWindow`, `DevicesWindow` and
   `SoundPickerWindow` are all **non-modal**. WPF's `ShowDialog` disables every
   other window of the thread, ringing alarm windows included, and an alarm must

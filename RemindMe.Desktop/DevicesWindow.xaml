@@ -21,10 +21,12 @@
                 <Border Style="{StaticResource Pane}" Padding="2,4" Margin="0,0,0,0">
                     <ListView x:Name="DeviceList" Height="170" SelectionMode="Single" BorderThickness="0"
                               Background="Transparent" SelectionChanged="DeviceList_SelectionChanged">
-                        <!-- A screen reader says a row's device (DeviceRow.ToString), then this. -->
+                        <!-- A screen reader says a row's device, then its status; bound, so it is
+                             told as they change. -->
                         <ListView.ItemContainerStyle>
                             <Style TargetType="ListViewItem"
                                    BasedOn="{StaticResource {x:Static GridView.GridViewItemContainerStyleKey}}">
+                                <Setter Property="AutomationProperties.Name" Value="{Binding Name}" />
                                 <Setter Property="AutomationProperties.ItemStatus" Value="{Binding SpokenStatus}" />
                             </Style>
                         </ListView.ItemContainerStyle>

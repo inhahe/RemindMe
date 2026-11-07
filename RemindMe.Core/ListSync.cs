@@ -17,7 +17,8 @@ public static class ListSync
     /// <param name="keyOfRow">The key a row was made for.</param>
     /// <param name="create">A new row for an item; <paramref name="update"/> then fills it.</param>
     /// <param name="update">Sets a row's properties from its item.</param>
-    /// <exception cref="ArgumentException">Two items, or two rows, have one key.</exception>
+    /// <exception cref="ArgumentException">Two items, or two rows, have one key. Nothing has
+    /// changed then.</exception>
     public static void Reconcile<TItem, TRow, TKey>(ObservableCollection<TRow> rows, IEnumerable<TItem> items,
         Func<TItem, TKey> keyOfItem, Func<TRow, TKey> keyOfRow, Func<TItem, TRow> create, Action<TRow, TItem> update)
         where TKey : notnull
@@ -27,14 +28,15 @@ public static class ListSync
         for (int t = 0; t < wanted.Count; t++)
             if (!targetOf.TryAdd(keyOfItem(wanted[t]), t))
                 throw new ArgumentException($"Two items have the key {keyOfItem(wanted[t])}.", nameof(items));
+        var rowOf = new Dictionary<TKey, TRow>();
+        foreach (var r in rows)
+            if (!rowOf.TryAdd(keyOfRow(r), r)) throw new ArgumentException($"Two rows have the key {keyOfRow(r)}.", nameof(rows));
 
         // Rows whose key is gone go first, from the end so the indices hold.
-        var rowOf = new Dictionary<TKey, TRow>();
         for (int i = rows.Count - 1; i >= 0; i--)
         {
             var key = keyOfRow(rows[i]);
-            if (!targetOf.ContainsKey(key)) rows.RemoveAt(i);
-            else if (!rowOf.TryAdd(key, rows[i])) throw new ArgumentException($"Two rows have the key {key}.", nameof(rows));
+            if (!targetOf.ContainsKey(key)) { rows.RemoveAt(i); rowOf.Remove(key); }
         }
 
         // Of the rows left, the longest run already in the wanted order stays where it is.
@@ -42,30 +44,26 @@ public static class ListSync
 
         // Then, in the wanted order, each other row (moved or new) goes right after the row
         // wanted before it, which is already in place relative to the rest.
+        TRow? previous = default;
         for (int t = 0; t < wanted.Count; t++)
         {
             var item = wanted[t];
-            var key = keyOfItem(item);
-            if (rowOf.TryGetValue(key, out var row))
+            bool known = rowOf.TryGetValue(keyOfItem(item), out var row);
+            if (!known) { row = create(item); update(row, item); }
+            if (!known || !staying.Contains(t))
             {
-                if (!staying.Contains(t))
+                int after = t == 0 ? -1 : rows.IndexOf(previous!);
+                if (!known) rows.Insert(after + 1, row!);
+                else
                 {
-                    int from = rows.IndexOf(row);
-                    int after = t == 0 ? -1 : rows.IndexOf(rowOf[keyOfItem(wanted[t - 1])]);
+                    int from = rows.IndexOf(row!);
                     // Move takes the row out before putting it back: what follows it shifts.
                     int to = from <= after ? after : after + 1;
                     if (to != from) rows.Move(from, to);
                 }
-                update(row, item);
             }
-            else
-            {
-                row = create(item);
-                update(row, item);
-                int after = t == 0 ? -1 : rows.IndexOf(rowOf[keyOfItem(wanted[t - 1])]);
-                rows.Insert(after + 1, row);
-                rowOf[key] = row;
-            }
+            if (known) update(row!, item);
+            previous = row;
         }
     }
 

@@ -85,6 +85,15 @@ public class ListSyncTests
     }
 
     [Fact]
+    public void TwoRowsOfOneKeyAreAnErrorThatChangesNothing()
+    {
+        var (rows, log) = RowsOf("A", "A", "X");
+        Assert.Throws<ArgumentException>(() => Show(rows, "A"));
+        Assert.Equal(["A", "A", "X"], Keys(rows));
+        Assert.Empty(log);
+    }
+
+    [Fact]
     public void AnyChangeEndsInTheWantedOrderWithTheKeptRowsKept()
     {
         var random = new Random(20261107);

@@ -3,6 +3,18 @@
 Reminders and alarms that keep nagging until you mark them done, on Windows and
 Android, kept in sync between your computers and your phone.
 
+> **Alpha:** RemindMe is at an early stage and hasn't been tested in real use
+> yet: it has unit tests and has been tried on one PC and an Android emulator,
+> no more. Expect bugs, and don't rely on it alone for anything that matters.
+> [`known-issues.md`](known-issues.md) lists what hasn't been checked.
+
+**Download** from the [releases page](https://github.com/inhahe/RemindMe/releases):
+`RemindMe-<version>.msi` installs it on Windows 10 or 11 (x64), and
+`RemindMe-<version>.exe` is the same program on its own, with nothing to
+install. `RemindMe-<version>.apk` is the Android app (Android 10 or later), to
+install by hand: open it on the phone and allow your browser or file manager to
+install apps when asked.
+
 ## Tasks
 
 Each task has a description (several lines if you like) and one of these

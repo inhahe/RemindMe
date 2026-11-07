@@ -68,17 +68,19 @@ paused; **Restart countdown** starts it running again.
 The **Sound** button in the task editor shows the task's sound; click it to pick
 a Windows sound, a sound file (WAV, MP3, WMA, M4A, AAC, FLAC), or **Default**.
 **Play it** chooses between once each time the alarm appears and over and over
-until the alarm is closed or marked done.
+until the alarm is closed or marked done. **Volume** sets how loud, as a share of
+the system volume (the alarm volume on Android), and can **fade in**: start
+quietly and grow to that volume over 10 seconds up to 5 minutes.
 
-Tasks left on **Default** follow the default in **Settings**, including when you
-change it later. If a sound can't be found or played, the built-in alarm sound
+Tasks left on **Default** (sound, play mode, volume, fade-in) follow the
+default in **Settings**, including when you change it later. If a sound can't be found or played, the built-in alarm sound
 plays instead and the alarm window says so.
 
 ## Settings
 
 | Setting | What it does |
 |---|---|
-| Sound / Play the sound | The default sound and sound mode for tasks left on "Default". |
+| Sound / Play the sound / Volume | The default sound, sound mode, volume and fade-in for tasks left on "Default". |
 | Remind again after | The reminder interval new tasks start with. |
 | Time of day for new days-of-the-week tasks | 09:00 unless changed. |
 | For new "every N" tasks | Which restart choice new tasks start with. |

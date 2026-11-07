@@ -105,6 +105,14 @@ public sealed record TaskDefinition
     /// <summary>Null means the device's default sound mode.</summary>
     public SoundMode? SoundMode { get; init; }
 
+    /// <summary>How loud the alarm plays, in percent of the device's own alarm volume
+    /// (one of <see cref="SoundLevels.Volumes"/>); null means the device's default (S10).</summary>
+    public int? Volume { get; init; }
+
+    /// <summary>Seconds over which the alarm grows from quiet to <see cref="Volume"/>; 0 is
+    /// at full volume at once; null means the device's default (S10).</summary>
+    public int? FadeInSeconds { get; init; }
+
     /// <summary>Raised on every edit that changes when the task fires; the state written
     /// with such an edit carries the new value in <see cref="TaskState.Revision"/>.</summary>
     public int ScheduleRevision { get; init; }

@@ -210,8 +210,10 @@ public sealed class RingingService : Service
             // Posted already, by this service with its sound running: nothing new.
             if (posted && (_sound!.IsPlayingOrPlayed(id) || Silenced.Contains(id))) continue;
             Silenced.Remove(id);
-            var problem = _sound!.Play(id, AppState.Settings.SoundFor(st.Task.Def, Platforms.Android),
-                AppState.Settings.SoundModeFor(st.Task.Def) == SoundMode.Repeat);
+            var settings = AppState.Settings;
+            var problem = _sound!.Play(id, settings.SoundFor(st.Task.Def, Platforms.Android),
+                loop: settings.SoundModeFor(st.Task.Def) == SoundMode.Repeat,
+                volume: settings.VolumeFor(st.Task.Def), fadeIn: settings.FadeInFor(st.Task.Def));
             Alerts[id] = posted ? Alerts[id] with { SoundProblem = problem } : NewAlert(st, now, problem);
             // A new alert (the first, or a later occurrence) is posted afresh, so it alerts and
             // opens the alarm screen; alarm notifications alert only once. One taken over (from
@@ -287,7 +289,12 @@ public sealed class RingingService : Service
 /// </summary>
 public sealed class AlarmSound(Context context)
 {
-    private sealed record Entry(Guid Owner, global::Android.Net.Uri Uri, bool Loop);
+    /// <param name="Volume">0.1 to 1, of the alarm stream's volume (S10).</param>
+    /// <param name="Since">When the alarm began: a fade-in counts from it, so a sound resumed
+    /// after another alarm interrupted it carries on where its fade had got to.</param>
+    private sealed record Entry(Guid Owner, global::Android.Net.Uri Uri, bool Loop, float Volume, TimeSpan FadeIn, DateTime Since);
+
+    private readonly Handler _fade = new(Looper.MainLooper!);
 
     private readonly List<Entry> _active = [];
     private readonly HashSet<Guid> _started = [];
@@ -321,7 +328,9 @@ public sealed class AlarmSound(Context context)
     /// through the phone's own sounds if it can't be played.</summary>
     /// <returns>A description of the problem when the chosen sound couldn't play and another
     /// played instead; otherwise null.</returns>
-    public string? Play(Guid owner, SoundRef? sound, bool loop)
+    /// <param name="volume">0.1 to 1: the task's volume (S10).</param>
+    /// <param name="fadeIn">How long the sound takes to grow to <paramref name="volume"/>.</param>
+    public string? Play(Guid owner, SoundRef? sound, bool loop, double volume = 1.0, TimeSpan fadeIn = default)
     {
         _active.RemoveAll(e => e.Owner == owner);
         _started.Add(owner);
@@ -330,7 +339,7 @@ public sealed class AlarmSound(Context context)
         candidates.AddRange(SystemSounds());
         foreach (var uri in candidates)
         {
-            var e = new Entry(owner, uri, loop);
+            var e = new Entry(owner, uri, loop, (float)Math.Clamp(volume, 0.1, 1.0), fadeIn, DateTime.UtcNow);
             if (!Start(e)) continue;
             _active.Add(e);
             return sound is not null && uri != candidates[0]
@@ -366,10 +375,13 @@ public sealed class AlarmSound(Context context)
                 .SetUsage(AudioUsageKind.Alarm)!.SetContentType(AudioContentType.Sonification)!.Build()!);
             p.SetDataSource(context, e.Uri);
             p.Looping = e.Loop;
+            float level = Level(e);
+            p.SetVolume(level, level);
             p.Completion += (_, _) => { if (_playing == e) { _active.Remove(e); StartNewest(); } };
             p.Prepare();
             p.Start();
             _player = p;
+            if (level < e.Volume) _fade.PostDelayed(Fade, 200);
             AppState.Log($"Playing {e.Uri} ({(e.Loop ? "looping" : "once")})");
             return true;
         }
@@ -389,8 +401,21 @@ public sealed class AlarmSound(Context context)
         if (_active.Count == 0) Release();
     }
 
+    private static float Level(Entry e) => (float)SoundLevels.FadeLevel(e.Volume, DateTime.UtcNow - e.Since, e.FadeIn);
+
+    /// <summary>One step of a fade-in, every 200 ms until the sound reaches its volume.</summary>
+    private void Fade()
+    {
+        if (_playing is not { } e || _player is not { } p) return;
+        float level = Level(e);
+        try { p.SetVolume(level, level); }
+        catch (Java.Lang.IllegalStateException) { return; }
+        if (level < e.Volume) _fade.PostDelayed(Fade, 200);
+    }
+
     private void Release()
     {
+        _fade.RemoveCallbacksAndMessages(null);
         try { _player?.Stop(); } catch (Java.Lang.IllegalStateException) { }
         _player?.Release();
         _player = null;

@@ -99,8 +99,9 @@ public partial class AlarmWindow : Window
         var path = SoundService.Resolve(st.Task.Def.SoundFor(Platforms.Windows), out var problem);
         SoundProblem.Text = problem ?? "";
         SoundProblem.Visibility = problem is null ? Visibility.Collapsed : Visibility.Visible;
-        bool loop = AppHost.Settings.SoundModeFor(st.Task.Def) == SoundMode.Repeat;
-        _owner.Sounds.Play(this, path, loop);
+        var s = AppHost.Settings;
+        _owner.Sounds.Play(this, path, loop: s.SoundModeFor(st.Task.Def) == SoundMode.Repeat,
+            volume: s.VolumeFor(st.Task.Def), fadeIn: s.FadeInFor(st.Task.Def));
         SilenceButton.IsEnabled = true;
         if (IsLoaded) { Activate(); FlashIfInactive(); }
     }

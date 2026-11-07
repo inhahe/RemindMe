@@ -127,7 +127,7 @@ user asked for all the rest (Phase 6):
 - [x] S4, S6: **Pause and resume** any task, desktop and Android; a paused countdown keeps the time it had left. Restart countdown was already in the list's menus.
 - [x] S5: **Snooze presets** on both alarm screens: remind me in 5 min, 10 min, 30 min or 1 h, this once
 - [x] S7: **Every N weeks** on the chosen weekdays, from the week of a chosen date, in both editors
-- [ ] S10: per-task volume and fade-in
+- [x] S10: **Volume** (10–100% of the system or alarm volume) and **fade-in** (10 s to 5 min) per task, with defaults in Settings, on both platforms
 - [ ] S8: export and import of tasks
 - [ ] S2: calendar view
 - [ ] S3: wake the PC from sleep for an alarm

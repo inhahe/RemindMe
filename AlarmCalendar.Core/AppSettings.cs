@@ -20,6 +20,10 @@ public sealed class AppSettings
     /// <summary>The time a new Weekly task starts with (R6).</summary>
     public TimeOnly DefaultTimeOfDay { get; set; } = new(9, 0);
     public RestartMode DefaultRestartMode { get; set; } = RestartMode.FromDone;
+    /// <summary>Percent of the device's alarm volume for tasks left on the default (S10).</summary>
+    public int DefaultVolume { get; set; } = 100;
+    /// <summary>Seconds of fade-in for tasks left on the default; 0 is none (S10).</summary>
+    public int DefaultFadeInSeconds { get; set; }
 
     // ---- Desktop ----
 
@@ -113,6 +117,12 @@ public sealed class AppSettings
 
     /// <summary>The sound mode <paramref name="d"/> plays with on this device.</summary>
     public SoundMode SoundModeFor(TaskDefinition d) => d.SoundMode ?? DefaultSoundMode;
+
+    /// <summary>The volume <paramref name="d"/> plays at on this device, from 0.1 to 1.</summary>
+    public double VolumeFor(TaskDefinition d) => Math.Clamp(d.Volume ?? DefaultVolume, 10, 100) / 100.0;
+
+    /// <summary>How long <paramref name="d"/>'s sound takes to reach its volume on this device.</summary>
+    public TimeSpan FadeInFor(TaskDefinition d) => TimeSpan.FromSeconds(Math.Clamp(d.FadeInSeconds ?? DefaultFadeInSeconds, 0, 600));
 
     /// <summary>The sound <paramref name="d"/> plays on <paramref name="platform"/>: its own
     /// choice, otherwise this device's default; null means the built-in alarm sound.</summary>

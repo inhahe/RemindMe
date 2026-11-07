@@ -11,13 +11,23 @@ namespace AlarmCalendar.Desktop;
 /// sound plays, and when it stops, the newest remaining looping sound resumes.
 /// <para>WAV files, which include every Windows sound, play through <see cref="SoundPlayer"/>
 /// (the waveOut API), which needs no Media Foundation and so also works on Windows "N"
-/// editions. Other formats play through WPF's <see cref="MediaPlayer"/>. A sound that fails
-/// to play falls back to <see cref="BuiltIn"/> and raises <see cref="Problem"/>, so an
-/// alarm never rings silently.</para>
+/// editions, unless they are to play quieter or fade in (S10), which only WPF's
+/// <see cref="MediaPlayer"/> can do; other formats always play through it. Where it can't
+/// play a WAV, the WAV plays through <see cref="SoundPlayer"/> at full volume instead. A
+/// sound that fails to play falls back to <see cref="BuiltIn"/> and raises
+/// <see cref="Problem"/>, so an alarm never rings silently.</para>
 /// </summary>
 public sealed class SoundService
 {
-    private sealed record Entry(object Owner, string Path, bool Loop);
+    /// <param name="Volume">0.1 to 1.</param>
+    /// <param name="Since">When the alarm began: a fade-in counts from it, so a sound resumed
+    /// after another alarm interrupted it carries on where its fade had got to.</param>
+    /// <param name="PlainWav">Play through <see cref="SoundPlayer"/> whatever the volume.</param>
+    private sealed record Entry(object Owner, string Path, bool Loop, double Volume, TimeSpan FadeIn, DateTime Since, bool PlainWav = false)
+    {
+        public bool ViaSoundPlayer => Path.EndsWith(".wav", StringComparison.OrdinalIgnoreCase)
+            && (PlainWav || (Volume >= 0.999 && FadeIn <= TimeSpan.Zero));
+    }
 
     public static readonly string MediaDir =
         System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows), "Media");
@@ -29,6 +39,7 @@ public sealed class SoundService
     private readonly List<Entry> _active = [];
     private SoundPlayer? _wav;
     private Entry? _playing;
+    private readonly System.Windows.Threading.DispatcherTimer _fade = new() { Interval = TimeSpan.FromMilliseconds(200) };
     /// <summary>Bumped whenever playback stops or changes, so a stale "finished" callback
     /// from an earlier sound is ignored.</summary>
     private int _generation;
@@ -40,7 +51,9 @@ public sealed class SoundService
     {
         _media.MediaEnded += (_, _) => OnEnded(_generation);
         _media.MediaFailed += (_, e) => OnFailed(_generation, e.ErrorException);
-        _media.MediaOpened += (_, _) => AppHost.Log($"Playing {_playing?.Path} ({(_playing?.Loop == true ? "looping" : "once")})");
+        _media.MediaOpened += (_, _) => AppHost.Log($"Playing {_playing?.Path} ({(_playing?.Loop == true ? "looping" : "once")}, "
+            + $"volume {_playing?.Volume:P0}{(_playing?.FadeIn > TimeSpan.Zero ? $", fading in over {_playing.FadeIn.TotalSeconds:0} s" : "")})");
+        _fade.Tick += (_, _) => Fade();
     }
 
     /// <summary>The Windows sounds in <see cref="MediaDir"/>, alarms and rings first.</summary>
@@ -90,7 +103,9 @@ public sealed class SoundService
     /// <summary>Plays <paramref name="path"/> for <paramref name="owner"/>, replacing whatever
     /// that owner was playing and taking over from any other owner's sound.</summary>
     /// <param name="loop">Repeat until <see cref="Stop"/>; otherwise play once.</param>
-    public void Play(object owner, string? path, bool loop)
+    /// <param name="volume">0.1 to 1: the task's volume (S10).</param>
+    /// <param name="fadeIn">How long the sound takes to grow to <paramref name="volume"/>.</param>
+    public void Play(object owner, string? path, bool loop, double volume = 1.0, TimeSpan fadeIn = default)
     {
         _active.RemoveAll(e => e.Owner == owner);
         if (path is null)
@@ -99,7 +114,7 @@ public sealed class SoundService
             Beep();
             return;
         }
-        var entry = new Entry(owner, path, loop);
+        var entry = new Entry(owner, path, loop, Math.Clamp(volume, 0.1, 1.0), fadeIn, DateTime.UtcNow);
         _active.Add(entry);
         Start(entry);
     }
@@ -122,7 +137,7 @@ public sealed class SoundService
         StopCurrent();
         _playing = e;
         int gen = _generation;
-        if (e.Path.EndsWith(".wav", StringComparison.OrdinalIgnoreCase))
+        if (e.ViaSoundPlayer)
         {
             try
             {
@@ -145,14 +160,25 @@ public sealed class SoundService
             }
             return;
         }
+        _media.Volume = SoundLevels.FadeLevel(e.Volume, DateTime.UtcNow - e.Since, e.FadeIn);
         _media.Open(new Uri(e.Path));
         _media.Play();
+        if (_media.Volume < e.Volume) _fade.Start();
+    }
+
+    /// <summary>One step of a fade-in, until the sound reaches its volume.</summary>
+    private void Fade()
+    {
+        if (_playing is not { } e || e.ViaSoundPlayer) { _fade.Stop(); return; }
+        _media.Volume = SoundLevels.FadeLevel(e.Volume, DateTime.UtcNow - e.Since, e.FadeIn);
+        if (_media.Volume >= e.Volume) _fade.Stop();
     }
 
     private void StopCurrent()
     {
         _generation++;
         _playing = null;
+        _fade.Stop();
         if (_wav is not null)
         {
             _wav.Stop();
@@ -181,6 +207,16 @@ public sealed class SoundService
         if (gen != _generation || _playing is not { } e) return;
         AppHost.Log($"Could not play {e.Path}: {error?.Message}");
         _active.Remove(e);
+        if (e.Path.EndsWith(".wav", StringComparison.OrdinalIgnoreCase) && !e.ViaSoundPlayer)
+        {
+            // Media Foundation can't play here (a Windows "N" edition, say); the waveOut player
+            // can, though only at full volume.
+            Problem?.Invoke(e.Owner, "The volume and fade-in couldn't be applied here, so the sound plays at full volume.");
+            var plain = e with { PlainWav = true };
+            _active.Add(plain);
+            Start(plain);
+            return;
+        }
         var builtIn = PathOf(BuiltIn);
         if (builtIn is not null && !string.Equals(e.Path, builtIn, StringComparison.OrdinalIgnoreCase))
         {

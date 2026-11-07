@@ -18,6 +18,11 @@
                 <RadioButton x:Name="ModeOnce" GroupName="Mode" Margin="12,3,0,0" Content="_once each time an alarm appears" />
                 <RadioButton x:Name="ModeRepeat" GroupName="Mode" Margin="12,2,0,8"
                              Content="over and over until the alarm is _closed or marked done" />
+                <WrapPanel Margin="0,0,0,8">
+                    <TextBlock Text="Volume: " VerticalAlignment="Center" />
+                    <ComboBox x:Name="VolumeBox" MinWidth="80" />
+                    <ComboBox x:Name="FadeInBox" MinWidth="200" Margin="8,0,0,0" />
+                </WrapPanel>
                 <WrapPanel>
                     <TextBlock Text="Remind again after " VerticalAlignment="Center" />
                     <TextBox x:Name="ReminderHours" Style="{StaticResource Small}" />

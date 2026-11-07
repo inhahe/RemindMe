@@ -34,6 +34,10 @@ public partial class TaskEditorWindow : Window
         SoundModeBox.Items.Add("");   // the "default" entry; its text depends on Settings
         SoundModeBox.Items.Add("once each time the alarm appears");
         SoundModeBox.Items.Add("over and over until it's closed or marked done");
+        VolumeBox.Items.Add("");   // the "default" entries; their text depends on Settings
+        foreach (var v in SoundLevels.Volumes) VolumeBox.Items.Add(SoundLevels.VolumeText(v));
+        FadeInBox.Items.Add("");
+        foreach (var f in SoundLevels.FadeIns) FadeInBox.Items.Add(SoundLevels.FadeInText(f));
 
         var s = AppHost.Settings;
         var now = AppHost.Clock.UtcNow;
@@ -94,6 +98,8 @@ public partial class TaskEditorWindow : Window
         ReminderMinutes.Text = (d.ReminderMinutes % 60).ToString(CultureInfo.CurrentCulture);
         _sound = d.SoundFor(Platforms.Windows);
         SoundModeBox.SelectedIndex = d.SoundMode switch { SoundMode.Once => 1, SoundMode.Repeat => 2, _ => 0 };
+        VolumeBox.SelectedIndex = d.Volume is { } vol ? 1 + SoundLevels.Nearest(SoundLevels.Volumes, vol) : 0;
+        FadeInBox.SelectedIndex = d.FadeInSeconds is { } fade ? 1 + SoundLevels.Nearest(SoundLevels.FadeIns, fade) : 0;
         RefreshDefaults();
         AppHost.SettingsChanged += RefreshDefaults;
         Closed += (_, _) => AppHost.SettingsChanged -= RefreshDefaults;
@@ -122,6 +128,12 @@ public partial class TaskEditorWindow : Window
         int sel = SoundModeBox.SelectedIndex;
         SoundModeBox.Items[0] = $"as the default says ({mode})";
         SoundModeBox.SelectedIndex = sel;
+        sel = VolumeBox.SelectedIndex;
+        VolumeBox.Items[0] = $"default ({SoundLevels.VolumeText(AppHost.Settings.DefaultVolume)})";
+        VolumeBox.SelectedIndex = sel;
+        sel = FadeInBox.SelectedIndex;
+        FadeInBox.Items[0] = $"default ({SoundLevels.FadeInText(AppHost.Settings.DefaultFadeInSeconds)})";
+        FadeInBox.SelectedIndex = sel;
     }
 
     private void ShowCountdownStatus(AlarmTask? existing)
@@ -245,6 +257,8 @@ public partial class TaskEditorWindow : Window
         {
             ReminderMinutes = reminder,
             SoundMode = SoundModeBox.SelectedIndex switch { 1 => SoundMode.Once, 2 => SoundMode.Repeat, _ => null },
+            Volume = VolumeBox.SelectedIndex > 0 ? SoundLevels.Volumes[VolumeBox.SelectedIndex - 1] : null,
+            FadeInSeconds = FadeInBox.SelectedIndex > 0 ? SoundLevels.FadeIns[FadeInBox.SelectedIndex - 1] : null,
         }).WithSound(Platforms.Windows, _sound);
 
         return errors.Count == 0 ? d : null;

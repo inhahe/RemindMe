@@ -150,6 +150,23 @@ public class EngineTests
     }
 
     [Fact]
+    public void VolumeAndFadeInFollowTheTaskOrTheDefault()
+    {
+        var s = new AppSettings { DefaultVolume = 80, DefaultFadeInSeconds = 30 };
+        var d = new TaskDefinition();
+        Assert.Equal(0.8, s.VolumeFor(d));
+        Assert.Equal(TimeSpan.FromSeconds(30), s.FadeInFor(d));
+        Assert.Equal(0.5, s.VolumeFor(d with { Volume = 50 }));
+        Assert.Equal(TimeSpan.Zero, s.FadeInFor(d with { FadeInSeconds = 0 }));
+
+        var fade = TimeSpan.FromSeconds(60);
+        Assert.Equal(0.5 * SoundLevels.FadeFloor, SoundLevels.FadeLevel(0.5, TimeSpan.Zero, fade));   // quiet, not silent
+        Assert.Equal(0.125, SoundLevels.FadeLevel(0.5, TimeSpan.FromSeconds(30), fade), 6);           // a quarter of the way at half time
+        Assert.Equal(0.5, SoundLevels.FadeLevel(0.5, TimeSpan.FromSeconds(90), fade));
+        Assert.Equal(0.5, SoundLevels.FadeLevel(0.5, TimeSpan.FromSeconds(5), TimeSpan.Zero));
+    }
+
+    [Fact]
     public void APausedTaskStopsRingingAndPassesOverWhatCameUpMeanwhile()
     {
         var t = EveryHourFromNow(RestartMode.OnSchedule);

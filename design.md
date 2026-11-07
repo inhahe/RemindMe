@@ -65,6 +65,7 @@ with its own version (a hybrid logical clock, `Hlc`):
 | `ReminderMinutes` | How long after a dismissal it reminds again, while not done. 0 means it doesn't. |
 | `WindowsSound`, `AndroidSound` | A `SoundRef` per platform, since a sound picked on one means nothing on the other. `null` means the device's default applies (R11). |
 | `SoundMode` | `Once` or `Repeat`. `null` means the device's default applies. |
+| `Volume`, `FadeInSeconds` | S10: percent of the device's alarm volume, and how long the sound takes to grow to it. `null` means the device's default applies; the choices both apps offer are `SoundLevels.Volumes` and `SoundLevels.FadeIns`. |
 | `ScheduleRevision` | Goes up on every change that affects *when* the task fires |
 | `Deleted` | Tombstone. A deleted task keeps its ID, so a deletion syncs like any other edit. |
 
@@ -79,7 +80,7 @@ with its own version (a hybrid logical clock, `Hlc`):
 | `SnoozeUntilUtc`, `SnoozeOccurrenceUtc` | After a dismissal: when to remind again, and the occurrence that was dismissed |
 | `PausedAtUtc` | When the user paused the task; `null` while it isn't paused |
 
-Per-device `AppSettings` (not synced): defaults for the sound, sound mode,
+Per-device `AppSettings` (not synced): defaults for the sound, sound mode, volume and fade-in,
 reminder interval, time of day (09:00) and restart mode; desktop window and
 startup options; sync identity and options.
 
@@ -387,9 +388,14 @@ separately (see *Simplification opportunities*).
 - `SoundService`: one sound at a time (D5). The newest alert's sound plays, and
   stopping it resumes the newest remaining looping one. WAV files play through
   `SoundPlayer`, which needs no Media Foundation, so Windows N editions work too;
-  other formats play through WPF `MediaPlayer`. A failure falls back to the
-  built-in `Alarm01.wav` and reports it in the alarm window, then to the
-  system beep.
+  other formats, and a WAV that is to play quieter or fade in (S10), play
+  through WPF `MediaPlayer`, the only one of the two with a volume. Where it
+  can't play a WAV, the WAV falls back to `SoundPlayer` at full volume, and the
+  alarm window says so. Any other failure falls back to the built-in
+  `Alarm01.wav` and reports it in the alarm window, then to the system beep.
+  A fade-in (`SoundLevels.FadeLevel`) rises with the square of the time, from 2%
+  of the target, in 200 ms steps. It counts from when the alarm began, so a
+  sound resumed after another alarm interrupted it doesn't start quiet again.
 - `Autostart.cs`: a single per-user `HKCU\...\Run` entry, as in LanLink. An
   instance with its own `--data-dir` gets an entry of its own name, and is never
   enabled on its first run.
@@ -479,7 +485,8 @@ it runs on Android 10 (API 29) and up. The root namespace is
   foreground after starting, it stops counting as running at once, so nothing
   has it play over the safety net and then stop.
 - `AlarmSound`: `MediaPlayer` on the alarm stream, one sound at a time, like the
-  desktop's. It tries the chosen sound, then the phone's alarm, ringtone and
+  desktop's, with the task's volume and fade-in (`SetVolume`, the same curve as
+  the desktop's). It tries the chosen sound, then the phone's alarm, ringtone and
   notification defaults, then the first installed alarm sound. An emulator, or
   a phone, can have no default set, and checking whether a default's address
   can be opened is no test: the settings-provider address fails that check yet

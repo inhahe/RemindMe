@@ -93,6 +93,14 @@ public sealed class TaskEditActivity : Screen
         mode.Adapter = Ui.SpinnerAdapter(this,
             [$"as the default says ({modeName})", "once each time the alarm appears", "over and over until it's closed or marked done"]);
         mode.SetSelection(d.SoundMode switch { SoundMode.Once => 1, SoundMode.Repeat => 2, _ => 0 });
+        var volume = Find<Spinner>(Resource.Id.volume);
+        volume.Adapter = Ui.SpinnerAdapter(this,
+            [$"default ({SoundLevels.VolumeText(s.DefaultVolume)})", .. SoundLevels.Volumes.Select(SoundLevels.VolumeText)]);
+        volume.SetSelection(d.Volume is { } v ? 1 + SoundLevels.Nearest(SoundLevels.Volumes, v) : 0);
+        var fade = Find<Spinner>(Resource.Id.fade_in);
+        fade.Adapter = Ui.SpinnerAdapter(this,
+            [$"default ({SoundLevels.FadeInText(s.DefaultFadeInSeconds)})", .. SoundLevels.FadeIns.Select(SoundLevels.FadeInText)]);
+        fade.SetSelection(d.FadeInSeconds is { } f ? 1 + SoundLevels.Nearest(SoundLevels.FadeIns, f) : 0);
 
         Find<Button>(Resource.Id.start_date).Click += (_, _) => Ui.PickDate(this, _startDate, v => { _startDate = v; ShowTimes(); });
         Find<Button>(Resource.Id.start_time).Click += (_, _) => Ui.PickTime(this, _startTime, v => { _startTime = v; ShowTimes(); });
@@ -264,6 +272,8 @@ public sealed class TaskEditActivity : Screen
         {
             ReminderMinutes = reminder,
             SoundMode = Find<Spinner>(Resource.Id.sound_mode).SelectedItemPosition switch { 1 => SoundMode.Once, 2 => SoundMode.Repeat, _ => null },
+            Volume = Find<Spinner>(Resource.Id.volume).SelectedItemPosition is > 0 and var vi ? SoundLevels.Volumes[vi - 1] : null,
+            FadeInSeconds = Find<Spinner>(Resource.Id.fade_in).SelectedItemPosition is > 0 and var fi ? SoundLevels.FadeIns[fi - 1] : null,
         }).WithSound(Platforms.Android, _sound);
 
         if (errors.Count > 0)

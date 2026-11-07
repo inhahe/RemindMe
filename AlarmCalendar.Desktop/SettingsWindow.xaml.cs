@@ -17,6 +17,10 @@ public partial class SettingsWindow : Window
         _sound = s.DefaultSound;
         ModeOnce.IsChecked = s.DefaultSoundMode == SoundMode.Once;
         ModeRepeat.IsChecked = s.DefaultSoundMode == SoundMode.Repeat;
+        foreach (var v in SoundLevels.Volumes) VolumeBox.Items.Add(SoundLevels.VolumeText(v));
+        foreach (var f in SoundLevels.FadeIns) FadeInBox.Items.Add(SoundLevels.FadeInText(f));
+        VolumeBox.SelectedIndex = SoundLevels.Nearest(SoundLevels.Volumes, s.DefaultVolume);
+        FadeInBox.SelectedIndex = SoundLevels.Nearest(SoundLevels.FadeIns, s.DefaultFadeInSeconds);
         ReminderHours.Text = (s.DefaultReminderMinutes / 60).ToString(CultureInfo.CurrentCulture);
         ReminderMinutes.Text = (s.DefaultReminderMinutes % 60).ToString(CultureInfo.CurrentCulture);
         TimeOfDay.Text = Fields.FormatTime(s.DefaultTimeOfDay);
@@ -49,12 +53,16 @@ public partial class SettingsWindow : Window
 
         var sound = _sound;
         var mode = ModeOnce.IsChecked == true ? SoundMode.Once : SoundMode.Repeat;
+        int volume = SoundLevels.Volumes[Math.Max(0, VolumeBox.SelectedIndex)];
+        int fadeIn = SoundLevels.FadeIns[Math.Max(0, FadeInBox.SelectedIndex)];
         var restart = RestartOnSchedule.IsChecked == true ? RestartMode.OnSchedule : RestartMode.FromDone;
         bool startWithWindows = StartWithWindows.IsChecked == true, closeToTray = CloseToTray.IsChecked == true;
         AppHost.UpdateSettings(s =>
         {
             s.DefaultSound = sound;
             s.DefaultSoundMode = mode;
+            s.DefaultVolume = volume;
+            s.DefaultFadeInSeconds = fadeIn;
             s.DefaultReminderMinutes = reminder;
             s.DefaultTimeOfDay = tod;
             s.DefaultRestartMode = restart;

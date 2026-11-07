@@ -127,6 +127,13 @@
                             <TextBlock Text="Play it " VerticalAlignment="Center" />
                             <ComboBox x:Name="SoundModeBox" MinWidth="330" />
                         </WrapPanel>
+                        <WrapPanel Margin="0,6,0,0">
+                            <TextBlock Text="Volume: " VerticalAlignment="Center" />
+                            <ComboBox x:Name="VolumeBox" MinWidth="180" />
+                            <ComboBox x:Name="FadeInBox" MinWidth="230" Margin="8,0,0,0" />
+                        </WrapPanel>
+                        <TextBlock Style="{StaticResource Hint}" Margin="0,2,0,0"
+                                   Text="Of the system volume. A fade-in starts quietly and grows to this." />
                     </StackPanel>
                 </Border>
                 <TextBlock x:Name="ErrorText" Foreground="#FFB00020" TextWrapping="Wrap" Margin="0,2,0,0" />

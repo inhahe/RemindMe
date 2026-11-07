@@ -28,6 +28,12 @@ public sealed class SettingsActivity : Screen
         _timeOfDay = s.DefaultTimeOfDay;
         Find<RadioButton>(Resource.Id.mode_once).Checked = s.DefaultSoundMode == SoundMode.Once;
         Find<RadioButton>(Resource.Id.mode_repeat).Checked = s.DefaultSoundMode == SoundMode.Repeat;
+        var volume = Find<Spinner>(Resource.Id.default_volume);
+        volume.Adapter = Ui.SpinnerAdapter(this, SoundLevels.Volumes.Select(SoundLevels.VolumeText).ToList());
+        volume.SetSelection(SoundLevels.Nearest(SoundLevels.Volumes, s.DefaultVolume));
+        var fade = Find<Spinner>(Resource.Id.default_fade_in);
+        fade.Adapter = Ui.SpinnerAdapter(this, SoundLevels.FadeIns.Select(SoundLevels.FadeInText).ToList());
+        fade.SetSelection(SoundLevels.Nearest(SoundLevels.FadeIns, s.DefaultFadeInSeconds));
         Find<EditText>(Resource.Id.rem_hours).Text = (s.DefaultReminderMinutes / 60).ToString(CultureInfo.CurrentCulture);
         Find<EditText>(Resource.Id.rem_minutes).Text = (s.DefaultReminderMinutes % 60).ToString(CultureInfo.CurrentCulture);
         Find<RadioButton>(Resource.Id.restart_from_done).Checked = s.DefaultRestartMode == RestartMode.FromDone;
@@ -103,11 +109,15 @@ public sealed class SettingsActivity : Screen
         var sound = _sound;
         var tod = _timeOfDay;
         var mode = Find<RadioButton>(Resource.Id.mode_once).Checked ? SoundMode.Once : SoundMode.Repeat;
+        int volume = SoundLevels.Volumes[Math.Max(0, Find<Spinner>(Resource.Id.default_volume).SelectedItemPosition)];
+        int fadeIn = SoundLevels.FadeIns[Math.Max(0, Find<Spinner>(Resource.Id.default_fade_in).SelectedItemPosition)];
         var restart = Find<RadioButton>(Resource.Id.restart_on_schedule).Checked ? RestartMode.OnSchedule : RestartMode.FromDone;
         AppState.UpdateSettings(s =>
         {
             s.DefaultSound = sound;
             s.DefaultSoundMode = mode;
+            s.DefaultVolume = volume;
+            s.DefaultFadeInSeconds = fadeIn;
             s.DefaultReminderMinutes = reminder;
             s.DefaultTimeOfDay = tod;
             s.DefaultRestartMode = restart;

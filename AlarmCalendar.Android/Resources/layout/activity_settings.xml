@@ -31,6 +31,10 @@
                             android:text="over and over until the alarm is closed or marked done" />
                     </RadioGroup>
                     <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+                        android:text="Volume (of the alarm volume)" android:layout_marginTop="8dp" />
+                    <Spinner android:id="@+id/default_volume" android:layout_width="match_parent" android:layout_height="wrap_content" />
+                    <Spinner android:id="@+id/default_fade_in" android:layout_width="match_parent" android:layout_height="wrap_content" />
+                    <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
                         android:text="New tasks remind again after" android:layout_marginTop="8dp" />
                     <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center_vertical">
                         <EditText android:id="@+id/rem_hours" style="@style/NumberField" />

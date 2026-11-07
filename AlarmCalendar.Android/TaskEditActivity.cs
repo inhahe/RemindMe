@@ -244,16 +244,7 @@ public sealed class TaskEditActivity : Screen
             if (mask == 0) errors.Add("Tick at least one day of the week.");
             if (!FieldParsing.TryInt(Find<EditText>(Resource.Id.week_interval).Text ?? "", 1, Occurrences.MaxWeekInterval, out int weeks))
                 errors.Add($"\"Every … weeks\" needs a whole number from 1 to {Occurrences.MaxWeekInterval}.");
-            d = d with { Kind = ScheduleKind.Weekly, Days = mask, TimeOfDay = _weeklyTime, WeekInterval = Math.Max(1, weeks) };
-            if (weeks > 1)
-                d = d with
-                {
-                    WeeksFrom = DateOnly.FromDateTime(_weeksFrom),
-                    // An existing task keeps the week start it was saved with, so opening it on a
-                    // device whose weeks start on another day doesn't move its schedule.
-                    FirstDayOfWeek = _original is { Kind: ScheduleKind.Weekly, WeekInterval: > 1 }
-                        ? _original.FirstDayOfWeek : CultureInfo.CurrentCulture.DateTimeFormat.FirstDayOfWeek,
-                };
+            d = d.AsWeekly(mask, _weeklyTime, weeks, DateOnly.FromDateTime(_weeksFrom), CultureInfo.CurrentCulture.DateTimeFormat.FirstDayOfWeek);
         }
         else
         {

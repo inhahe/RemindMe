@@ -298,6 +298,50 @@ public class ExportImportTests
         Assert.Equal(NY(2026, 6, 6, 8), a.Status(t.Id)!.NextOccurrence);
     }
 
+    /// <summary>The definition syncs apart from the state: this device has another's new
+    /// schedule (revision 2) but not yet its state, deletes the task, and imports a file of
+    /// revision 1. The restored task must outrank that revision-2 state when it arrives.</summary>
+    [Fact]
+    public void ATombstoneWhoseScheduleIsAheadOfItsStateIsOutrankedToo()
+    {
+        var a = NewStore("node-a");
+        var t = a.Save(null, new TaskDefinition
+        {
+            Description = "daily", Kind = ScheduleKind.Interval, Unit = IntervalUnit.Days, Start = new DateTime(2026, 6, 1, 8, 0, 0),
+            Restart = RestartMode.OnSchedule,
+        });
+        var file = a.Export();
+        var b = NewStore("node-b");
+        b.Merge(a.All());
+        _clock.Advance(TimeSpan.FromMinutes(1));
+        var rescheduled = b.Save(t.Id, t.Def with { Start = new DateTime(2026, 6, 1, 20, 0, 0) });   // revision 2
+        a.Merge([rescheduled with { State = a.Get(t.Id)!.State, StateVersion = a.Get(t.Id)!.StateVersion }]);   // its definition only
+        Assert.Equal((2, 1), (a.Get(t.Id)!.Def.ScheduleRevision, a.Get(t.Id)!.State.Revision));
+        a.Delete(t.Id);
+        _clock.UtcNow = NY(2026, 6, 5, 10);
+
+        a.Import(file);
+        Assert.Equal(3, a.Get(t.Id)!.State.Revision);
+        a.Merge(b.All());   // b's revision-2 state arrives
+        var back = a.Get(t.Id)!;
+        Assert.Equal(new DateTime(2026, 6, 1, 8, 0, 0), back.Def.Start);
+        Assert.Equal(3, back.State.Revision);   // the state still belongs to the schedule shown
+        Assert.Equal(NY(2026, 6, 6, 8), a.Status(t.Id)!.NextOccurrence);
+    }
+
+    [Fact]
+    public void AnExportSaysHowManyTasksItHolds()
+    {
+        var a = NewStore("node-a");
+        a.Save(null, new TaskDefinition { Description = "x", Kind = ScheduleKind.Once, At = new DateTime(2026, 7, 1, 9, 0, 0) });
+        var gone = a.Save(null, new TaskDefinition { Description = "y", Kind = ScheduleKind.Once, At = new DateTime(2026, 7, 1, 9, 0, 0) });
+        a.Delete(gone.Id);
+        a.Export(out int count);
+        Assert.Equal(1, count);
+        Assert.Equal("Exported 1 task.", TextFormat.ExportSummary(count));
+        Assert.Equal("Exported 2 tasks to C:/x.json.", TextFormat.ExportSummary(2, "C:/x.json"));
+    }
+
     /// <summary>The device a file came from goes on editing and marking done; another
     /// imports the file, and the two are linked later. The import must not outrank any of it.</summary>
     [Fact]

@@ -125,6 +125,24 @@ public sealed record TaskDefinition
     public TaskDefinition WithDay(DayOfWeek d, bool on) =>
         this with { Days = on ? Days | (1 << (int)d) : Days & ~(1 << (int)d) };
 
+    /// <summary>This definition as a days-of-the-week schedule, as both editors save it.</summary>
+    /// <param name="days">The <see cref="Days"/> mask.</param>
+    /// <param name="weeks">Every this many weeks; anything below 2 is every week.</param>
+    /// <param name="weeksFrom">With <paramref name="weeks"/> above 1: a date in the first week that rings.</param>
+    /// <param name="firstDayHere">The day weeks start on in this device's culture. A task that
+    /// already rang every few weeks keeps the week start it was saved with instead, so that
+    /// opening it on a device whose weeks start on another day doesn't move its schedule.</param>
+    public TaskDefinition AsWeekly(int days, TimeOnly time, int weeks, DateOnly weeksFrom, DayOfWeek firstDayHere)
+    {
+        var d = this with { Kind = ScheduleKind.Weekly, Days = days, TimeOfDay = time, WeekInterval = Math.Max(1, weeks) };
+        if (weeks <= 1) return d;
+        return d with
+        {
+            WeeksFrom = weeksFrom,
+            FirstDayOfWeek = this is { Kind: ScheduleKind.Weekly, WeekInterval: > 1 } ? FirstDayOfWeek : firstDayHere,
+        };
+    }
+
     /// <summary>True when the two definitions would fire at different times.</summary>
     public bool ScheduleDiffers(TaskDefinition other) =>
         Kind != other.Kind || Kind switch

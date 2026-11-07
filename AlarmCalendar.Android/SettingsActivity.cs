@@ -150,11 +150,11 @@ public sealed class SettingsActivity : Screen
         {
             if (export)
             {
+                var json = AppState.Store.Export(out int count);
                 using (var stream = ContentResolver!.OpenOutputStream(uri, "wt") ?? throw new IOException("The file couldn't be opened."))
                 using (var w = new StreamWriter(stream, new System.Text.UTF8Encoding(false)))
-                    w.Write(AppState.Store.Export());
-                int n = AppState.Store.Live().Count;
-                text.Text = $"Exported {n} task{(n == 1 ? "" : "s")}.";
+                    w.Write(json);
+                text.Text = TextFormat.ExportSummary(count);
             }
             else
             {

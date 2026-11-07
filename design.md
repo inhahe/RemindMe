@@ -59,7 +59,7 @@ with its own version (a hybrid logical clock, `Hlc`):
 | `Start` | Wall-clock start of an Interval schedule: occurrence *k* is `Start + k·N·unit` |
 | `Restart` | `FromDone` (the next occurrence is N after you mark it done) or `OnSchedule` (it keeps to the grid set by `Start`). Interval only. |
 | `Days`, `TimeOfDay` | Weekly: a bitmask indexed by `DayOfWeek` (bit 0 is Sunday), and a wall-clock time |
-| `WeekInterval`, `WeeksFrom`, `FirstDayOfWeek` | Weekly, every N weeks (S7): N (1 is every week), a date in the first week that rings, and the day weeks start on. That day comes from the culture of the device that first saved the schedule, and editing elsewhere keeps it, so every device agrees which weeks ring. |
+| `WeekInterval`, `WeeksFrom`, `FirstDayOfWeek` | Weekly, every N weeks (S7): N (1 is every week), a date in the first week that rings, and the day weeks start on. That day comes from the culture of the device that first saved the schedule, and editing elsewhere keeps it, so every device agrees which weeks ring. Both editors save through `TaskDefinition.AsWeekly`, which keeps that rule. |
 | `At` | Once: a wall-clock date and time |
 | `Duration` | Countdown: the length |
 | `ReminderMinutes` | How long after a dismissal it reminds again, while not done. 0 means it doesn't. |
@@ -179,10 +179,15 @@ otherwise also give.
   Once it has come up, its timer has stopped: the time it came up is the one
   `Waiting` entry, and the estimates count from now, as if it were marked done
   now (`AlarmEngine.MarkDone`).
-- **Keeping up**: `CalendarMonth.NextChange` gives the first time shown still
-  to come. Both screens rebuild then, as well as on every store change and when
-  the date changes (checked at least once a minute), so a time turns red as it
-  comes up.
+  For one several times a day, the line of the day its next time falls on is
+  exact; the others are estimates.
+- **Keeping up**: `CalendarMonth.NextChange` gives the first exact time shown
+  still to come. Estimates don't count: a waiting task's are reckoned from now,
+  so they would always be about to change. They are reckoned afresh on every
+  rebuild. Both screens rebuild at that time, on every store change, and when
+  the date changes (`CalendarMonth.Stale`, checked as `CalendarMonth.TickDelay`
+  says: just after the next change, and at least once a minute). So a time
+  turns red as it comes up.
 - **The desktop window** (`CalendarWindow`) has a grid of up to four lines a
   day, plus "+N more", and the chosen day's full list beside it, which opens
   the editor.
@@ -215,10 +220,12 @@ from sync.
   consequence: once linked, the raise reaches the device the file came from too,
   passing over an occurrence still waiting there, as marking it done here would.
 - A task this device deleted comes back with a fresh `DefVersion`, outranking
-  the tombstone, and its state merges as above. Only if the tombstone's state is
-  of a newer revision (the task was rescheduled after the export, then deleted)
-  does it get a new revision, with a fresh `StateVersion` and `DoneThrough` =
-  now.
+  the tombstone, and its state merges as above. It gets a new revision, with a
+  fresh `StateVersion` and `DoneThrough` = now, only if the tombstone is of a
+  newer revision than the file, in its state or in its definition (the task was
+  rescheduled after the export, then deleted). The definition counts because it
+  syncs apart from the state: a schedule's definition can arrive before its
+  state, which would otherwise outrank the restored one when it comes.
 - Records that aren't well formed (`MergeRules.IsWellFormed`: no ID,
   definition or state, a null description or sound name) are skipped, as sync
   skips them. JSON can leave a member null whatever its declared type: an

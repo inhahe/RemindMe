@@ -131,7 +131,43 @@ public class CalendarTests
         Assert.Empty(Day(days, 6, 11).Entries);
         var today = Day(days, 6, 12).Entries.Single();
         Assert.False(today.Waiting);
+        Assert.True(today.Estimated);
         Assert.Equal(NY(2026, 6, 12, 8, 15), today.At);
+        // Estimates reckoned from now don't count as a change to wait for, or an open
+        // calendar would rebuild every 15 minutes (or every second, for a task of seconds).
+        Assert.Null(CalendarMonth.NextChange(days, _clock.UtcNow));
+    }
+
+    [Fact]
+    public void OnlyTheNextTimeOfARestartWhenDoneTaskIsExact()
+    {
+        _store.Save(null, new TaskDefinition
+        {
+            Description = "stretch", Kind = ScheduleKind.Interval, IntervalCount = 15, Unit = IntervalUnit.Minutes,
+            Start = new DateTime(2026, 6, 10, 12, 0, 0), Restart = RestartMode.FromDone,
+        });
+        var days = June();
+        var today = Day(days, 6, 10).Entries.Single();
+        Assert.Equal(NY(2026, 6, 10, 12, 15), today.At);
+        Assert.False(today.Estimated);   // its next time, known exactly
+        Assert.True(Day(days, 6, 11).Entries.Single().Estimated);
+        Assert.Equal(NY(2026, 6, 10, 12, 15), CalendarMonth.NextChange(days, _clock.UtcNow));
+    }
+
+    [Fact]
+    public void AnOpenCalendarChecksJustAfterTheNextChangeAndAtLeastEveryMinute()
+    {
+        var now = _clock.UtcNow;
+        Assert.Equal(TimeSpan.FromSeconds(10.2), CalendarMonth.TickDelay(now.AddSeconds(10), now));
+        Assert.Equal(TimeSpan.FromMinutes(1), CalendarMonth.TickDelay(now.AddHours(3), now));
+        Assert.Equal(TimeSpan.FromMinutes(1), CalendarMonth.TickDelay(null, now));
+        Assert.Equal(TimeSpan.FromMilliseconds(200), CalendarMonth.TickDelay(now.AddSeconds(-5), now));
+
+        var today = new DateTime(2026, 6, 10);
+        Assert.False(CalendarMonth.Stale(today, now.AddMinutes(5), now, NewYork));
+        Assert.True(CalendarMonth.Stale(today, now.AddMinutes(5), now.AddMinutes(5), NewYork));
+        Assert.True(CalendarMonth.Stale(today, null, NY(2026, 6, 11, 0, 0, 1), NewYork));   // the date changed
+        Assert.False(CalendarMonth.Stale(today, null, now, NewYork));
     }
 
     [Fact]

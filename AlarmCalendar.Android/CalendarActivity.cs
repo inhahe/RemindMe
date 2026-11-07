@@ -66,13 +66,11 @@ public sealed class CalendarActivity : Screen
     private void ScheduleTick()
     {
         _ticks.RemoveCallbacksAndMessages(null);
-        var wait = _nextChange is { } at ? at - AppState.Clock.UtcNow + TimeSpan.FromMilliseconds(200) : TimeSpan.MaxValue;
-        long ms = wait < TimeSpan.FromMilliseconds(200) ? 200 : wait > TimeSpan.FromMinutes(1) ? 60_000 : (long)wait.TotalMilliseconds;
         _ticks.PostDelayed(() =>
         {
-            if (Today() != _builtOn || AppState.Clock.UtcNow >= _nextChange) Build();
+            if (CalendarMonth.Stale(_builtOn, _nextChange, AppState.Clock.UtcNow, AppState.Clock.Zone)) Build();
             else ScheduleTick();
-        }, ms);
+        }, (long)CalendarMonth.TickDelay(_nextChange, AppState.Clock.UtcNow).TotalMilliseconds);
     }
 
     private void ShowMonth(DateTime month)

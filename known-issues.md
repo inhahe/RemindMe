@@ -13,6 +13,32 @@ Firewall prompt for the debug build (`ALARMCAL_BIND=127.0.0.1` avoids that in
 tests). **To verify:** run the app on two PCs on one LAN, or a PC and the phone;
 each should list the other in Devices within a few seconds.
 
+### Waking the computer from sleep (S3)
+Checked only as far as setting the timer: app.log says "Wake timer set for …",
+and the timer is set again as the next alarm changes. The computer was never
+put to sleep for it. **To verify:**
+1. Turn on Power Options → Change advanced power settings → Sleep → Allow wake
+   timers (for the power source in use; many laptops turn it off on battery).
+2. Make a task due in a few minutes, then put the computer to sleep (Sleep, not
+   hibernate or shut down). `powercfg /waketimers`, in an administrator
+   prompt, should list the app's timer.
+3. The computer should wake about 20 seconds before the task, and ring on time.
+
+What to watch:
+- **The screen.** After a timer wake, Windows leaves the display off. While the
+  sound plays, the app requests `ES_DISPLAY_REQUIRED`. Microsoft documents that
+  as "forces the display to be on by resetting the display idle timer", but
+  doesn't say outright that it lights a display a timer wake left off. If the
+  alarm sounds while the screen stays dark, the fix is to turn the display on
+  when an alert begins after an automatic wake (`IsSystemResumeAutomatic`):
+  - A zero-distance `SendInput` mouse move. Windows also takes it as the user
+    being present, so the computer then sleeps on its usual idle timeout
+    rather than within two minutes.
+  - Or `SC_MONITORPOWER` −1, which recent Windows versions are said to ignore.
+- **Modern Standby** computers (S0 low-power idle, most recent laptops) don't
+  sleep in S3. Microsoft's page on timer wakes covers S3 and hibernation only,
+  and Modern Standby honours wake timers far less.
+
 ### Android on a real phone
 Checked only on the emulator (API 36). Worth checking on the phone, a Samsung
 running One UI: that the alarm screen opens over the lock screen (One UI can

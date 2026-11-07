@@ -30,6 +30,9 @@ Write-Host '[2/3] Checking the WiX Toolset...'
 if (-not (Get-Command wix -ErrorAction SilentlyContinue)) {
     dotnet tool install --global wix
     if ($LASTEXITCODE) { throw 'Could not install WiX: dotnet tool install --global wix' }
+    # The global tools folder reaches the PATH of shells started later, not this one's.
+    $tools = Join-Path $env:USERPROFILE '.dotnet\tools'
+    if (-not (Get-Command wix -ErrorAction SilentlyContinue)) { $env:Path = "$tools;$env:Path" }
 }
 $extensions = (wix extension list --global) -join "`n"
 foreach ($ext in 'WixToolset.UI.wixext', 'WixToolset.Firewall.wixext') {

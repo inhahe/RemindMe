@@ -56,9 +56,8 @@ public partial class SettingsWindow : Window
         if (dialog.ShowDialog(this) != true) return;
         try
         {
-            System.IO.File.WriteAllText(dialog.FileName, AppHost.Store.Export(), new System.Text.UTF8Encoding(false));
-            int n = AppHost.Store.Live().Count;
-            TransferText.Text = $"Exported {n} task{(n == 1 ? "" : "s")} to {dialog.FileName}.";
+            System.IO.File.WriteAllText(dialog.FileName, AppHost.Store.Export(out int count), new System.Text.UTF8Encoding(false));
+            TransferText.Text = TextFormat.ExportSummary(count, dialog.FileName);
         }
         catch (Exception ex) when (ex is System.IO.IOException or UnauthorizedAccessException)
         {

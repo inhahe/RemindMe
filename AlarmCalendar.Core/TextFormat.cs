@@ -102,10 +102,17 @@ public static class TextFormat
         return $"{minutes / 60}:{minutes % 60:00}";
     }
 
+    private static string Tasks(int n) => $"{n} task{(n == 1 ? "" : "s")}";
+
+    /// <summary>"Exported 3 tasks." or "Exported 3 tasks to C:\…\file.json.": what an export did.</summary>
+    /// <param name="count">How many tasks the file holds.</param>
+    /// <param name="destination">Where it went, when worth saying.</param>
+    public static string ExportSummary(int count, string? destination = null) =>
+        $"Exported {Tasks(count)}{(destination is null ? "" : " to " + destination)}.";
+
     /// <summary>"Imported 3 tasks; updated 1; 2 were already up to date.": what an import did.</summary>
     public static string ImportSummary(ImportResult r)
     {
-        static string Tasks(int n) => $"{n} task{(n == 1 ? "" : "s")}";
         var parts = new List<string>();
         if (r.Added > 0) parts.Add($"imported {Tasks(r.Added)}");
         if (r.Updated > 0) parts.Add($"updated {Tasks(r.Updated)}");

@@ -41,7 +41,7 @@ public partial class CalendarWindow : Window
         AppHost.Store.Changed += OnStoreChanged;
         _clock.Tick += (_, _) =>
         {
-            if (Today() != _builtOn || AppHost.Clock.UtcNow >= _nextChange) Build();
+            if (CalendarMonth.Stale(_builtOn, _nextChange, AppHost.Clock.UtcNow, AppHost.Clock.Zone)) Build();
             else ScheduleTick();
         };
         Closed += (_, _) => { _closed = true; AppHost.Store.Changed -= OnStoreChanged; _clock.Stop(); };
@@ -51,10 +51,8 @@ public partial class CalendarWindow : Window
     private void ScheduleTick()
     {
         if (_closed) return;   // a store change queued before closing still builds once
-        var wait = _nextChange is { } at ? at - AppHost.Clock.UtcNow + TimeSpan.FromMilliseconds(200) : TimeSpan.MaxValue;
         _clock.Stop();
-        _clock.Interval = wait < TimeSpan.FromMilliseconds(200) ? TimeSpan.FromMilliseconds(200)
-            : wait > TimeSpan.FromMinutes(1) ? TimeSpan.FromMinutes(1) : wait;
+        _clock.Interval = CalendarMonth.TickDelay(_nextChange, AppHost.Clock.UtcNow);
         _clock.Start();
     }
 

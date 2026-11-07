@@ -142,6 +142,22 @@ public class OccurrenceTests
     }
 
     [Fact]
+    public void AnEveryFewWeeksTaskKeepsTheWeekStartItWasSavedWith()
+    {
+        var from = new DateOnly(2026, 6, 3);
+        var fresh = new TaskDefinition().AsWeekly(0b10, new TimeOnly(9, 0), 2, from, DayOfWeek.Sunday);
+        Assert.Equal((ScheduleKind.Weekly, 2, from, DayOfWeek.Sunday), (fresh.Kind, fresh.WeekInterval, fresh.WeeksFrom, fresh.FirstDayOfWeek));
+
+        // Edited on a device whose weeks start on Monday: which weeks ring mustn't move.
+        var edited = fresh.AsWeekly(0b110, new TimeOnly(10, 0), 3, from, DayOfWeek.Monday);
+        Assert.Equal((3, DayOfWeek.Sunday), (edited.WeekInterval, edited.FirstDayOfWeek));
+
+        // Every week: the first week and week start don't matter, and aren't touched.
+        var weekly = fresh.AsWeekly(0b10, new TimeOnly(9, 0), 0, new DateOnly(2027, 1, 1), DayOfWeek.Monday);
+        Assert.Equal((1, from, DayOfWeek.Sunday), (weekly.WeekInterval, weekly.WeeksFrom, weekly.FirstDayOfWeek));
+    }
+
+    [Fact]
     public void AFirstRingingWeekFarAheadIsFound()
     {
         var d = new TaskDefinition

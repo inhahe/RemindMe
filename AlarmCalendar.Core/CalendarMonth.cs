@@ -90,7 +90,8 @@ public static class CalendarMonth
                 var dayStart = TimeMath.Max(TimeMath.ToInstant(gridStart.AddDays(i), zone) - TimeSpan.FromTicks(1), from);
                 var dayEnd = TimeMath.ToInstant(gridStart.AddDays(i + 1), zone);
                 if (Occurrences.After(d, s, dayStart, zone) is { } o && o < dayEnd)
-                    yield return new CalendarEntry(t.Id, o, every, title, Estimated: fromDone, Repeating: true, Waiting: o <= now);
+                    yield return new CalendarEntry(t.Id, o, every, title, Estimated: fromDone && o != st.NextOccurrence,
+                        Repeating: true, Waiting: o <= now);
             }
             yield break;
         }
@@ -111,9 +112,28 @@ public static class CalendarMonth
     /// <summary>The next moment <paramref name="days"/> would look different without any
     /// change to the tasks: when the first time still to come that it shows comes up, and
     /// starts waiting (or moves a restart-when-done task's estimates). Null when it shows
-    /// nothing still to come. The date changing is the caller's to watch.</summary>
+    /// nothing still to come. Estimates don't count: a waiting task's are reckoned from now,
+    /// so they would always be about to change. The date changing is the caller's to watch.</summary>
     public static DateTimeOffset? NextChange(IEnumerable<CalendarDay> days, DateTimeOffset now) =>
-        days.SelectMany(d => d.Entries).Where(e => !e.Waiting && e.At > now).Select(e => (DateTimeOffset?)e.At).Min();
+        days.SelectMany(d => d.Entries).Where(e => !e.Waiting && !e.Estimated && e.At > now)
+            .Select(e => (DateTimeOffset?)e.At).Min();
+
+    /// <summary>How long a calendar on screen waits before checking again whether to
+    /// rebuild: until just after <paramref name="nextChange"/>, but at least once a minute,
+    /// for the date.</summary>
+    public static TimeSpan TickDelay(DateTimeOffset? nextChange, DateTimeOffset now)
+    {
+        var floor = TimeSpan.FromMilliseconds(200);
+        var cap = TimeSpan.FromMinutes(1);
+        if (nextChange is not { } at || at - now > cap) return cap;
+        var wait = at - now + floor;
+        return wait < floor ? floor : wait;
+    }
+
+    /// <summary>Whether a calendar built on <paramref name="builtOn"/> (its date), with
+    /// <paramref name="nextChange"/> from <see cref="NextChange"/>, is out of date.</summary>
+    public static bool Stale(DateTime builtOn, DateTimeOffset? nextChange, DateTimeOffset now, TimeZoneInfo zone) =>
+        TimeMath.ToWall(now, zone).Date != builtOn || now >= nextChange;
 
     private static TimeSpan Step(TaskDefinition d) => d.Unit switch
     {

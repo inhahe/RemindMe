@@ -248,9 +248,13 @@ public sealed class TaskStore
     // ---- Export and import (S8) ----------------------------------------------------
 
     /// <summary>Every task that isn't deleted, as the JSON of an export file.</summary>
-    public string Export()
+    public string Export() => Export(out _);
+
+    /// <param name="count">How many tasks the file holds.</param>
+    public string Export(out int count)
     {
         var file = new ExportFile { App = Sync.Protocol.App, ExportedUtc = _clock.UtcNow, Tasks = Live().OrderBy(t => t.Id).ToList() };
+        count = file.Tasks.Count;
         return System.Text.Json.JsonSerializer.Serialize(file, Json.Files.ExportFile);
     }
 
@@ -326,12 +330,13 @@ public sealed class TaskStore
 
     /// <summary>The file's copy <paramref name="r"/> of a task this device deleted. The
     /// definition gets a new version, outranking the deletion. The state keeps the file's
-    /// revision unless this device's is newer: then it was written against a later schedule,
-    /// which only a new revision outranks.</summary>
+    /// revision unless this device's copy has a newer one, in its state or in its definition
+    /// (which syncs apart from the state, and can be ahead of it): a later schedule's state
+    /// exists, here or elsewhere, and only a new revision outranks it.</summary>
     private AlarmTask Restore(AlarmTask tombstone, AlarmTask r, DateTimeOffset now)
     {
         var def = r.Def with { Deleted = false };
-        if (r.State.Revision >= tombstone.State.Revision)
+        if (r.State.Revision >= Math.Max(tombstone.State.Revision, tombstone.Def.ScheduleRevision))
         {
             var merged = PassOverPast(MergeRules.Merge(tombstone, r), now);
             return merged with { Def = def, DefVersion = Versions.Tick() };

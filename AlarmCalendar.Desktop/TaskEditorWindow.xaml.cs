@@ -223,19 +223,9 @@ public partial class TaskEditorWindow : Window
             if (!Fields.TryTime(WeeklyTime.Text, out var time)) errors.Add("The time of day isn't a time, e.g. 9:30 or 21:30.");
             if (!Fields.TryInt(WeekIntervalBox.Text, 1, Occurrences.MaxWeekInterval, out int weeks))
                 errors.Add($"\"Every … weeks\" needs a whole number from 1 to {Occurrences.MaxWeekInterval}.");
-            d = d with { Kind = ScheduleKind.Weekly, Days = mask, TimeOfDay = time, WeekInterval = Math.Max(1, weeks) };
-            if (weeks > 1)
-            {
-                if (WeeksFromDate.SelectedDate is not { } from) errors.Add("Choose the week it starts.");
-                d = d with
-                {
-                    WeeksFrom = DateOnly.FromDateTime(WeeksFromDate.SelectedDate ?? DateTime.Today),
-                    // An existing task keeps the week start it was saved with, so opening it on a
-                    // device whose weeks start on another day doesn't move its schedule.
-                    FirstDayOfWeek = _original is { Kind: ScheduleKind.Weekly, WeekInterval: > 1 }
-                        ? _original.FirstDayOfWeek : CultureInfo.CurrentCulture.DateTimeFormat.FirstDayOfWeek,
-                };
-            }
+            if (weeks > 1 && WeeksFromDate.SelectedDate is null) errors.Add("Choose the week it starts.");
+            d = d.AsWeekly(mask, time, weeks, DateOnly.FromDateTime(WeeksFromDate.SelectedDate ?? DateTime.Today),
+                CultureInfo.CurrentCulture.DateTimeFormat.FirstDayOfWeek);
         }
         else
         {

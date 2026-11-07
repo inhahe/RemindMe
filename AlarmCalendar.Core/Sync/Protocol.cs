@@ -1,5 +1,6 @@
 using System.Buffers.Binary;
 using System.Net;
+using System.Net.NetworkInformation;
 using System.Net.Sockets;
 using System.Security.Cryptography;
 using System.Text;
@@ -43,6 +44,9 @@ public sealed class SyncMessage
     public string? Group { get; set; }
     public string? Nonce { get; set; }
     public int? Port { get; set; }
+    /// <summary>An announcement's HMAC under the group key (<see cref="SyncCrypto.AnnouncementMac"/>):
+    /// the group ID is public, so only this shows that a device really is a member.</summary>
+    public string? Mac { get; set; }
 
     // replication
     public List<DigestEntry>? Digest { get; set; }
@@ -53,6 +57,9 @@ public sealed class SyncMessage
     public string? PairKey { get; set; }
     /// <summary>The requester's commitment: SHA-256 of the key it reveals later (base64).</summary>
     public string? Commit { get; set; }
+    /// <summary>The pairing attempt every later pairing message belongs to: its request's
+    /// <see cref="Commit"/>.</summary>
+    public string? Round { get; set; }
     /// <summary>How many other devices the sender is linked with; the side with fewer joins
     /// the other's group.</summary>
     public int? Members { get; set; }
@@ -66,8 +73,9 @@ public static class Protocol
     public const string App = "AlarmCalendar";
     /// <summary>Raise on every incompatible change, so mismatched builds refuse each other
     /// with a clear message instead of failing obscurely. 2: the "ready" frame, two-sided
-    /// pairing acceptance, member counts in the commitment.</summary>
-    public const int Version = 2;
+    /// pairing acceptance, member counts in the commitment. 3: pairing rounds, MACed
+    /// announcements.</summary>
+    public const int Version = 3;
     public const int DefaultPort = 37660;
     /// <summary>Discovery always uses this UDP port, whatever TCP port a node listens on,
     /// so several instances on one machine (or a custom port) still find each other.</summary>
@@ -149,20 +157,22 @@ public static class Protocol
     }
 
     /// <summary>True for an address on the local network: private, link-local or loopback
-    /// (<see cref="IsPrivateOrLan"/>), or inside the subnet of one of this machine's own
-    /// interfaces, which covers LAN peers reaching it over a global IPv6 address.</summary>
-    public static bool IsLanAddress(IPAddress ip)
+    /// (<see cref="IsPrivateOrLan"/>), or a global IPv6 address inside the on-link prefix of
+    /// one of this machine's LAN interfaces, which is how LAN peers often reach each other
+    /// over IPv6.</summary>
+    public static bool IsLanAddress(IPAddress ip) => IsLanAddress(ip, OnLinkPrefixes.Current());
+
+    /// <param name="onLink">This machine's IPv6 prefixes, as <see cref="OnLinkPrefixes"/> lists them.</param>
+    internal static bool IsLanAddress(IPAddress ip, IReadOnlyList<(IPAddress Address, int Length)> onLink)
     {
         if (ip.IsIPv4MappedToIPv6) ip = ip.MapToIPv4();
         if (IsPrivateOrLan(ip)) return true;
-        try
-        {
-            foreach (var iface in System.Net.NetworkInformation.NetworkInterface.GetAllNetworkInterfaces())
-                foreach (var u in iface.GetIPProperties().UnicastAddresses)
-                    if (u.Address.AddressFamily == ip.AddressFamily && SamePrefix(u.Address, ip, u.PrefixLength))
-                        return true;
-        }
-        catch (System.Net.NetworkInformation.NetworkInformationException) { }
+        // A public IPv4 subnet or a prefix shorter than /64 can span far more than a LAN (a
+        // PC plugged straight into an ISP's modem shares its subnet with other customers).
+        if (ip.AddressFamily != AddressFamily.InterNetworkV6) return false;
+        foreach (var (address, length) in onLink)
+            if (length is >= 64 and <= 128 && address.AddressFamily == AddressFamily.InterNetworkV6 && SamePrefix(address, ip, length))
+                return true;
         return false;
     }
 
@@ -204,6 +214,51 @@ public static class Protocol
     }
 }
 
+/// <summary>
+/// The global IPv6 prefixes of this machine's LAN interfaces (not loopback, tunnels or
+/// point-to-point links), for <see cref="Protocol.IsLanAddress(IPAddress)"/>. Cached: the
+/// accept loop asks for every connection from outside the private ranges, and listing the
+/// interfaces is slow on Windows. Refreshed when the system reports an address change, and
+/// at least every 30 s where it doesn't.
+/// </summary>
+internal static class OnLinkPrefixes
+{
+    private static (IPAddress, int)[]? _cached;
+    private static long _cachedAt;
+
+    static OnLinkPrefixes()
+    {
+        // Any failure here would make the type unusable, so none may escape.
+        try { NetworkChange.NetworkAddressChanged += (_, _) => Volatile.Write(ref _cached, null); }
+        catch (Exception) { }
+    }
+
+    public static IReadOnlyList<(IPAddress Address, int Length)> Current()
+    {
+        var cached = Volatile.Read(ref _cached);
+        if (cached is not null && Environment.TickCount64 - Volatile.Read(ref _cachedAt) < 30_000) return cached;
+        var list = new List<(IPAddress, int)>();
+        try
+        {
+            foreach (var iface in NetworkInterface.GetAllNetworkInterfaces())
+            {
+                // Android may report every interface's status as Unknown.
+                if (iface.OperationalStatus is not (OperationalStatus.Up or OperationalStatus.Unknown)
+                    || iface.NetworkInterfaceType is NetworkInterfaceType.Loopback or NetworkInterfaceType.Tunnel or NetworkInterfaceType.Ppp)
+                    continue;
+                foreach (var u in iface.GetIPProperties().UnicastAddresses)
+                    if (u.Address.AddressFamily == AddressFamily.InterNetworkV6 && !u.Address.IsIPv6LinkLocal)
+                        list.Add((u.Address, u.PrefixLength));
+            }
+        }
+        catch (Exception e) when (e is NetworkInformationException or PlatformNotSupportedException) { }
+        var result = list.ToArray();
+        Volatile.Write(ref _cachedAt, Environment.TickCount64);
+        Volatile.Write(ref _cached, result);
+        return result;
+    }
+}
+
 /// <summary>Key derivation and sealing for sessions and pairing.</summary>
 public static class SyncCrypto
 {
@@ -227,6 +282,28 @@ public static class SyncCrypto
         byte[] lowToHigh = HKDF.DeriveKey(HashAlgorithmName.SHA256, groupKey, 32, salt, Encoding.UTF8.GetBytes($"alarmcal v1 from {lowNode} to {highNode}"));
         byte[] highToLow = HKDF.DeriveKey(HashAlgorithmName.SHA256, groupKey, 32, salt, Encoding.UTF8.GetBytes($"alarmcal v1 from {highNode} to {lowNode}"));
         return iAmLow ? (lowToHigh, highToLow) : (highToLow, lowToHigh);
+    }
+
+    /// <summary>The MAC a member puts on its announcement, under a key derived from the
+    /// group secret. It covers every field acted on: anyone can claim the group's ID, which
+    /// every announcement carries, but only a member can produce this.</summary>
+    public static string AnnouncementMac(byte[] groupKey, SyncMessage m)
+    {
+        var key = HKDF.DeriveKey(HashAlgorithmName.SHA256, groupKey, 32, info: "alarmcal announce"u8.ToArray());
+        // The node and group IDs have a fixed length and the port and version are numbers, so
+        // with the name last no two announcements share this text.
+        var data = Encoding.UTF8.GetBytes($"{m.Node}\n{m.Group}\n{m.Port}\n{m.Proto}\n{m.Name}");
+        return Convert.ToBase64String(HMACSHA256.HashData(key, data));
+    }
+
+    /// <summary>Whether <paramref name="m"/> carries a valid <see cref="AnnouncementMac"/> under <paramref name="groupKey"/>.</summary>
+    public static bool HasValidMac(byte[] groupKey, SyncMessage m)
+    {
+        if (m.Mac is null || !Protocol.IsValidNodeId(m.Group)) return false;
+        byte[] given;
+        try { given = Convert.FromBase64String(m.Mac); }
+        catch (FormatException) { return false; }
+        return CryptographicOperations.FixedTimeEquals(given, Convert.FromBase64String(AnnouncementMac(groupKey, m)));
     }
 
     /// <summary>The requester's commitment to its pairing key and its member count, sent

@@ -30,8 +30,17 @@ public sealed record SyncOptions
     /// peers). When two devices pair, the one with fewer joins the other's group.</summary>
     public Func<int>? LinkedDeviceCount { get; init; }
     /// <summary>Whether a node ID belongs to a device this one has been in sync with. An
-    /// inbound connection claiming such an ID but not the group is refused.</summary>
+    /// inbound connection claiming such an ID but not the group never speaks for that
+    /// device here; it may only ask to pair.</summary>
     public Func<string, bool>? IsLinkedPeer { get; init; }
+
+    /// <summary>An inbound connection from outside the group, with no pairing under way, is
+    /// closed after sitting idle this long.</summary>
+    internal TimeSpan UnlinkedIdleTimeout { get; init; } = TimeSpan.FromMinutes(3);
+    /// <summary>A pairing left unanswered this long is abandoned.</summary>
+    internal TimeSpan PairingTimeout { get; init; } = TimeSpan.FromMinutes(5);
+    /// <summary>How often those two timeouts and the nearby list's expiry are checked.</summary>
+    internal TimeSpan HousekeepingInterval { get; init; } = TimeSpan.FromSeconds(5);
 }
 
 /// <summary>A device this node knows of, for the Devices screen.</summary>
@@ -86,9 +95,6 @@ public sealed class SyncEngine : IDisposable
 {
     private static readonly TimeSpan PeerExpiry = TimeSpan.FromSeconds(12);
     private static readonly TimeSpan HandshakeTimeout = TimeSpan.FromSeconds(15);
-    private static readonly TimeSpan UnlinkedIdleTimeout = TimeSpan.FromMinutes(3);
-    /// <summary>A pairing left unanswered this long is abandoned.</summary>
-    private static readonly TimeSpan PairingTimeout = TimeSpan.FromMinutes(5);
     /// <summary>A same-group peer that announces but never connects is dialled by the
     /// higher ID too after this long: the lower one's dials may be blocked by a firewall.</summary>
     private static readonly TimeSpan HigherIdFallback = TimeSpan.FromSeconds(10);
@@ -115,11 +121,16 @@ public sealed class SyncEngine : IDisposable
     private TcpListener? _listener;
     private Discovery? _discovery;
     /// <summary>The one pairing in progress on each side, if any.</summary>
-    private PeerSession? _accepting, _requesting;
+    private PairRound? _accepting, _requesting;
     private int _peersChangedQueued;
     private int _disposed;
 
-    private sealed record Nearby(SyncMessage Msg, IPEndPoint Ep, DateTimeOffset Seen, DateTimeOffset FirstSeen);
+    /// <param name="Member">The announcement carried a valid MAC under the key of the group
+    /// it claims, which was this node's group at the time.</param>
+    private sealed record Nearby(SyncMessage Msg, IPEndPoint Ep, DateTimeOffset Seen, DateTimeOffset FirstSeen, bool Member);
+
+    /// <summary>Announced by a member of this node's current group.</summary>
+    private static bool IsMember(Nearby n, string group) => n.Member && n.Msg.Group == group;
 
     public event Action? PeersChanged;
     /// <summary>A pairing needs this device's user: on the accepting device when the
@@ -192,7 +203,7 @@ public sealed class SyncEngine : IDisposable
         var now = DateTimeOffset.UtcNow;
         foreach (var (node, n) in _nearby)
             if (now - n.Seen <= PeerExpiry)
-                result[node] = new PeerInfo(node, Protocol.CleanName(n.Msg.Name, node[..8]), n.Msg.Group == group, false, n.Ep.Address.ToString());
+                result[node] = new PeerInfo(node, Protocol.CleanName(n.Msg.Name, node[..8]), IsMember(n, group), false, n.Ep.Address.ToString());
         lock (_lock)
         {
             foreach (var (node, s) in _sessions)
@@ -262,12 +273,17 @@ public sealed class SyncEngine : IDisposable
     private SyncMessage Presence(string type)
     {
         var id = Identity;
-        return new SyncMessage
+        var m = new SyncMessage
         {
             Type = type, App = Protocol.App, Proto = Protocol.Version,
             Node = id.NodeId, Name = id.Name, Group = id.GroupId, Port = ListenPort,
         };
+        if (type == MessageTypes.Announce) m.Mac = SyncCrypto.AnnouncementMac(id.GroupKey, m);
+        return m;
     }
+
+    /// <summary>What this node announces on the LAN.</summary>
+    internal SyncMessage Announcement() => Presence(MessageTypes.Announce);
 
     private async Task AcceptLoopAsync(CancellationToken ct)
     {
@@ -342,17 +358,14 @@ public sealed class SyncEngine : IDisposable
     private void OnSessionClosed(PeerSession s)
     {
         bool wasCurrent;
+        PairRound? round;
         lock (_lock)
         {
             _allSessions.Remove(s);
             wasCurrent = s.PeerNode is not null && _sessions.TryGetValue(s.PeerNode, out var cur) && cur == s && _sessions.Remove(s.PeerNode);
+            round = s.Round;
         }
-        if (s.PairStarted && !s.PairCompleted)
-        {
-            if (s.PairInitiator)
-                PairProgressed?.Invoke(new PairProgress(s.PeerNode ?? "", s.PeerName ?? "?", PairStage.Failed, s.PairCode, "The connection was lost."));
-            EndPairing(s);
-        }
+        if (round is not null) EndPairing(s, round, PairStage.Failed, "The connection was lost.");
         if (!wasCurrent) return;
         _log?.Invoke($"Disconnected from {s.Describe()}.");
         // Only for this group: sessions closed by leaving a group must not bring the old
@@ -364,29 +377,35 @@ public sealed class SyncEngine : IDisposable
     internal void OnAnnounced(SyncMessage msg, IPAddress from)
     {
         var node = msg.Node!;
+        var id = Identity;
         var now = DateTimeOffset.UtcNow;
         var ep = new IPEndPoint(from, msg.Port!.Value);
+        // Anyone on the LAN can announce anything, and our group's ID is no secret (every
+        // announcement carries it), so only the MAC makes a device a member here. A claim to
+        // the group without it is a forgery, and dropped.
+        bool member = msg.Group == id.GroupId;
+        if (member && !SyncCrypto.HasValidMac(id.GroupKey, msg)) return;
         bool known = _nearby.TryGetValue(node, out var old);
+        // Nor may a stranger's announcement give a member's ID and push the member out.
+        if (known && !member && IsMember(old!, id.GroupId) && now - old!.Seen <= PeerExpiry) return;
         if (!known && _nearby.Count >= MaxNearby)
         {
-            // Full (a flood of made-up devices, likely): make room for a device of our own
-            // group, or one we've been linked with, by dropping the stalest stranger.
-            var id0 = Identity;
-            if (msg.Group != id0.GroupId && _options.IsLinkedPeer?.Invoke(node) != true) return;
-            var victim = _nearby.Where(kv => kv.Value.Msg.Group != id0.GroupId && _options.IsLinkedPeer?.Invoke(kv.Key) != true)
+            // Full (a flood of made-up devices, likely): a member still gets in, in place of
+            // the stalest stranger.
+            if (!member) return;
+            var victim = _nearby.Where(kv => !IsMember(kv.Value, id.GroupId))
                 .OrderBy(kv => kv.Value.Seen).Select(kv => kv.Key).FirstOrDefault();
             if (victim is null) return;
             _nearby.TryRemove(victim, out _);
         }
-        _nearby[node] = new Nearby(msg, ep, now, old?.FirstSeen ?? now);
+        _nearby[node] = new Nearby(msg, ep, now, old?.FirstSeen ?? now, member);
         if (!known) RaisePeersChanged();
 
         // As in LanLink, the node with the lower ID dials, so two peers don't open two
         // connections to each other; but if nothing connects for a while (a firewall may be
         // refusing the lower one's dials), the higher one tries too. Only group members are
         // dialled; others wait for a pairing.
-        var id = Identity;
-        if (msg.Group != id.GroupId) return;
+        if (!member) return;
         lock (_lock) if (_sessions.ContainsKey(node)) { _nearby[node] = _nearby[node] with { FirstSeen = now }; return; }
         if (string.CompareOrdinal(id.NodeId, node) < 0 || now - (old?.FirstSeen ?? now) > HigherIdFallback)
             _ = DialNodeAsync(node, ep);
@@ -419,6 +438,9 @@ public sealed class SyncEngine : IDisposable
         bool failureLogged = false;
         while (!ct.IsCancellationRequested)
         {
+            // Taken before dialling, so that a change of group (pairing, leaving) at any
+            // moment from here on cuts the wait below short: the next try should work.
+            var kick = Volatile.Read(ref _kick).Task;
             bool alreadyLinked;
             lock (_lock) alreadyLinked = knownNode is not null && _sessions.TryGetValue(knownNode, out var cur) && cur.Authenticated;
             if (!alreadyLinked)
@@ -427,12 +449,13 @@ public sealed class SyncEngine : IDisposable
                 bool good = false;
                 if (s is not null)
                 {
-                    var closed = new TaskCompletionSource();
+                    var closed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
                     s.Closed += _ => closed.TrySetResult();
                     if (s.IsClosed) closed.TrySetResult();
-                    await Task.WhenAny(closed.Task, Task.Delay(Timeout.Infinite, ct)).ConfigureAwait(false);
+                    using (ct.Register(() => closed.TrySetResult())) await closed.Task.ConfigureAwait(false);
+                    if (ct.IsCancellationRequested) break;
                     knownNode = s.PeerNode ?? knownNode;
-                    if (s.PairCompleted)
+                    if (s.LinkedJustNow)
                     {
                         // Linked just now: reconnect under the shared group straight away.
                         delay = first;
@@ -450,9 +473,12 @@ public sealed class SyncEngine : IDisposable
                     delay = TimeSpan.FromSeconds(Math.Min(60, Math.Max(delay.TotalSeconds * 2, first.TotalSeconds)));
                 }
             }
-            // A change of group (pairing, leaving) cuts the wait short: the next try should work.
-            var kick = Volatile.Read(ref _kick).Task;
-            await Task.WhenAny(Task.Delay(delay, ct), kick).ConfigureAwait(false);
+            if (!kick.IsCompleted)
+            {
+                using var wait = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                await Task.WhenAny(Task.Delay(delay, wait.Token), kick).ConfigureAwait(false);
+                wait.Cancel();   // ends the delay when the kick came first
+            }
             if (ct.IsCancellationRequested) break;
             if (kick.IsCompleted) delay = first;
         }
@@ -468,19 +494,29 @@ public sealed class SyncEngine : IDisposable
     {
         while (!ct.IsCancellationRequested)
         {
-            try { await Task.Delay(TimeSpan.FromSeconds(5), ct).ConfigureAwait(false); }
+            try { await Task.Delay(_options.HousekeepingInterval, ct).ConfigureAwait(false); }
             catch (OperationCanceledException) { break; }
             var now = DateTimeOffset.UtcNow;
             bool expired = false;
             foreach (var (node, entry) in _nearby)
                 if (now - entry.Seen > PeerExpiry && _nearby.TryRemove(node, out _)) expired = true;
-            List<PeerSession> stale;
+            List<PeerSession> idle;
+            List<(PeerSession Session, PairRound Round)> unanswered;
             var group = Identity.GroupId;
             lock (_lock)
-                stale = _allSessions.Where(s => s.PeerGroup != group && (s.PairStarted
-                    ? now - s.PairStartedAt > PairingTimeout
-                    : !s.IsOutgoing && now - s.Opened > UnlinkedIdleTimeout)).ToList();
-            foreach (var s in stale) s.Close();
+            {
+                idle = _allSessions.Where(s => s.PeerGroup != group && s.Round is null && !s.IsOutgoing
+                    && now - s.LastActive > _options.UnlinkedIdleTimeout).ToList();
+                unanswered = _allSessions.Where(s => s.Round is { } r && now - r.StartedAt > _options.PairingTimeout)
+                    .Select(s => (s, s.Round!)).ToList();
+            }
+            foreach (var s in idle) s.Close();
+            foreach (var (s, r) in unanswered)
+            {
+                s.LinkedJustNow = false;
+                _ = s.SendAsync(new SyncMessage { Type = MessageTypes.PairReject, Round = r.Id, Reason = "timeout" });
+                EndPairing(s, r, PairStage.Failed, "Nobody answered in time.");
+            }
             if (expired) RaisePeersChanged();
         }
     }
@@ -516,36 +552,9 @@ public sealed class SyncEngine : IDisposable
                 case MessageTypes.PairRequest when !s.Sealed:
                     OnPairRequest(s, m);
                     break;
-                case MessageTypes.PairChallenge when !s.Sealed && s.PairInitiator && s.PairPeerPublic is null:
-                    OnPairChallenge(s, m);
-                    break;
-                case MessageTypes.PairReveal when !s.Sealed && s.PairStarted && !s.PairInitiator && s.PairPeerPublic is null:
-                    OnPairReveal(s, m);
-                    break;
-                case MessageTypes.PairAccept when !s.Sealed && s.PairInitiator && s.PairSecret is not null && !s.PeerAccepted:
-                    s.PeerAccepted = true;
-                    s.PeerSealedGroup = m.Sealed;
-                    TryCompleteAsRequester(s);
-                    break;
-                case MessageTypes.PairGroup when !s.Sealed && s.PairStarted && !s.PairInitiator && s.LocalAccepted && !s.RequesterJoins:
-                    // Only ever after this device's user accepted: a group pushed at any other
-                    // moment would let anyone pull this device into their group unasked.
-                    Adopt(s, m.Sealed, SyncCrypto.RequesterGroupCounter);
-                    break;
-                case MessageTypes.PairAccept or MessageTypes.PairGroup or MessageTypes.PairChallenge or MessageTypes.PairReveal
-                    when !s.Sealed && !s.PairStarted:
-                    // Late, for a pairing already over on this side (each user answers on
-                    // their own device, so the two ends finish at different moments): ignored,
-                    // keeping the connection free for another try.
-                    break;
-                case MessageTypes.PairReject when !s.Sealed:
-                    // Likewise a late "no" (the accepter handed over its group, then the
-                    // requester's user declined) needs nothing.
-                    if (!s.PairStarted) break;
-                    if (s.PairInitiator)
-                        PairProgressed?.Invoke(new PairProgress(s.PeerNode, s.PeerName!, PairStage.Rejected, s.PairCode,
-                            m.Reason == "busy" ? $"{s.PeerName} is busy linking another device." : $"{s.PeerName} said no."));
-                    EndPairing(s);
+                case MessageTypes.PairChallenge or MessageTypes.PairReveal or MessageTypes.PairAccept
+                    or MessageTypes.PairGroup or MessageTypes.PairReject when !s.Sealed:
+                    OnPairMessage(s, m);
                     break;
                 default:
                     _log?.Invoke($"Unexpected {m.Type} from {s.Describe()}; closing.");
@@ -557,6 +566,9 @@ public sealed class SyncEngine : IDisposable
         {
             // Whatever a peer sends, the worst it may cause is the end of its own session.
             _log?.Invoke($"Bad {m.Type} from {s.Describe()}: {e.Message}");
+            PairRound? round;
+            lock (_lock) round = s.Round;
+            if (round is not null) EndPairing(s, round, PairStage.Failed, $"{s.PeerName ?? "The other device"} sent something invalid.");
             s.Close();
         }
     }
@@ -583,7 +595,7 @@ public sealed class SyncEngine : IDisposable
             // pairing) off its connection. A session claiming the group takes over only once
             // it proves the key (OnAuthenticated).
             installed = !claimsLinkedDevice
-                && (old is null || old.IsClosed || (!old.Authenticated && !old.Sealed && !old.PairStarted));
+                && (old is null || old.IsClosed || (!old.Authenticated && !old.Sealed && old.Round is null));
             if (installed)
             {
                 if (old is not null && old != s) replaced = old;
@@ -650,13 +662,18 @@ public sealed class SyncEngine : IDisposable
     //                                                        {} if A joins   (A's user said yes)
     //   when R's user says yes too:
     //     R joins: adopts A's group;  A joins: pair_group {R's group, sealed} →
+    //   either user's no, or the timeout: pair_reject →
     //
     // R commits before seeing A's key and A reveals before seeing R's, so nobody in the
     // middle can choose a key that makes the two codes agree. Each side links only on its
     // own user's yes, so no device can be pulled into a group, or handed its group's key,
     // without the person in front of it comparing the codes. The device linked with fewer
     // others joins, so linking a new device from an established one brings the new one in.
-    // One pairing at a time on each side.
+    //
+    // Every message after the request names its round (the commitment), and each side keeps
+    // a round open until it is decided for both, so a message from an earlier try never acts
+    // on a later one, however the two users' answers interleave. One round at a time on each
+    // side, and per connection.
 
     private int LinkedCount() => Math.Clamp(_options.LinkedDeviceCount?.Invoke() ?? 0, 0, 10_000);
 
@@ -684,81 +701,133 @@ public sealed class SyncEngine : IDisposable
             PairProgressed?.Invoke(new PairProgress(node, s.PeerName!, PairStage.Accepted, null, "Already linked."));
             return;
         }
+        int members = LinkedCount();
+        var key = SyncCrypto.NewPairingKey();
+        var pub = key.ExportSubjectPublicKeyInfo();
+        var round = new PairRound { Initiator = true, Key = key, Public = pub, Commit = SyncCrypto.Commitment(pub, members), MyMembers = members };
+        bool busy;
         lock (_lock)
         {
-            if (s.PairStarted || (_requesting is { IsClosed: false } r && r != s))
-            {
-                PairProgressed?.Invoke(new PairProgress(node, s.PeerName!, PairStage.Failed, null, "Another link is already under way."));
-                return;
-            }
-            _requesting = s;
-            s.PairStarted = true;
-            s.PairStartedAt = DateTimeOffset.UtcNow;
-            s.PairInitiator = true;
+            // Under the lock, and only if the session is open: a session closed before the
+            // round is installed would never end it, holding the one-at-a-time slot for good.
+            busy = s.IsClosed || s.Round is not null || _requesting is { Ended: false };
+            if (!busy) { _requesting = round; s.Round = round; s.LastActive = DateTimeOffset.UtcNow; }
         }
-        s.MyMembers = LinkedCount();
-        s.PairKey = SyncCrypto.NewPairingKey();
-        s.PairPublic = s.PairKey.ExportSubjectPublicKeyInfo();
-        await s.SendAsync(new SyncMessage
+        if (busy)
         {
-            Type = MessageTypes.PairRequest,
-            Commit = Convert.ToBase64String(SyncCrypto.Commitment(s.PairPublic, s.MyMembers)),
-            Members = s.MyMembers,
-        }).ConfigureAwait(false);
+            key.Dispose();
+            PairProgressed?.Invoke(new PairProgress(node, s.PeerName!, PairStage.Failed, null,
+                s.IsClosed ? "The connection was lost." : "Another link is already under way."));
+            return;
+        }
+        await s.SendAsync(new SyncMessage { Type = MessageTypes.PairRequest, Commit = round.Id, Members = members }).ConfigureAwait(false);
     }
 
     /// <summary>Accepter: answer with our key, if no other pairing is under way.</summary>
     private void OnPairRequest(PeerSession s, SyncMessage m)
     {
         var commit = Convert.FromBase64String(m.Commit ?? "");
+        if (commit.Length != 32) throw new InvalidDataException("A pairing request without a commitment.");
+        var key = SyncCrypto.NewPairingKey();
+        var round = new PairRound
+        {
+            Initiator = false, Key = key, Public = key.ExportSubjectPublicKeyInfo(), Commit = commit,
+            MyMembers = LinkedCount(), PeerMembers = Math.Clamp(m.Members ?? 0, 0, 10_000),
+        };
         bool busy;
         lock (_lock)
         {
-            busy = s.PairStarted || commit.Length != 32 || (_accepting is { IsClosed: false } a && a != s);
-            if (!busy) { _accepting = s; s.PairStarted = true; s.PairStartedAt = DateTimeOffset.UtcNow; }
+            busy = s.IsClosed || s.Round is not null || _accepting is { Ended: false };
+            if (!busy) { _accepting = round; s.Round = round; s.LastActive = DateTimeOffset.UtcNow; }
         }
         if (busy)
         {
-            _ = s.SendAsync(new SyncMessage { Type = MessageTypes.PairReject, Reason = "busy" });
+            key.Dispose();
+            _ = s.SendAsync(new SyncMessage { Type = MessageTypes.PairReject, Round = round.Id, Reason = "busy" });
             return;
         }
-        s.PairCommit = commit;
-        s.PeerMembers = Math.Clamp(m.Members ?? 0, 0, 10_000);
-        s.MyMembers = LinkedCount();
-        s.PairKey = SyncCrypto.NewPairingKey();
-        s.PairPublic = s.PairKey.ExportSubjectPublicKeyInfo();
-        _ = s.SendAsync(new SyncMessage { Type = MessageTypes.PairChallenge, PairKey = Convert.ToBase64String(s.PairPublic), Members = s.MyMembers });
+        _ = s.SendAsync(new SyncMessage
+        {
+            Type = MessageTypes.PairChallenge, Round = round.Id, PairKey = Convert.ToBase64String(round.Public), Members = round.MyMembers,
+        });
+    }
+
+    /// <summary>Every pairing message after the request: acted on only within its own round.</summary>
+    private void OnPairMessage(PeerSession s, SyncMessage m)
+    {
+        PairRound? round;
+        lock (_lock) round = s.Round;
+        // For a round already over on this side (each user answers on their own device, so
+        // the two ends finish at different moments), or none at all: ignored, leaving the
+        // connection free for another try.
+        if (round is null || m.Round != round.Id) return;
+        switch (m.Type)
+        {
+            case MessageTypes.PairChallenge when round.Initiator && round.PeerPublic is null:
+                OnPairChallenge(s, round, m);
+                break;
+            case MessageTypes.PairReveal when !round.Initiator && round.PeerPublic is null:
+                OnPairReveal(s, round, m);
+                break;
+            case MessageTypes.PairAccept when round.Initiator && round.Secret is not null:
+                lock (round.Gate)
+                {
+                    if (round.PeerAccepted) throw new InvalidDataException("A second pair_accept.");
+                    round.PeerSealedGroup = m.Sealed;
+                    round.PeerAccepted = true;
+                }
+                TryCompleteAsRequester(s, round);
+                break;
+            case MessageTypes.PairGroup when !round.Initiator && round.LocalAccepted && !round.RequesterJoins:
+                // Only ever after this device's user said yes: a group pushed at any other
+                // moment would let anyone pull this device into their group unasked.
+                Adopt(s, round, m.Sealed, SyncCrypto.RequesterGroupCounter);
+                break;
+            case MessageTypes.PairReject:
+                s.LinkedJustNow = false;
+                EndPairing(s, round, PairStage.Rejected, m.Reason switch
+                {
+                    "busy" => $"{s.PeerName} is busy linking another device.",
+                    "timeout" => "Nobody answered in time.",
+                    _ => $"{s.PeerName} said no.",
+                });
+                break;
+            default:
+                throw new InvalidDataException($"Unexpected {m.Type} in a pairing.");
+        }
     }
 
     /// <summary>Requester: reveal our key, work out the code, and ask our user.</summary>
-    private void OnPairChallenge(PeerSession s, SyncMessage m)
+    private void OnPairChallenge(PeerSession s, PairRound round, SyncMessage m)
     {
         var theirs = Convert.FromBase64String(m.PairKey ?? "");
-        s.PairPeerPublic = theirs;
-        s.PeerMembers = Math.Clamp(m.Members ?? 0, 0, 10_000);
-        (s.PairSecret, s.PairCode) = SyncCrypto.PairingSecret(s.PairKey!, theirs,
-            requesterKey: s.PairPublic!, accepterKey: theirs, requesterMembers: s.MyMembers, accepterMembers: s.PeerMembers);
-        s.RequesterJoins = s.MyMembers <= s.PeerMembers;
-        _ = s.SendAsync(new SyncMessage { Type = MessageTypes.PairReveal, PairKey = Convert.ToBase64String(s.PairPublic!) });
-        PairProgressed?.Invoke(new PairProgress(s.PeerNode!, s.PeerName!, PairStage.CodeShown, s.PairCode, null));
-        Ask(s, isRequester: true, thisDeviceJoins: s.RequesterJoins);
+        round.PeerMembers = Math.Clamp(m.Members ?? 0, 0, 10_000);
+        (round.Secret, round.Code) = SyncCrypto.PairingSecret(round.Key, theirs,
+            requesterKey: round.Public, accepterKey: theirs, requesterMembers: round.MyMembers, accepterMembers: round.PeerMembers);
+        round.PeerPublic = theirs;
+        round.RequesterJoins = round.MyMembers <= round.PeerMembers;
+        round.Key.Dispose();
+        _ = s.SendAsync(new SyncMessage { Type = MessageTypes.PairReveal, Round = round.Id, PairKey = Convert.ToBase64String(round.Public) });
+        PairProgressed?.Invoke(new PairProgress(s.PeerNode!, s.PeerName!, PairStage.CodeShown, round.Code, null));
+        Ask(s, round);
     }
 
     /// <summary>Accepter: check the revealed key against the commitment, work out the code,
     /// and ask our user.</summary>
-    private void OnPairReveal(PeerSession s, SyncMessage m)
+    private void OnPairReveal(PeerSession s, PairRound round, SyncMessage m)
     {
         var theirs = Convert.FromBase64String(m.PairKey ?? "");
-        if (!CryptographicOperations.FixedTimeEquals(SyncCrypto.Commitment(theirs, s.PeerMembers), s.PairCommit))
+        if (!CryptographicOperations.FixedTimeEquals(SyncCrypto.Commitment(theirs, round.PeerMembers), round.Commit))
             throw new CryptographicException("The revealed pairing key doesn't match its commitment.");
-        s.PairPeerPublic = theirs;
-        (s.PairSecret, s.PairCode) = SyncCrypto.PairingSecret(s.PairKey!, theirs,
-            requesterKey: theirs, accepterKey: s.PairPublic!, requesterMembers: s.PeerMembers, accepterMembers: s.MyMembers);
-        s.RequesterJoins = s.PeerMembers <= s.MyMembers;
-        Ask(s, isRequester: false, thisDeviceJoins: !s.RequesterJoins);
+        (round.Secret, round.Code) = SyncCrypto.PairingSecret(round.Key, theirs,
+            requesterKey: theirs, accepterKey: round.Public, requesterMembers: round.PeerMembers, accepterMembers: round.MyMembers);
+        round.PeerPublic = theirs;
+        round.RequesterJoins = round.PeerMembers <= round.MyMembers;
+        round.Key.Dispose();
+        Ask(s, round);
     }
 
-    private void Ask(PeerSession s, bool isRequester, bool thisDeviceJoins)
+    private void Ask(PeerSession s, PairRound round)
     {
         int answered = 0;
         PairPrompt? prompt = null;
@@ -766,121 +835,130 @@ public sealed class SyncEngine : IDisposable
         {
             PeerNode = s.PeerNode!,
             PeerName = s.PeerName!,
-            Code = s.PairCode!,
-            IsRequester = isRequester,
-            ThisDeviceJoins = thisDeviceJoins,
-            MyLinkedDevices = s.MyMembers,
-            Answer = accept => Interlocked.Exchange(ref answered, 1) != 0 ? Task.CompletedTask : AnswerAsync(s, prompt!, accept),
+            Code = round.Code!,
+            IsRequester = round.Initiator,
+            ThisDeviceJoins = round.Initiator ? round.RequesterJoins : !round.RequesterJoins,
+            MyLinkedDevices = round.MyMembers,
+            Answer = accept => Interlocked.Exchange(ref answered, 1) != 0 ? Task.CompletedTask : AnswerAsync(s, round, prompt!, accept),
         };
-        s.Prompt = prompt;
+        lock (round.Gate)
+        {
+            if (round.Ended) return;
+            round.Prompt = prompt;
+        }
         PairRequested?.Invoke(prompt);
     }
 
     /// <summary>This device's user answered <paramref name="prompt"/> (on either side). An
-    /// answer counts only for the pairing it was asked about: a prompt left over from an
-    /// earlier pairing on the same connection answers nothing.</summary>
-    private async Task AnswerAsync(PeerSession s, PairPrompt prompt, bool accept)
+    /// answer counts only for the round it was asked about, and acts only on that round.</summary>
+    private async Task AnswerAsync(PeerSession s, PairRound round, PairPrompt prompt, bool accept)
     {
         try
         {
-            lock (s)
+            lock (round.Gate)
             {
-                if (s.IsClosed || s.PairSecret is null || s.Prompt != prompt) return;
-                s.Prompt = null;
-                if (accept) s.LocalAccepted = true;
+                if (round.Ended || round.Prompt != prompt) return;
+                round.Prompt = null;
+                if (accept) round.LocalAccepted = true;
             }
             if (!accept)
             {
-                await s.SendAsync(new SyncMessage { Type = MessageTypes.PairReject }).ConfigureAwait(false);
-                if (s.PairInitiator) PairProgressed?.Invoke(new PairProgress(s.PeerNode!, s.PeerName!, PairStage.Rejected, s.PairCode, "Linking cancelled."));
-                EndPairing(s);
+                await s.SendAsync(new SyncMessage { Type = MessageTypes.PairReject, Round = round.Id }).ConfigureAwait(false);
+                EndPairing(s, round, PairStage.Rejected, "Linking cancelled.");
                 return;
             }
-            if (s.PairInitiator)
+            if (round.Initiator)
             {
-                TryCompleteAsRequester(s);
+                TryCompleteAsRequester(s, round);
                 return;
             }
             // Accepter: say yes, handing over our group if the requester is the one joining.
-            // Nothing is final here: the requester's user may still decline, so the pairing
-            // is simply over on this side, and the connection free for another try.
-            var sealedGroup = s.RequesterJoins ? SealGroup(s, SyncCrypto.AccepterGroupCounter) : null;
-            await s.SendAsync(new SyncMessage { Type = MessageTypes.PairAccept, Sealed = sealedGroup }).ConfigureAwait(false);
-            if (s.RequesterJoins)
-            {
-                EndPairing(s);
-                _log?.Invoke($"Accepted the link with {s.Describe()}.");
-            }
+            // Nothing is final yet: the round stays open until the requester's user answers
+            // too (with pair_group, or by joining and reconnecting, or with a no), or it times out.
+            if (round.RequesterJoins) s.LinkedJustNow = true;
+            var sealedGroup = round.RequesterJoins ? SealGroup(round, SyncCrypto.AccepterGroupCounter) : null;
+            await s.SendAsync(new SyncMessage { Type = MessageTypes.PairAccept, Round = round.Id, Sealed = sealedGroup }).ConfigureAwait(false);
+            if (round.RequesterJoins) _log?.Invoke($"Accepted the link with {s.Describe()}.");
         }
         catch (Exception e)
         {
             // An answer goes through a Task the screen discards: report here, not into the void.
             _log?.Invoke($"Linking with {s.Describe()} failed: {e.Message}");
-            if (s.PairInitiator) PairProgressed?.Invoke(new PairProgress(s.PeerNode ?? "", s.PeerName ?? "?", PairStage.Failed, s.PairCode, e.Message));
+            EndPairing(s, round, PairStage.Failed, e.Message);
             s.Close();
         }
     }
 
     /// <summary>Requester: once both users have said yes, join the accepter's group or send
     /// ours. Called from the read loop (pair_accept) and from the answer (the user's yes);
-    /// the lock and <see cref="PeerSession.PairFinishing"/> make exactly one of them finish.</summary>
-    private void TryCompleteAsRequester(PeerSession s)
+    /// <see cref="PairRound.Finishing"/>, set under the round's lock, makes exactly one of
+    /// them finish.</summary>
+    private void TryCompleteAsRequester(PeerSession s, PairRound round)
     {
-        lock (s)
+        lock (round.Gate)
         {
-            if (!s.LocalAccepted || !s.PeerAccepted || s.PairFinishing) return;
-            s.PairFinishing = true;
+            if (round.Ended || !round.LocalAccepted || !round.PeerAccepted || round.Finishing) return;
+            round.Finishing = true;
         }
-        var (node, name, code) = (s.PeerNode!, s.PeerName!, s.PairCode);
-        if (s.RequesterJoins)
+        var (node, name, code) = (s.PeerNode!, s.PeerName!, round.Code);
+        if (round.RequesterJoins)
         {
-            Adopt(s, s.PeerSealedGroup, SyncCrypto.AccepterGroupCounter);
+            Adopt(s, round, round.PeerSealedGroup, SyncCrypto.AccepterGroupCounter);
             PairProgressed?.Invoke(new PairProgress(node, name, PairStage.Accepted, code, null));
             return;
         }
-        s.PairCompleted = true;
-        _ = s.SendAsync(new SyncMessage { Type = MessageTypes.PairGroup, Sealed = SealGroup(s, SyncCrypto.RequesterGroupCounter) });
-        EndPairing(s);
+        s.LinkedJustNow = true;
+        _ = s.SendAsync(new SyncMessage { Type = MessageTypes.PairGroup, Round = round.Id, Sealed = SealGroup(round, SyncCrypto.RequesterGroupCounter) });
         _log?.Invoke($"{s.Describe()} joins this device's sync group.");
-        PairProgressed?.Invoke(new PairProgress(node, name, PairStage.Accepted, code, null));
+        EndPairing(s, round, PairStage.Accepted);
     }
 
-    /// <summary>Ends a pairing on <paramref name="s"/>: frees the one-at-a-time slot,
-    /// withdraws a prompt nobody answered, and (unless it linked) forgets the pairing so the
-    /// two can try again.</summary>
-    private void EndPairing(PeerSession s)
+    /// <summary>Ends <paramref name="round"/> (once; later calls do nothing): frees the
+    /// one-at-a-time slots, withdraws a prompt nobody answered, and on the requesting side
+    /// reports <paramref name="stage"/>, if given, with <paramref name="message"/>.</summary>
+    private void EndPairing(PeerSession s, PairRound round, PairStage? stage = null, string? message = null)
     {
-        var prompt = s.Prompt;
+        PairPrompt? prompt;
+        lock (round.Gate)
+        {
+            if (round.Ended) return;
+            round.Ended = true;
+            prompt = round.Prompt;
+            round.Prompt = null;
+        }
         lock (_lock)
         {
-            if (_accepting == s) _accepting = null;
-            if (_requesting == s) _requesting = null;
+            if (_accepting == round) _accepting = null;
+            if (_requesting == round) _requesting = null;
+            if (s.Round == round) s.Round = null;
+            s.LastActive = DateTimeOffset.UtcNow;
         }
+        round.Key.Dispose();
         prompt?.Withdraw();
-        if (!s.PairCompleted) s.ResetPairing();
-        else s.Prompt = null;
+        if (round.Initiator && stage is { } st)
+            PairProgressed?.Invoke(new PairProgress(s.PeerNode ?? "", s.PeerName ?? "?", st, round.Code, message));
     }
 
-    private string SealGroup(PeerSession s, ulong counter)
+    private string SealGroup(PairRound round, ulong counter)
     {
         var id = Identity;
         var payload = JsonSerializer.SerializeToUtf8Bytes([id.GroupId, id.GroupKeyBase64], Json.Wire.StringArray);
-        return Convert.ToBase64String(SyncCrypto.Seal(s.PairSecret!, counter, payload));
+        return Convert.ToBase64String(SyncCrypto.Seal(round.Secret!, counter, payload));
     }
 
     /// <summary>Joins the group sealed in <paramref name="sealedGroup"/>, then reconnects
     /// everything under it.</summary>
-    private void Adopt(PeerSession s, string? sealedGroup, ulong counter)
+    private void Adopt(PeerSession s, PairRound round, string? sealedGroup, ulong counter)
     {
-        var plain = SyncCrypto.Open(s.PairSecret!, counter, Convert.FromBase64String(sealedGroup ?? ""));
+        var plain = SyncCrypto.Open(round.Secret!, counter, Convert.FromBase64String(sealedGroup ?? ""));
         var parts = JsonSerializer.Deserialize(plain, Json.Wire.StringArray);
         if (parts is not [var groupId, var groupKey] || !Protocol.IsValidNodeId(groupId) || Convert.FromBase64String(groupKey).Length != 32)
             throw new CryptographicException("Malformed group.");
         var peerEp = s.RemoteEndPoint;
         var peerPort = s.PeerPort;
         var remote = s.RemoteAddress;
-        s.PairCompleted = true;
-        EndPairing(s);
+        s.LinkedJustNow = true;
+        EndPairing(s, round);
         SyncIdentity adopted;
         lock (_lock) adopted = _id = _id with { GroupId = groupId, GroupKeyBase64 = groupKey };
         IdentityChanged?.Invoke(adopted);

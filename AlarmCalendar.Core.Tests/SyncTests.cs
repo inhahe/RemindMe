@@ -24,22 +24,27 @@ public sealed class SyncTests : IDisposable
         TimeSpan reconnectDelay, params string[] remotes) => Node(id, linkedDevices, log, reconnectDelay, IPAddress.Loopback, remotes);
 
     private (SyncEngine engine, TaskStore store) Node(SyncIdentity id, int linkedDevices, List<string>? log,
-        TimeSpan reconnectDelay, IPAddress bind, params string[] remotes)
+        TimeSpan reconnectDelay, IPAddress bind, params string[] remotes) =>
+        Node(id, Options(linkedDevices, reconnectDelay, bind, remotes), log);
+
+    private (SyncEngine engine, TaskStore store) Node(SyncIdentity id, SyncOptions options, List<string>? log = null)
     {
         var store = new TaskStore(null, id.NodeId, SystemClock.Instance);
-        var engine = new SyncEngine(store, id, new SyncOptions
-        {
-            Port = 0,
-            BindAddress = bind,
-            EnableDiscovery = false,
-            RemoteAddresses = remotes,
-            ReconnectDelay = reconnectDelay,
-            LinkedDeviceCount = () => linkedDevices,
-        }, log is null ? null : line => { lock (log) log.Add(line); });
+        var engine = new SyncEngine(store, id, options, log is null ? null : line => { lock (log) log.Add(line); });
         engine.Start();
         _engines.Add(engine);
         return (engine, store);
     }
+
+    private static SyncOptions Options(int linkedDevices, TimeSpan reconnectDelay, IPAddress bind, params string[] remotes) => new()
+    {
+        Port = 0,
+        BindAddress = bind,
+        EnableDiscovery = false,
+        RemoteAddresses = remotes,
+        ReconnectDelay = reconnectDelay,
+        LinkedDeviceCount = () => linkedDevices,
+    };
 
     private static string Addr(SyncEngine e) => $"127.0.0.1:{e.ListenPort}";
 
@@ -239,18 +244,19 @@ public sealed class SyncTests : IDisposable
         // Claim to be linked with many devices, so that A is the one to join.
         using var key = SyncCrypto.NewPairingKey();
         var pub = key.ExportSubjectPublicKeyInfo();
-        await evil.SendAsync(new SyncMessage { Type = MessageTypes.PairRequest, Commit = Convert.ToBase64String(SyncCrypto.Commitment(pub, 10_000)), Members = 10_000 });
+        var round = Convert.ToBase64String(SyncCrypto.Commitment(pub, 10_000));
+        await evil.SendAsync(new SyncMessage { Type = MessageTypes.PairRequest, Commit = round, Members = 10_000 });
         var challenge = (await evil.ReceiveAsync())!;
         var theirs = Convert.FromBase64String(challenge.PairKey!);
         var (secret, _) = SyncCrypto.PairingSecret(key, theirs, pub, theirs, 10_000, challenge.Members!.Value);
-        await evil.SendAsync(new SyncMessage { Type = MessageTypes.PairReveal, PairKey = Convert.ToBase64String(pub) });
+        await evil.SendAsync(new SyncMessage { Type = MessageTypes.PairReveal, Round = round, PairKey = Convert.ToBase64String(pub) });
         await WaitFor(() => prompt is not null, "A asked");
         Assert.True(prompt!.ThisDeviceJoins);
 
         // Push a group before A's user has answered.
         var sealedGroup = SyncCrypto.Seal(secret, SyncCrypto.RequesterGroupCounter,
             System.Text.Json.JsonSerializer.SerializeToUtf8Bytes([evilGroup, evilKey], Json.Wire.StringArray));
-        await evil.SendAsync(new SyncMessage { Type = MessageTypes.PairGroup, Sealed = Convert.ToBase64String(sealedGroup) });
+        await evil.SendAsync(new SyncMessage { Type = MessageTypes.PairGroup, Round = round, Sealed = Convert.ToBase64String(sealedGroup) });
         Assert.Null(await evil.ReceiveAsync());   // A hangs up on it
         Assert.Equal(a.GroupId, ea.Identity.GroupId);
     }
@@ -410,10 +416,128 @@ public sealed class SyncTests : IDisposable
                 Type = MessageTypes.Announce, App = Protocol.App, Node = Guid.NewGuid().ToString("N"),
                 Group = Guid.NewGuid().ToString("N"), Port = 9,
             }, IPAddress.Loopback);
-        var mine = Guid.NewGuid().ToString("N");
-        ea.OnAnnounced(new SyncMessage { Type = MessageTypes.Announce, App = Protocol.App, Node = mine, Group = a.GroupId, Port = 9 },
+        // Nor does a flood claiming our group, whose ID every announcement shows.
+        for (int i = 0; i < 300; i++)
+            ea.OnAnnounced(new SyncMessage
+            {
+                Type = MessageTypes.Announce, App = Protocol.App, Node = Guid.NewGuid().ToString("N"), Group = a.GroupId, Port = 9,
+            }, IPAddress.Loopback);
+        var (eb, _) = Node(NewIdentity("B", a.GroupId, a.GroupKeyBase64));
+        ea.OnAnnounced(eb.Announcement(), IPAddress.Loopback);
+        Assert.Contains(ea.Peers(), p => p.NodeId == eb.Identity.NodeId && p.Linked);
+    }
+
+    [Fact]
+    public void OnlyAMemberCanAnnounceItselfAsOne()
+    {
+        var a = NewIdentity("A");
+        var (ea, _) = Node(a);
+        var forged = Guid.NewGuid().ToString("N");
+        ea.OnAnnounced(new SyncMessage { Type = MessageTypes.Announce, App = Protocol.App, Node = forged, Group = a.GroupId, Port = 9 },
             IPAddress.Loopback);
-        Assert.Contains(ea.Peers(), p => p.NodeId == mine && p.Linked);
+        var (ex, _) = Node(NewIdentity("X", a.GroupId));   // the group's ID, but not its key
+        ea.OnAnnounced(ex.Announcement(), IPAddress.Loopback);
+        // A member that isn't listening (port 9), so no session to it can hide what the
+        // announcements alone do.
+        var b = Guid.NewGuid().ToString("N");
+        SyncMessage Member(int port)
+        {
+            var m = new SyncMessage { Type = MessageTypes.Announce, App = Protocol.App, Proto = Protocol.Version, Node = b, Name = "B", Group = a.GroupId, Port = port };
+            m.Mac = SyncCrypto.AnnouncementMac(Convert.FromBase64String(a.GroupKeyBase64), m);
+            return m;
+        }
+        var tampered = Member(9);
+        tampered.Port = 10;
+        ea.OnAnnounced(tampered, IPAddress.Loopback);
+        Assert.DoesNotContain(ea.Peers(), p => p.NodeId == forged || p.NodeId == ex.Identity.NodeId || p.NodeId == b);
+
+        ea.OnAnnounced(Member(9), IPAddress.Loopback);
+        Assert.Contains(ea.Peers(), p => p.NodeId == b && p.Linked);
+        // A stranger giving a member's ID can't push the member out.
+        ea.OnAnnounced(new SyncMessage
+        {
+            Type = MessageTypes.Announce, App = Protocol.App, Node = b, Group = Guid.NewGuid().ToString("N"), Port = 9,
+        }, IPAddress.Loopback);
+        Assert.Contains(ea.Peers(), p => p.NodeId == b && p.Linked);
+    }
+
+    [Fact]
+    public async Task AnAccepterKeepsThePairingOpenUntilTheRequesterAnswers()
+    {
+        // A, linked with others, says yes at once; B, which would join, answers well after A's
+        // idle timeout for connections from outside the group.
+        var quick = Options(2, TimeSpan.FromMilliseconds(200), IPAddress.Loopback) with
+        {
+            UnlinkedIdleTimeout = TimeSpan.FromSeconds(1.5), HousekeepingInterval = TimeSpan.FromMilliseconds(100),
+        };
+        var (ea, _) = Node(NewIdentity("A"), quick);
+        AutoAccept(ea);
+        var (eb, _) = Node(NewIdentity("B"), 0, null, Addr(ea));
+        PairPrompt? bPrompt = null;
+        eb.PairRequested += p => bPrompt = p;
+        await WaitFor(() => eb.Peers().Any(p => p.Connected), "B connected to A");
+        await eb.RequestPairingAsync(ea.Identity.NodeId);
+        await WaitFor(() => bPrompt is not null, "B asked");
+        await Task.Delay(3000);
+        await bPrompt!.AcceptAsync();
+        await WaitFor(() => eb.Identity.GroupId == ea.Identity.GroupId, "B joining A's group");
+    }
+
+    [Fact]
+    public async Task TheAccepterOfARemoteLinkReconnectsAtOnceAfterPairing()
+    {
+        // A dials B over a remote link with a long backoff; B, alone, asks to link and joins
+        // A's group. A listens on 127.0.0.2 while its connections come from 127.0.0.1, so B
+        // can't dial back: only A's link can reconnect them.
+        var (eb, sb) = Node(NewIdentity("B"), 0, null);
+        var (ea, sa) = Node(NewIdentity("A"), 2, null, TimeSpan.FromSeconds(30), IPAddress.Parse("127.0.0.2"), Addr(eb));
+        AutoAccept(ea);
+        AutoAccept(eb);
+        await WaitFor(() => eb.Peers().Any(p => p.Name == "A" && p.Connected), "A connected to B");
+        await eb.RequestPairingAsync(ea.Identity.NodeId);
+        await WaitFor(() => eb.Identity.GroupId == ea.Identity.GroupId, "B joining A's group");
+        var t = Add(sa, "after linking");
+        // Well inside the 30 s backoff: the link redialled as soon as the pairing closed it.
+        await WaitFor(() => sb.Get(t.Id) is not null, "A's task reaching B", timeoutMs: 8000);
+    }
+
+    [Fact]
+    public async Task AMessageFromAnEarlierRoundActsOnNothing()
+    {
+        var (ea, _) = Node(NewIdentity("A"));
+        var prompts = new List<PairPrompt>();
+        ea.PairRequested += p => { lock (prompts) prompts.Add(p); };
+        using var other = await RawPeer.ConnectAsync(ea);
+        await other.HelloAsync(Guid.NewGuid().ToString("N"));
+        Assert.Equal(MessageTypes.Hello, (await other.ReceiveAsync())!.Type);
+        await WaitFor(() => ea.Peers().Any(p => p.NodeId == other.Node), "A sees the other device");
+
+        async Task<string> ChallengeAsync()
+        {
+            var request = await other.ReceiveAsync();
+            Assert.Equal(MessageTypes.PairRequest, request?.Type);
+            using var key = SyncCrypto.NewPairingKey();
+            await other.SendAsync(new SyncMessage
+            {
+                Type = MessageTypes.PairChallenge, Round = request!.Commit, Members = 0,
+                PairKey = Convert.ToBase64String(key.ExportSubjectPublicKeyInfo()),
+            });
+            Assert.Equal(MessageTypes.PairReveal, (await other.ReceiveAsync())?.Type);   // null: A hung up
+            return request.Commit!;
+        }
+
+        // Round 1: A asks, and its user says no.
+        await ea.RequestPairingAsync(other.Node);
+        var round1 = await ChallengeAsync();
+        await WaitFor(() => { lock (prompts) return prompts.Count == 1; }, "A's user asked");
+        await prompts[0].RejectAsync();
+        Assert.Equal(MessageTypes.PairReject, (await other.ReceiveAsync())!.Type);
+
+        // Round 2 begins, and only then does the other device's yes to round 1 arrive.
+        await ea.RequestPairingAsync(other.Node);
+        await other.SendAsync(new SyncMessage { Type = MessageTypes.PairAccept, Round = round1 });
+        await ChallengeAsync();   // round 2 carries on as if nothing had come
+        await WaitFor(() => { lock (prompts) return prompts.Count == 2; }, "A's user asked again");
     }
 
     [Fact]
@@ -540,6 +664,15 @@ public sealed class SyncTests : IDisposable
     [InlineData("172.32.0.1", false)]
     public void LanAddressClassification(string ip, bool lan) =>
         Assert.Equal(lan, Protocol.IsPrivateOrLan(IPAddress.Parse(ip)));
+
+    [Theory]
+    [InlineData("2001:db8:1:2::5", "2001:db8:1:2::1", 64, true)]
+    [InlineData("2001:db8:1:3::5", "2001:db8:1:2::1", 64, false)]
+    [InlineData("2001:db8:9::5", "2001:db8::1", 32, false)]     // a prefix far wider than a LAN
+    [InlineData("203.0.113.7", "203.0.113.1", 24, false)]      // public IPv4: an ISP's subnet, maybe
+    [InlineData("192.168.1.5", "2001:db8::1", 64, true)]       // private, whatever the prefixes
+    public void OnlyANarrowIpv6PrefixWidensTheLan(string ip, string local, int length, bool lan) =>
+        Assert.Equal(lan, Protocol.IsLanAddress(IPAddress.Parse(ip), [(IPAddress.Parse(local), length)]));
 
     [Theory]
     [InlineData("example.com", "example.com", 37660)]

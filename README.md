@@ -84,7 +84,8 @@ Open **Devices…** (in the toolbar or the tray menu).
 - **On the same network**: other copies of the app appear by themselves. Select
   one and click **Link…**. Both devices then show a six-digit code and ask
   whether to link. Check that the two codes match, then accept on both; neither
-  links until its own user accepts.
+  links until its own user accepts. A request nobody answers is dropped after 5
+  minutes.
   The two devices then share all their tasks, and keep the tasks and their state
   in sync: mark a task done on one, and its alarm stops on the others. It doesn't
   matter which device you click Link on: the one linked with fewer devices joins
@@ -93,7 +94,9 @@ Open **Devices…** (in the toolbar or the tray menu).
 - **Over the internet**: on the device the others will reach, forward the port
   (37660 by default) to it and tick **Accept connections from outside the local
   network**. On the others, add its address (`host` or `host:port`) under
-  **Devices elsewhere**, then link as above.
+  **Devices elsewhere**, then link as above. With that box unticked, a device
+  accepts connections only from its local network: private addresses, and IPv6
+  addresses within its own network's prefix.
 - **Bridging**: a device linked to both a far device and the ones near it
   carries updates between them, so every linked device stays in sync.
 - **Leave the sync group…** stops this device syncing. It keeps its tasks, and the

@@ -176,8 +176,12 @@ separately (see *Simplification opportunities*).
 - **Port 37660**, TCP for sessions and UDP for discovery. Different from
   LanLink's 37656, so both apps can run on one machine.
 - **Discovery**: a UDP broadcast every 3 s on each interface's subnet broadcast
-  address: `{app, proto, node, name, port, group}`. `group` is the sync
-  group's public ID, not its secret.
+  address: `{app, proto, node, name, port, group, mac}`. `group` is the sync
+  group's public ID, not its secret, so claiming it proves nothing: `mac` is an
+  HMAC-SHA256 of the other fields under a key derived from the group secret, and
+  an announcement claiming this node's group without a valid one is dropped.
+  Only members so proven are shown as linked from announcements alone, and
+  dialled.
 - **Sessions**: frames of `[4B length][body]`. Each side sends a plaintext
   `hello`: `{node, name, group, nonce, proto}`. With the same group, both
   derive per-direction keys from the group secret and the two nonces (HKDF-SHA256),
@@ -186,7 +190,13 @@ separately (see *Simplification opportunities*).
   dials** (but if a same-group peer keeps announcing for 10 s with no session,
   the higher ID dials too, in case a firewall refuses the lower one), TCP
   keep-alive is on with `NoDelay`, and inbound connections from outside the LAN
-  are refused unless `AcceptExternalConnections` is set.
+  are refused unless `AcceptExternalConnections` is set. The LAN
+  (`Protocol.IsLanAddress`) is loopback, private and link-local addresses, plus
+  global IPv6 addresses inside a /64-or-longer prefix of one of this machine's
+  interfaces (not tunnels, PPP or loopback), which is how LAN peers often reach
+  each other over IPv6. Public IPv4 subnets and wider prefixes don't count: they
+  can span an ISP's other customers. The interface prefixes are cached, and
+  refreshed when the system reports an address change, or after 30 s.
 - **Hello proves nothing; the first sealed frame does.** That frame is a tiny
   `ready`, and a session is `Authenticated` once its peer's `ready` opens. The
   digest goes out only after that. It can be any size, while frames from a peer
@@ -195,13 +205,22 @@ separately (see *Simplification opportunities*).
 - **Takeover rules.** A fresh `hello` replaces a stale session (as in LanLink),
   but only one that is unsealed, unauthenticated and not pairing. A session
   claiming the group takes over only when it authenticates, and one that hasn't
-  authenticated within 15 s is closed. An inbound hello that gives the node ID of
-  a remembered linked device without the group (`IsLinkedPeer`) is refused.
-  Otherwise anyone on the LAN could knock a linked device off its connection, or
-  make it appear "not linked" and invite a re-link. Only authenticated sessions
-  receive broadcasts. Node IDs must be 32 hex digits, which makes the key labels
-  unambiguous. The protocol version in `hello` must match.
-- **Bounded noise.** At most 256 devices are remembered from announcements, and
+  authenticated within 15 s is closed. An inbound session whose hello gives the
+  node ID of a remembered linked device without the group (`IsLinkedPeer`) is
+  kept apart: it never speaks for that device (it isn't installed, so the device
+  isn't shown "not linked"), but it may ask to pair, so a device that left the
+  group can link again through the usual codes. Otherwise anyone on the LAN could
+  knock a linked device off its connection, or make it appear "not linked" and
+  invite a re-link. Only authenticated sessions receive broadcasts. Node IDs must
+  be 32 hex digits, which makes the key labels unambiguous. The protocol version
+  in `hello` must match.
+- **Bounded noise.** At most 256 devices are remembered from announcements. When
+  the table is full, a proven member still gets in, in place of the stalest
+  stranger, and a stranger's announcement can't take over a fresh member's
+  entry by giving its node ID. (A replayed member announcement from another
+  address can still point a dial at the wrong place for a few seconds, as ARP
+  spoofing could; it can't make anything a member.) Inbound connections from
+  outside the group are closed after 3 minutes idle (with no pairing under way).
   `PeersChanged` is coalesced to about four a second. The listener is dual-mode
   (IPv4 and IPv6) when bound to `Any`, so IPv6 remote addresses work.
 - **Pairing (linking)**: commit, then reveal, then **both users accept**. The
@@ -226,12 +245,21 @@ separately (see *Simplification opportunities*).
   `pair_group` with counter 1. The two never share a nonce, whatever either side
   is told. Both prompts say which way it goes, and warn when the joiner will
   leave devices behind.
-  One pairing at a time on each side; further requests get
-  `pair_reject {reason: busy}`. When a pairing ends unanswered (the other side
-  said no or went away), its prompt is `Withdrawn` and the screens close it. A
-  pairing that ends without linking is forgotten, so the same connection can try
-  again, and the requester always hears Accepted, Rejected or Failed. Unanswered
-  pairings are dropped after 5 minutes.
+  **Rounds.** Each attempt is a `PairRound` (`PeerSession.cs`), and every message
+  after the request carries its ID, the commitment (`round`). A message for any
+  other round, one already over on this side, is ignored, and an answer acts only
+  on the round it was asked about, so however the two users' answers and retries
+  interleave, nothing from one try reaches the next. Each side keeps its round
+  open until it is decided for both: the accepter, after saying yes to a
+  requester that joins, still waits for that user's answer (the requester's
+  joining and reconnecting, or its `pair_reject`), so the connection stays
+  protected from the idle timeout and its slot stays taken. One round at a time
+  on each side, and per connection; further requests get
+  `pair_reject {reason: busy}`. When a round ends unanswered (the other side said
+  no or went away), its prompt is `Withdrawn` and the screens close it. A round
+  that ends without linking leaves the connection free to try again, and the
+  requester always hears Accepted, Rejected or Failed. A round unanswered for 5
+  minutes ends with `pair_reject {reason: timeout}`.
 - **Replication**: when a session starts, both sides send a `digest`:
   `{id, defVersion, stateVersion, doneThrough}` for every task. Each then pushes
   `tasks` for every record where it is newer in any of those three, or that the
@@ -243,7 +271,11 @@ separately (see *Simplification opportunities*).
 - **Remote addresses**: kept in settings, dialled persistently, with a backoff
   from 5 s up to 60 s. A remote link doesn't redial while a session to its node
   exists by another path, so a LAN session and a remote link to the same node
-  don't keep replacing each other.
+  don't keep replacing each other. It redials at once, skipping the backoff, when
+  a pairing on its session said yes on this side (`LinkedJustNow`: the session
+  is closed as one side joins, and the other side may not be able to dial back,
+  behind NAT), and when this node's group changes (pairing, leaving), which
+  kicks every link, whether it was waiting or dialling at that moment.
 - **Discovery port vs session port**: discovery always uses UDP 37660 with
   `ReuseAddress`, and the TCP port each node listens on travels in the
   announcement. So several instances on one machine, or a node with a custom
@@ -259,8 +291,8 @@ separately (see *Simplification opportunities*).
   can't connect, doesn't have the key, not linked) in the Devices screens. A
   link's backoff resets only after a session that got into sync, or lasted 30 s.
 - **Code layout** (`AlarmCalendar.Core/Sync/`): `Protocol.cs` (messages,
-  framing, `SyncCrypto`), `Discovery.cs`, `PeerSession.cs` (one connection, its
-  keys and its pairing state), `SyncEngine.cs` (listener, dialling, sessions,
+  framing, `SyncCrypto`, `OnLinkPrefixes`), `Discovery.cs`, `PeerSession.cs` (one
+  connection and its keys, and `PairRound`), `SyncEngine.cs` (listener, dialling, sessions,
   replication, pairing). The engine raises its events on pool threads; the apps
   marshal them to their UI thread.
 - **Identity**: the node ID, device name, group ID and group secret live in

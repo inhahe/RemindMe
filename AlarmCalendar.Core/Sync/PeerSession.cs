@@ -5,6 +5,47 @@ using System.Security.Cryptography;
 namespace AlarmCalendar.Sync;
 
 /// <summary>
+/// One attempt to pair, on one connection. Every pairing message carries its ID (the
+/// requester's commitment), so a message from an earlier attempt can never act on a later
+/// one, and everything an answer touches is this object, not whatever the connection holds
+/// by then.
+/// </summary>
+internal sealed class PairRound
+{
+    public required bool Initiator { get; init; }
+    public required ECDiffieHellman Key { get; init; }
+    public required byte[] Public { get; init; }
+    /// <summary>The requester's commitment to its key and member count.</summary>
+    public required byte[] Commit { get; init; }
+    /// <summary>The round's ID on the wire: the commitment, in base64.</summary>
+    public string Id => _id ??= Convert.ToBase64String(Commit);
+    private string? _id;
+    public int MyMembers { get; init; }
+    public int PeerMembers { get; set; }
+    public DateTimeOffset StartedAt { get; } = DateTimeOffset.UtcNow;
+    /// <summary>Guards the answers and the end: the user's answer, the peer's messages and
+    /// the timeout arrive on different threads.</summary>
+    public readonly object Gate = new();
+
+    public byte[]? PeerPublic { get; set; }
+    public byte[]? Secret { get; set; }
+    public string? Code { get; set; }
+    /// <summary>The requesting device joins the accepting device's group (otherwise the
+    /// other way round).</summary>
+    public bool RequesterJoins { get; set; }
+    /// <summary>This device's user said yes, after comparing the codes.</summary>
+    public bool LocalAccepted { get; set; }
+    /// <summary>The other device's user said yes (it sent <c>pair_accept</c>).</summary>
+    public bool PeerAccepted { get; set; }
+    /// <summary>The accepter's group, sealed, held until this device's user says yes too.</summary>
+    public string? PeerSealedGroup { get; set; }
+    /// <summary>The question shown on this device, withdrawn if the round ends unanswered.</summary>
+    public PairPrompt? Prompt { get; set; }
+    public bool Finishing { get; set; }
+    public bool Ended { get; set; }
+}
+
+/// <summary>
 /// One TCP connection to another node. Both ends open with a plaintext <c>hello</c>.
 /// Between members of the same group, every later frame is AES-GCM sealed with
 /// per-direction session keys; otherwise only the pairing messages may follow, in plaintext.
@@ -39,48 +80,16 @@ internal sealed class PeerSession : IDisposable
     /// <summary>Keys are derived: the peer claims the same group, and frames are now sealed.</summary>
     public bool Sealed => _sendKey is not null;
 
-    // Pairing (a session between different groups); see SyncEngine's pairing section.
-    public bool PairStarted { get; set; }
-    public DateTimeOffset PairStartedAt { get; set; }
-    /// <summary>The requester is finishing the pairing (set once, under the session's lock).</summary>
-    public bool PairFinishing { get; set; }
-    /// <summary>This device's user accepted, after comparing the codes.</summary>
-    public bool LocalAccepted { get; set; }
-    /// <summary>The other device's user accepted (it sent <c>pair_accept</c>).</summary>
-    public bool PeerAccepted { get; set; }
-    /// <summary>The accepter's group, sealed, held until this device's user accepts too.</summary>
-    public string? PeerSealedGroup { get; set; }
-    /// <summary>The question shown on this device, withdrawn if the pairing ends unanswered.</summary>
-    public PairPrompt? Prompt { get; set; }
-    public bool PairInitiator { get; set; }
-    public ECDiffieHellman? PairKey { get; set; }
-    public byte[]? PairPublic { get; set; }
-    /// <summary>On the accepting side: the requester's commitment, checked against the key
-    /// it reveals.</summary>
-    public byte[]? PairCommit { get; set; }
-    public byte[]? PairPeerPublic { get; set; }
-    public byte[]? PairSecret { get; set; }
-    public string? PairCode { get; set; }
-    /// <summary>The requesting device will join the accepting device's group (otherwise
-    /// the other way round).</summary>
-    public bool RequesterJoins { get; set; }
-    public int MyMembers { get; set; }
-    public int PeerMembers { get; set; }
-    /// <summary>The pairing went through; this session is about to be replaced by one
-    /// under the joined group, so whoever dialled it should redial at once.</summary>
-    public bool PairCompleted { get; set; }
+    /// <summary>The pairing under way on this connection, if any (one at a time).</summary>
+    public PairRound? Round { get; set; }
 
-    /// <summary>Forgets a pairing that ended without linking, so the two can try again
-    /// on this same connection.</summary>
-    public void ResetPairing()
-    {
-        PairKey?.Dispose();
-        PairKey = null;
-        PairStarted = PairInitiator = LocalAccepted = PeerAccepted = PairFinishing = false;
-        PairPublic = PairCommit = PairPeerPublic = PairSecret = null;
-        PairCode = PeerSealedGroup = null;
-        Prompt = null;
-    }
+    /// <summary>A pairing on this connection said yes: the session is about to be replaced
+    /// by one under the joined group, so whoever dialled it should redial at once.</summary>
+    public bool LinkedJustNow { get; set; }
+
+    /// <summary>When the session last carried something meaningful (opening, pairing); an
+    /// unlinked inbound session idle for long is closed.</summary>
+    public DateTimeOffset LastActive { get; set; } = DateTimeOffset.UtcNow;
 
     public event Action<PeerSession, SyncMessage>? Received;
     /// <summary>Raised once, when the peer's first sealed frame opens.</summary>
@@ -191,7 +200,6 @@ internal sealed class PeerSession : IDisposable
         if (Interlocked.Exchange(ref _closed, 1) != 0) return;
         try { _cts.Cancel(); } catch (ObjectDisposedException) { }
         try { _client.Close(); } catch (SocketException) { }
-        PairKey?.Dispose();
         Closed?.Invoke(this);
     }
 

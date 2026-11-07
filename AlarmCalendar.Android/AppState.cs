@@ -13,7 +13,8 @@ namespace AlarmCalendar.Droid;
 public static class AppState
 {
     private static readonly object LogLock = new();
-    private static readonly Handler Main = new(Looper.MainLooper!);
+    /// <summary>The main thread's handler, for work to post there or to delay.</summary>
+    internal static readonly Handler Main = new(Looper.MainLooper!);
 
     public static Context Context { get; private set; } = null!;
     public static string DataDir { get; private set; } = "";
@@ -46,11 +47,27 @@ public static class AppState
     {
         Context = context;
         Load();
-        // Only a receiver registered at run time hears of the unlock (no manifest receiver
-        // does); the boot-completed broadcast and the first screen opened cover it too.
-        if (Provisional)
-            AndroidX.Core.Content.ContextCompat.RegisterReceiver(context, new UnlockReceiver(), new IntentFilter(Intent.ActionUserUnlocked),
+        // The boot-completed broadcast and the first screen opened cover the unlock too.
+        if (Provisional) WhenUnlocked(LoadOnceUnlocked);
+    }
+
+    private static readonly List<Action> OnUnlock = [];
+    private static UnlockReceiver? _unlockReceiver;
+
+    /// <summary>Runs <paramref name="action"/> on the main thread when the phone is next
+    /// unlocked (once, however often it is asked for). Only a receiver registered at run time
+    /// hears of the unlock (no manifest receiver does), so if the process dies first the
+    /// action is lost: callers also act when the next process starts. Any thread.</summary>
+    internal static void WhenUnlocked(Action action)
+    {
+        lock (OnUnlock)
+        {
+            if (!OnUnlock.Contains(action)) OnUnlock.Add(action);
+            if (_unlockReceiver is not null) return;
+            _unlockReceiver = new UnlockReceiver();
+            AndroidX.Core.Content.ContextCompat.RegisterReceiver(Context, _unlockReceiver, new IntentFilter(Intent.ActionUserUnlocked),
                 AndroidX.Core.Content.ContextCompat.ReceiverNotExported);
+        }
     }
 
     private sealed class UnlockReceiver : BroadcastReceiver
@@ -59,7 +76,14 @@ public static class AppState
         {
             try { Context.UnregisterReceiver(this); }
             catch (Java.Lang.IllegalArgumentException) { }
-            LoadOnceUnlocked();
+            List<Action> actions;
+            lock (OnUnlock)
+            {
+                actions = [.. OnUnlock];
+                OnUnlock.Clear();
+                _unlockReceiver = null;
+            }
+            foreach (var action in actions) action();
         }
     }
 

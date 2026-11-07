@@ -264,13 +264,27 @@ once the tasks have changed and nothing more has changed for 5 s
 - **`BackupRunner`** (Core) makes every decision, for both apps, against an
   `IBackupFolder` (list, read, write, delete; failures as `IOException`), so it
   is all tested:
-  - The first attempt in a folder reads this device's newest backup. If that
-    file can't be read (a cloud file left online-only, say), a fresh backup is
-    written rather than none ever again.
+  - Each attempt lists the folder once and works from that list.
+  - It reads this device's newest backup the first time, and again whenever
+    that backup has gone (deleted by hand, or by a cloud drive freeing space),
+    so an emptied folder gets a new backup without waiting for a change.
+  - A backup dated more than a minute ahead (written while the clock was) isn't
+    taken as the newest: it would stay "newest" for days, and every start
+    would write another backup beside it.
+  - If the newest backup can't be read (a cloud file left online-only, say), a
+    fresh one is written rather than none ever again.
+  - A new name never repeats an existing one: names go to the second, and a
+    second backup within one second moves on a second. The same name would
+    replace the first on Windows, and MediaStore would rename the second past
+    `Parse`.
+  - The fingerprint counts only well-formed records, as a file's does, so the
+    store and its backup agree whatever the store holds.
   - Old backups are thinned after a write, and once per folder, not on every
     attempt.
-  - A failure goes into `Problem` (the Settings line) and is logged once per
-    message, and so is an old backup that can't be deleted.
+  - A failure of any kind goes into `Problem` (the Settings line) and is
+    logged once per message, never thrown: a backup must neither take the app
+    down nor stop without a word. An old backup that can't be deleted is also
+    logged once.
   - The apps only decide when to attempt and supply the folder.
   - `TextFormat.BackupStatus` words the Settings line for both: off, the
     failure, the last backup, or none yet.
@@ -291,9 +305,11 @@ once the tasks have changed and nothing more has changed for 5 s
   reinstall it starts a new series and leaves the old one alone. Shared storage
   opens only after the first unlock since a restart, but the tasks can change
   before then (they live in device storage, and sync runs). So an attempt while
-  locked registers for `ACTION_USER_UNLOCKED` and tries again then. Files are
-  written with `IS_PENDING` until complete. The work runs off the main thread,
-  since MediaStore calls go to another process.
+  locked tries again on unlock (`AppState.WhenUnlocked`, which the data loading
+  uses too). Files are written with `IS_PENDING` until complete. The work runs
+  off the main thread, since MediaStore calls go to another process, and an
+  attempt queries the media provider once, then reads and deletes through that
+  listing.
 - **Limit**: Import merges, so restoring brings back deleted tasks but doesn't
   undo an edit made since the backup: the newer version wins.
 

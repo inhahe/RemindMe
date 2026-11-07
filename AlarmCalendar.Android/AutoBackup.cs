@@ -1,5 +1,4 @@
 using Android.Content;
-using Android.OS;
 using Android.Provider;
 using System.Text;
 
@@ -24,10 +23,8 @@ public static class AutoBackup
     /// <summary>The folder, as MediaStore's relative path.</summary>
     public const string Folder = "Download/Alarm Calendar backups/";
 
-    private static readonly Handler Main = new(Looper.MainLooper!);
     private static readonly Java.Lang.Runnable Pending = new(() => Task.Run(Attempt));
     private static BackupRunner? _runner;
-    private static UnlockReceiver? _waitingForUnlock;
 
     /// <summary>When this device's newest backup was taken, when known.</summary>
     public static DateTimeOffset? NewestAt => _runner?.NewestAt;
@@ -45,59 +42,44 @@ public static class AutoBackup
     /// <summary>Attempts a backup once nothing has changed for <see cref="Backups.Settle"/>.</summary>
     public static void Schedule()
     {
-        Main.RemoveCallbacks(Pending);
-        Main.PostDelayed(Pending, (long)Backups.Settle.TotalMilliseconds);
+        AppState.Main.RemoveCallbacks(Pending);
+        AppState.Main.PostDelayed(Pending, (long)Backups.Settle.TotalMilliseconds);
     }
 
-    /// <summary>Off the main thread: MediaStore calls are calls to another process.</summary>
+    /// <summary>Off the main thread: MediaStore calls are calls to another process. While
+    /// the phone is locked, it attempts again once unlocked; if the process dies first, the
+    /// next one attempts when it loads.</summary>
     private static void Attempt()
     {
         if (_runner is not { } runner || AppState.Provisional || !AppState.Settings.AutoBackup) return;
         var context = AppState.Context;
         if (!AppState.IsUnlocked(context))
         {
-            AppState.OnMain(WaitForUnlock);
+            AppState.WhenUnlocked(Schedule);
             return;
         }
         runner.Run(new MediaStoreFolder(context.ContentResolver!));
         AppState.OnMain(() => Changed?.Invoke());
     }
 
-    /// <summary>Attempts again once the phone is unlocked. Only a receiver registered at run
-    /// time hears of it; if the process dies first, the next one attempts when it loads.</summary>
-    private static void WaitForUnlock()
-    {
-        if (_waitingForUnlock is not null) return;
-        _waitingForUnlock = new UnlockReceiver();
-        AndroidX.Core.Content.ContextCompat.RegisterReceiver(AppState.Context, _waitingForUnlock,
-            new IntentFilter(Intent.ActionUserUnlocked), AndroidX.Core.Content.ContextCompat.ReceiverNotExported);
-    }
-
-    private sealed class UnlockReceiver : BroadcastReceiver
-    {
-        public override void OnReceive(Context? context, Intent? intent)
-        {
-            try { AppState.Context.UnregisterReceiver(this); }
-            catch (Java.Lang.IllegalArgumentException) { }
-            _waitingForUnlock = null;
-            Schedule();
-        }
-    }
-
     /// <summary><see cref="Folder"/> through MediaStore, holding the files this installation
     /// wrote there. Java exceptions become <see cref="IOException"/>s, as
-    /// <see cref="IBackupFolder"/> asks.</summary>
+    /// <see cref="IBackupFolder"/> asks. One per attempt: reads and deletes use the listing
+    /// the attempt began with, rather than querying the media provider again for each.</summary>
     private sealed class MediaStoreFolder(ContentResolver resolver) : IBackupFolder
     {
         private static Android.Net.Uri Collection => MediaStore.Downloads.ExternalContentUri!;
+        private Dictionary<string, Android.Net.Uri>? _listed;
 
         public string Name => Folder;
 
-        public IEnumerable<string> List() => Io(() => Files().Keys.ToList());
+        public IEnumerable<string> List() => Io(() => (_listed = Files()).Keys.ToList());
+
+        private Android.Net.Uri? UriOf(string fileName) => (_listed ?? (_listed = Files())).GetValueOrDefault(fileName);
 
         public string Read(string fileName) => Io(() =>
         {
-            var uri = Files().GetValueOrDefault(fileName) ?? throw new IOException($"{fileName} is gone.");
+            var uri = UriOf(fileName) ?? throw new IOException($"{fileName} is gone.");
             using var stream = resolver.OpenInputStream(uri) ?? throw new IOException($"{fileName} couldn't be opened.");
             using var reader = new StreamReader(stream, Encoding.UTF8);
             return reader.ReadToEnd();
@@ -132,7 +114,7 @@ public static class AutoBackup
 
         public void Delete(string fileName) => Io(() =>
         {
-            if (Files().GetValueOrDefault(fileName) is { } uri) resolver.Delete(uri, null, null);
+            if (UriOf(fileName) is { } uri) resolver.Delete(uri, null, null);
             return 0;
         });
 

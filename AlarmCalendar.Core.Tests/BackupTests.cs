@@ -33,12 +33,51 @@ public class BackupTests
     public void TheNewestIsTheLatestInstantNotTheLatestClockTime()
     {
         // 10:00 in New York, then two hours later in Los Angeles: 09:00 by the local clock.
+        var now = At(2026, 11, 7, 13);
         var east = Backups.FileName(At(2026, 11, 7, 10, -5), Me);
         var west = Backups.FileName(At(2026, 11, 7, 9, -8), Me);
-        Assert.Equal(west, Backups.Newest([east, west], Me)!.Value.Name);
+        Assert.Equal(west, Backups.Newest([east, west], Me, now)!.Value.Name);
         var names = new[] { Backups.FileName(At(2026, 11, 7, 11), Me), Backups.FileName(At(2026, 11, 7, 12), "0ther0ne") };
-        Assert.Equal(names[0], Backups.Newest(names, Me)!.Value.Name);
-        Assert.Null(Backups.Newest(names, "nobody"));
+        Assert.Equal(names[0], Backups.Newest(names, Me, now)!.Value.Name);
+        Assert.Null(Backups.Newest(names, "nobody", now));
+
+        // One written while the clock was set days ahead isn't the newest once it is back.
+        var ahead = Backups.FileName(At(2026, 11, 10, 9), Me);
+        Assert.Equal(names[0], Backups.Newest([.. names, ahead], Me, now)!.Value.Name);
+    }
+
+    [Fact]
+    public void AStoreAndItsBackupAgreeEvenOnARecordAnExportLeavesOut()
+    {
+        // A record the app wouldn't accept today (a sound with no name), from an older
+        // version's file. An export of it reads back without the name too, so a file's
+        // fingerprint leaves it out; the store's must as well.
+        var dir = Directory.CreateTempSubdirectory("alarmcal-test-");
+        try
+        {
+            var json = $$"""
+                { "format": 1, "tasks": [
+                  { "id": "{{Guid.NewGuid()}}", "def": { "description": "x", "kind": "once", "at": "2026-07-01T09:00:00", "scheduleRevision": 1 },
+                    "defVersion": { "ms": 1, "counter": 0, "node": "a" }, "state": { "revision": 1, "doneThroughUtc": "2026-06-01T13:00:00+00:00" },
+                    "stateVersion": { "ms": 1, "counter": 1, "node": "a" } },
+                  { "id": "{{Guid.NewGuid()}}", "def": { "description": "y", "kind": "once", "at": "2026-07-01T09:00:00", "scheduleRevision": 1,
+                      "windowsSound": { "source": "file", "value": "C:/a.wav" } },
+                    "defVersion": { "ms": 1, "counter": 2, "node": "a" }, "state": { "revision": 1, "doneThroughUtc": "2026-06-01T13:00:00+00:00" },
+                    "stateVersion": { "ms": 1, "counter": 3, "node": "a" } } ] }
+                """;
+            File.WriteAllText(Path.Combine(dir.FullName, "tasks.json"), json);
+            var store = new TaskStore(Path.Combine(dir.FullName, "tasks.json"), NodeId, _clock);
+            Assert.Equal(2, store.Live().Count);
+            Assert.Equal(Backups.Fingerprint(store.Live()), Backups.FingerprintOfFile(store.Export()));
+
+            var folder = new FakeFolder();
+            var runner = new BackupRunner(store, NodeId, _ => { });
+            runner.Run(folder);
+            _clock.Advance(TimeSpan.FromMinutes(1));
+            runner.Run(folder);
+            Assert.Single(folder.Files);   // not a new, identical backup on every attempt
+        }
+        finally { dir.Delete(recursive: true); }
     }
 
     [Fact]
@@ -154,6 +193,74 @@ public class BackupTests
         restarted.Run(folder);
         Assert.Equal(2, folder.Files.Count);
         Assert.Equal(_clock.UtcNow - TimeSpan.FromMinutes(1), restarted.NewestAt);
+    }
+
+    [Fact]
+    public void ABackupDatedAheadDoesNotCallForANewOneOnEveryStart()
+    {
+        var store = new TaskStore(null, NodeId, _clock);
+        store.Save(null, new TaskDefinition { Description = "x", Kind = ScheduleKind.Once, At = new DateTime(2026, 7, 1, 9, 0, 0) });
+        var folder = new FakeFolder();
+        // Written three days "ahead" of a different set of tasks, while the clock was wrong.
+        folder.Files[Backups.FileName(At(2026, 6, 4, 9), Me)] = "{}";
+
+        new BackupRunner(store, NodeId, _ => { }).Run(folder);
+        Assert.Equal(2, folder.Files.Count);
+        _clock.Advance(TimeSpan.FromMinutes(1));
+        var restarted = new BackupRunner(store, NodeId, _ => { });
+        restarted.Run(folder);
+        Assert.Equal(2, folder.Files.Count);
+        Assert.Equal(_clock.UtcNow - TimeSpan.FromMinutes(1), restarted.NewestAt);   // not three days hence
+    }
+
+    [Fact]
+    public void AFolderEmptiedSinceTheLastBackupGetsANewOne()
+    {
+        var store = new TaskStore(null, NodeId, _clock);
+        var t = store.Save(null, new TaskDefinition { Description = "x", Kind = ScheduleKind.Once, At = new DateTime(2026, 7, 1, 9, 0, 0) });
+        var folder = new FakeFolder();
+        var runner = new BackupRunner(store, NodeId, _ => { });
+        runner.Run(folder);
+        folder.Files.Clear();   // by hand, or a cloud drive freeing space
+        _clock.Advance(TimeSpan.FromMinutes(1));
+        store.Pause(t.Id);      // a change that calls for no backup of its own
+        runner.Run(folder);
+        Assert.Single(folder.Files);
+    }
+
+    [Fact]
+    public void TwoBackupsInOneSecondGetTwoNames()
+    {
+        var store = new TaskStore(null, NodeId, _clock);
+        var t = store.Save(null, new TaskDefinition { Description = "x", Kind = ScheduleKind.Once, At = new DateTime(2026, 7, 1, 9, 0, 0) });
+        var folder = new FakeFolder();
+        var runner = new BackupRunner(store, NodeId, _ => { });
+        runner.Run(folder);
+        store.Save(t.Id, store.Get(t.Id)!.Def with { Description = "y" });   // within the same second
+        runner.Run(folder);
+        Assert.Equal(2, folder.Files.Count);
+        Assert.Contains(Backups.FileName(At(2026, 6, 1, 9).AddSeconds(1), Me), folder.Files.Keys);
+        Assert.Equal(At(2026, 6, 1, 9).AddSeconds(1), runner.NewestAt);
+    }
+
+    [Fact]
+    public void AnUnexpectedFailureIsReportedNotThrown()
+    {
+        var log = new List<string>();
+        var store = new TaskStore(null, NodeId, _clock);
+        var runner = new BackupRunner(store, NodeId, log.Add);
+        runner.Run(new BrokenFolder());
+        Assert.Equal("The last backup failed: broken", runner.Problem);
+        Assert.Single(log, l => l.StartsWith("Backing up to broken failed: System.InvalidOperationException"));
+    }
+
+    private sealed class BrokenFolder : IBackupFolder
+    {
+        public string Name => "broken";
+        public IEnumerable<string> List() => throw new InvalidOperationException("broken");
+        public string Read(string fileName) => throw new InvalidOperationException("broken");
+        public void Write(string fileName, string contents) => throw new InvalidOperationException("broken");
+        public void Delete(string fileName) => throw new InvalidOperationException("broken");
     }
 
     [Fact]

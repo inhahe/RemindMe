@@ -74,10 +74,12 @@ public static class Backups
     /// <summary>What a backup has to keep up with: which tasks there are, and each one's
     /// definition (as its version, which every edit, here or elsewhere, changes). Marking
     /// done, snoozing and pausing change neither, so they don't call for a new backup.</summary>
+    /// <remarks>Only well-formed records count, as in a file, where an export of them would
+    /// leave the rest out: the store and its backup must agree whatever the store holds.</remarks>
     public static string Fingerprint(IEnumerable<AlarmTask> tasks)
     {
         var text = new StringBuilder();
-        foreach (var t in tasks.Where(t => !t.Def.Deleted).OrderBy(t => t.Id))
+        foreach (var t in tasks.Where(t => MergeRules.IsWellFormed(t) && !t.Def.Deleted).OrderBy(t => t.Id))
             text.Append(t.Id).Append(' ').Append(t.DefVersion.ToString()).Append('\n');
         return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(text.ToString())));
     }
@@ -89,15 +91,17 @@ public static class Backups
         try
         {
             var file = System.Text.Json.JsonSerializer.Deserialize(json, Json.Files.ExportFile);
-            return file?.Tasks is { } tasks ? Fingerprint(tasks.Where(MergeRules.IsWellFormed)) : null;
+            return file?.Tasks is { } tasks ? Fingerprint(tasks) : null;
         }
         catch (System.Text.Json.JsonException) { return null; }
     }
 
     /// <summary>The newest of <paramref name="device"/>'s backups among
-    /// <paramref name="fileNames"/>, and when it was taken; null if it has none.</summary>
-    public static (string Name, DateTimeOffset At)? Newest(IEnumerable<string> fileNames, string device) =>
-        Of(fileNames, device).FirstOrDefault() is { Name: not null } b ? b : null;
+    /// <paramref name="fileNames"/>, and when it was taken; null if it has none. One dated
+    /// more than a minute after <paramref name="now"/> was written while the clock was ahead,
+    /// and doesn't count: it would stay "newest" until the clock caught up with it.</summary>
+    public static (string Name, DateTimeOffset At)? Newest(IEnumerable<string> fileNames, string device, DateTimeOffset now) =>
+        Of(fileNames, device).FirstOrDefault(b => b.At <= now.AddMinutes(1)) is { Name: not null } b ? b : null;
 
     /// <summary><paramref name="device"/>'s backups among <paramref name="fileNames"/>, newest first.</summary>
     private static List<(string Name, DateTimeOffset At)> Of(IEnumerable<string> fileNames, string device) =>
@@ -157,9 +161,9 @@ public interface IBackupFolder
 
 /// <summary>
 /// One backup attempt at a time, for either app, which only says when to attempt one and
-/// where (<see cref="IBackupFolder"/>). An attempt writes a backup unless this device's
-/// newest one already has the tasks as they are, and thins out the old ones after writing
-/// (and once per folder). Thread-safe; attempts may run on any thread.
+/// where (<see cref="IBackupFolder"/>). An attempt lists the folder once, writes a backup
+/// unless this device's newest one already has the tasks as they are, and thins out the
+/// old ones after writing (and once per folder). Thread-safe; attempts may run on any thread.
 /// </summary>
 public sealed class BackupRunner
 {
@@ -169,6 +173,7 @@ public sealed class BackupRunner
     private readonly Action<string> _log;
     /// <summary>The folder the fields below describe; null when it is to be read afresh.</summary>
     private string? _folder;
+    private string? _newestName;
     private string? _newestFingerprint;
     private bool _pruneDue;
     private string? _loggedProblem;
@@ -191,7 +196,8 @@ public sealed class BackupRunner
     }
 
     /// <summary>One attempt, against <paramref name="folder"/>. Failures end up in
-    /// <see cref="Problem"/> (and the log, once per message), never thrown.</summary>
+    /// <see cref="Problem"/> (and the log, once per message), never thrown: a backup must
+    /// neither take the app down nor stop without a word.</summary>
     public void Run(IBackupFolder folder)
     {
         lock (_lock)
@@ -200,37 +206,48 @@ public sealed class BackupRunner
             var now = TimeZoneInfo.ConvertTime(clock.UtcNow, clock.Zone);
             try
             {
-                if (_folder != folder.Name) ReadNewest(folder);
+                var names = folder.List().ToList();
+                // Read the folder when it is new here, and again when the newest backup has
+                // gone (deleted by hand, or by a cloud drive freeing space): what is there now
+                // decides whether to write.
+                if (_folder != folder.Name || (_newestName is { } known && !names.Contains(known, StringComparer.OrdinalIgnoreCase)))
+                    ReadNewest(folder, names, now);
                 if (Backups.Fingerprint(_store.Live()) != _newestFingerprint)
                 {
                     var json = _store.Export(out int count);
-                    var name = Backups.FileName(now, _device);
+                    var (name, at) = FreeName(names, now);
                     folder.Write(name, json);
+                    names.Add(name);
+                    _newestName = name;
                     _newestFingerprint = Backups.FingerprintOfFile(json);
-                    NewestAt = now;
+                    NewestAt = at;
                     _pruneDue = true;
                     _log($"Backed up {count} task{(count == 1 ? "" : "s")} to {folder.Name}: {name}.");
                 }
-                if (_pruneDue) Prune(folder, now);
+                if (_pruneDue) Prune(folder, names, now);
                 Problem = null;
                 _loggedProblem = null;
             }
-            catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+            catch (Exception e)
             {
+                bool storage = e is IOException or UnauthorizedAccessException;
                 Problem = $"The last backup failed: {e.Message}";
-                if (Problem != _loggedProblem) _log($"Couldn't back up to {folder.Name}: {e.Message}");
+                if (Problem != _loggedProblem)
+                    _log(storage ? $"Couldn't back up to {folder.Name}: {e.Message}" : $"Backing up to {folder.Name} failed: {e}");
                 _loggedProblem = Problem;
                 _folder = null;   // read it afresh next time
             }
         }
     }
 
-    private void ReadNewest(IBackupFolder folder)
+    private void ReadNewest(IBackupFolder folder, IReadOnlyList<string> names, DateTimeOffset now)
     {
+        _newestName = null;
         _newestFingerprint = null;
         NewestAt = null;
-        if (Backups.Newest(folder.List(), _device) is { } newest)
+        if (Backups.Newest(names, _device, now) is { } newest)
         {
+            _newestName = newest.Name;
             NewestAt = newest.At;
             try { _newestFingerprint = Backups.FingerprintOfFile(folder.Read(newest.Name)); }
             catch (Exception e) when (e is IOException or UnauthorizedAccessException)
@@ -244,9 +261,22 @@ public sealed class BackupRunner
         _pruneDue = true;
     }
 
-    private void Prune(IBackupFolder folder, DateTimeOffset now)
+    /// <summary>The name for a backup taken at <paramref name="now"/>, and the time it
+    /// carries. Names go to the second, so a second backup within one second (an edit
+    /// just before exit, say) moves on a second: the same name would replace the first
+    /// backup on Windows, and MediaStore would rename it beyond <see cref="Backups.Parse"/>.</summary>
+    private (string Name, DateTimeOffset At) FreeName(List<string> names, DateTimeOffset now)
     {
-        foreach (var name in Backups.ToDelete(folder.List(), _device, now))
+        var at = now.AddTicks(-(now.Ticks % TimeSpan.TicksPerSecond));
+        if (NewestAt is { } last && at <= last) at = last.AddSeconds(1).ToOffset(now.Offset);
+        string name;
+        while (names.Contains(name = Backups.FileName(at, _device), StringComparer.OrdinalIgnoreCase)) at = at.AddSeconds(1);
+        return (name, at);
+    }
+
+    private void Prune(IBackupFolder folder, IReadOnlyList<string> names, DateTimeOffset now)
+    {
+        foreach (var name in Backups.ToDelete(names, _device, now))
         {
             try { folder.Delete(name); }
             catch (Exception e) when (e is IOException or UnauthorizedAccessException)

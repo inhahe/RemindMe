@@ -718,8 +718,9 @@ it runs on Android 10 (API 29) and up. The root namespace is
 
 ## Releases (S9)
 
-As in LanLink, with PowerShell instead of batch files: the project folder's `&`
-is a command separator to `cmd`.
+As in LanLink and the user's other projects, `release.bat` publishes. The work
+is in PowerShell rather than batch: the project folder's name has an `&`, a
+command separator to `cmd`.
 
 - **`VERSION`** (two to four numbers) is the single source of the version.
   It becomes the desktop assembly's version, Android's `versionName`, and its
@@ -748,13 +749,23 @@ is a command separator to `cmd`.
 - **`build-apk.ps1`**: the Release APK with that version. It is signed with the
   key the `REMINDME_*` environment variables name (passwords passed as
   `env:NAME`, so they appear on no command line), or this machine's debug key.
-- **`release-github.ps1`**: builds both and creates the GitHub release
-  `v<version>` with `gh`, unless it exists already. The APK is optional.
-  `-DryRun` builds and prints the command; the repository comes from `origin`
-  or `-Repo`. `release-github.bat` runs it in Windows PowerShell 5.1, which,
-  under `$ErrorActionPreference = 'Stop'`, ends the script at the first native
-  command whose redirected stderr has a line. The checks that expect to fail
-  (no remote, no such release) therefore go through `Invoke-Probe`.
+- **`release.bat`** runs **`release.ps1`**, which publishes to
+  `inhahe/RemindMe`, modelled on the user's Pitchstone `release.bat`.
+  - What is released is `main` as GitHub has it. It refuses another branch,
+    uncommitted changes, an untracked file where the build reads, and a commit
+    GitHub's `main` doesn't have.
+  - It refuses a version already released, or tagged without a release, or not
+    above the last release (`git describe` of the last `v*` tag).
+  - Then the tests, `build-msi.ps1` and `build-apk.ps1` (all three assets
+    required).
+  - Then `gh release create --target <commit>`, with notes on what it is, the
+    alpha warning, how to install, and the commits since the last release. A
+    0.x version is a pre-release.
+  - `--dry-run` does everything but publish, and shows the notes.
+  - `release.bat` runs it in Windows PowerShell 5.1. Under
+    `$ErrorActionPreference = 'Stop'`, that ends the script at the first native
+    command whose redirected stderr has a line, so the git and gh checks that
+    may fail go through `Invoke-Probe`.
 
 ## Simplification opportunities
 

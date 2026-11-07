@@ -5,7 +5,7 @@
      xmlns:fw="http://wixtoolset.org/schemas/v4/wxs/firewall">
 
   <!-- Supplied by build-msi.ps1 with -d; the defaults let the file build on its own. -->
-  <?ifndef Version?>    <?define Version    = "1.0.0.0"?> <?endif?>
+  <?ifndef Version?>    <?define Version    = "0.1.0.0"?> <?endif?>
   <?ifndef PublishDir?> <?define PublishDir = "publish"?> <?endif?>
 
   <Package Name="RemindMe"

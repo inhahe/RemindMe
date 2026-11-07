@@ -86,18 +86,21 @@ Checked on the emulator:
 
 ## Decisions waiting on the user
 
-### Releasing (S9 is built; these are yours to settle)
-- **A GitHub repository.** The project has no remote yet; `release-github.ps1`
-  needs one (`origin`, or `-Repo owner/name`), and publishes nothing until then.
-- **A release key for the APK.** `build-apk.ps1` signs with your key when the
+### Releasing (these are yours to settle)
+- **The APK's signing key.** `build-apk.ps1` signs with your key when the
   `REMINDME_*` variables point at one, and with this machine's debug key
-  otherwise. Whatever key the first published APK uses, every update must use
-  too, so it is worth making a real one (the script's header says how) before
-  publishing, and keeping it safe.
-- **A license.** The installer shows no license page, because none is chosen.
-  LanLink's installer shows a "do whatever you want with it" text; say if this
-  project should carry the same (`installer/License.rtf` plus one line in the
-  `.wxs`).
+  otherwise. The first release (0.1.0.0) went out signed with the debug key, as
+  LanLink's APKs are. An update installs over it only if it is signed with the
+  same key: build releases on this machine, or keep a copy of
+  `%LOCALAPPDATA%\Xamarin\Mono for Android\debug.keystore`. Moving to a real
+  release key later (the script's header says how to make one) means users
+  uninstall first. Their tasks then come back from the automatic backups in
+  `Download/RemindMe backups`, which survive the uninstall.
+- **A license.** None is chosen. The installer shows no license page, and the
+  GitHub repository has no `LICENSE` file, so by default nobody may reuse the
+  code. LanLink's repository is MIT, and its installer shows a "do whatever you
+  want with it" text. Say if this project should carry the same: a `LICENSE`
+  file, plus `installer/License.rtf` and one line in the `.wxs`.
 - **Not tried: an actual install.** The MSI was built and its payload unpacked
   (`msiexec /a`), and the exe it contains starts and exits; installing it for
   real would change this machine (Program Files, firewall rules), so that, and

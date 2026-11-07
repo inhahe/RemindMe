@@ -75,20 +75,13 @@ public sealed class AppSettings
         KnownPeers = [];
     }
 
-    /// <summary>Records that the linked devices <paramref name="connected"/> (node ID, name)
-    /// are in sync at <paramref name="now"/>.</summary>
-    /// <returns>True when a device was added or renamed, so the settings are worth saving.</returns>
-    public bool RememberPeers(IEnumerable<(string node, string name)> connected, DateTimeOffset now)
+    /// <summary>Records that the linked device <paramref name="node"/> was in sync at
+    /// <paramref name="now"/> (when its session proved the key, and again when it closed).</summary>
+    public void RememberPeer(string node, string name, DateTimeOffset now)
     {
-        bool added = false;
-        foreach (var (node, name) in connected)
-        {
-            int i = KnownPeers.FindIndex(p => p.NodeId == node);
-            if (i < 0 || KnownPeers[i].Name != name) added = true;
-            if (i >= 0) KnownPeers[i] = new KnownPeer(node, name, now);
-            else KnownPeers.Add(new KnownPeer(node, name, now));
-        }
-        return added;
+        int i = KnownPeers.FindIndex(p => p.NodeId == node);
+        if (i >= 0) KnownPeers[i] = new KnownPeer(node, name, now);
+        else KnownPeers.Add(new KnownPeer(node, name, now));
     }
 
     public void Save(string path, Action<string>? log = null)

@@ -8,6 +8,8 @@ namespace AlarmCalendar.Sync;
 /// One TCP connection to another node. Both ends open with a plaintext <c>hello</c>.
 /// Between members of the same group, every later frame is AES-GCM sealed with
 /// per-direction session keys; otherwise only the pairing messages may follow, in plaintext.
+/// A peer counts as a member only once its first sealed frame opens (<see cref="Authenticated"/>):
+/// claiming the group ID proves nothing.
 /// </summary>
 internal sealed class PeerSession : IDisposable
 {
@@ -32,24 +34,39 @@ internal sealed class PeerSession : IDisposable
     public string? PeerGroup { get; private set; }
     public int? PeerPort { get; private set; }
 
-    /// <summary>The peer proved knowledge of the group secret (its first sealed frame opened).</summary>
+    /// <summary>The peer proved knowledge of the group secret: its first sealed frame opened.</summary>
     public bool Authenticated { get; private set; }
     /// <summary>Keys are derived: the peer claims the same group, and frames are now sealed.</summary>
     public bool Sealed => _sendKey is not null;
+    /// <summary>The peer's tasks have all arrived once: it sent <c>digest_done</c>.</summary>
+    public bool FirstSyncDone { get; set; }
 
-    // Pairing state (a session between different groups).
+    // Pairing (a session between different groups). One pairing per session.
+    public bool PairStarted { get; set; }
+    public bool PairInitiator { get; set; }
     public ECDiffieHellman? PairKey { get; set; }
     public byte[]? PairPublic { get; set; }
+    /// <summary>On the accepting side: the requester's commitment, checked against the key
+    /// it reveals.</summary>
+    public byte[]? PairCommit { get; set; }
+    public byte[]? PairPeerPublic { get; set; }
     public byte[]? PairSecret { get; set; }
     public string? PairCode { get; set; }
-    public bool PairInitiator { get; set; }
+    /// <summary>The requesting device will join the accepting device's group (otherwise
+    /// the other way round).</summary>
+    public bool RequesterJoins { get; set; }
+    public int MyMembers { get; set; }
+    public int PeerMembers { get; set; }
 
     public event Action<PeerSession, SyncMessage>? Received;
+    /// <summary>Raised once, when the peer's first sealed frame opens.</summary>
+    public event Action<PeerSession>? AuthenticatedNow;
     public event Action<PeerSession>? Closed;
 
     public PeerSession(TcpClient client, bool isOutgoing)
     {
         _client = client;
+        _client.NoDelay = true;
         _stream = client.GetStream();
         IsOutgoing = isOutgoing;
         RemoteEndPoint = client.Client.RemoteEndPoint as IPEndPoint;
@@ -69,20 +86,20 @@ internal sealed class PeerSession : IDisposable
 
     /// <summary>Records the peer's hello and, for a peer claiming our group, derives the
     /// session keys so every later frame is sealed.</summary>
-    /// <returns>False if the hello is malformed.</returns>
+    /// <returns>False if the hello is malformed or claims this node's own ID.</returns>
     public bool AcceptHello(SyncMessage hello, string myNode, string myGroup, byte[] groupKey)
     {
-        if (hello.Node is null || hello.Nonce is null) return false;
+        if (!Protocol.IsValidNodeId(hello.Node) || hello.Node == myNode || hello.Nonce is null) return false;
         byte[] peerNonce;
         try { peerNonce = Convert.FromBase64String(hello.Nonce); }
         catch (FormatException) { return false; }
-        if (peerNonce.Length != SyncCrypto.NonceBytes || hello.Node == myNode) return false;
+        if (peerNonce.Length != SyncCrypto.NonceBytes) return false;
         PeerNode = hello.Node;
-        PeerName = string.IsNullOrWhiteSpace(hello.Name) ? hello.Node[..Math.Min(8, hello.Node.Length)] : hello.Name;
+        PeerName = Protocol.CleanName(hello.Name, hello.Node![..8]);
         PeerGroup = hello.Group;
-        PeerPort = hello.Port;
+        PeerPort = hello.Port is >= 1 and <= 65535 ? hello.Port : null;
         if (hello.Group == myGroup)
-            (_sendKey, _receiveKey) = SyncCrypto.SessionKeys(groupKey, myNode, _myNonce, hello.Node, peerNonce);
+            (_sendKey, _receiveKey) = SyncCrypto.SessionKeys(groupKey, myNode, _myNonce, hello.Node!, peerNonce);
         return true;
     }
 
@@ -112,13 +129,18 @@ internal sealed class PeerSession : IDisposable
         {
             while (!_cts.IsCancellationRequested)
             {
-                var frame = await Protocol.ReadFrameAsync(_stream, _cts.Token).ConfigureAwait(false);
+                int max = Authenticated ? Protocol.MaxFrame : Protocol.MaxUnauthenticatedFrame;
+                var frame = await Protocol.ReadFrameAsync(_stream, max, _cts.Token).ConfigureAwait(false);
                 if (frame is null) break;
                 byte[] plain = frame;
                 if (_receiveKey is not null)
                 {
                     plain = SyncCrypto.Open(_receiveKey, _receiveCounter++, frame);
-                    Authenticated = true;
+                    if (!Authenticated)
+                    {
+                        Authenticated = true;
+                        AuthenticatedNow?.Invoke(this);
+                    }
                 }
                 var msg = Protocol.Deserialize(plain);
                 if (msg is null) break;

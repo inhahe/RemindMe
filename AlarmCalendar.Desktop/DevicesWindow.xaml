@@ -21,7 +21,7 @@
         <DockPanel Margin="0,6,0,0" LastChildFill="True">
             <Button x:Name="LinkButton" DockPanel.Dock="Left" Content="_Link…" Click="Link_Click" IsEnabled="False"
                     ToolTip="Join the selected device's sync group: both then share all their tasks" />
-            <TextBlock x:Name="PairText" Margin="10,0,0,0" VerticalAlignment="Center" TextWrapping="Wrap" />
+            <TextBlock x:Name="PairStatus" Margin="10,0,0,0" VerticalAlignment="Center" TextWrapping="Wrap" />
         </DockPanel>
         <TextBlock Style="{StaticResource Hint}" Margin="0,4,0,8"
                    Text="Devices on this network appear by themselves. To link one, select it and click Link, then accept on that device, after checking that both show the same code." />

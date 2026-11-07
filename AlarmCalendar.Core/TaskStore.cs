@@ -211,7 +211,9 @@ public sealed class TaskStore
         {
             foreach (var r in incoming)
             {
-                if (r.Id == Guid.Empty) continue;
+                // Records come from other devices, possibly running another version: one
+                // that is malformed is skipped, rather than stored and gossiped onwards.
+                if (r is null || r.Id == Guid.Empty || r.Def is null || r.State is null) continue;
                 Versions.Observe(r.DefVersion);
                 Versions.Observe(r.StateVersion);
                 if (!_tasks.TryGetValue(r.Id, out var local))

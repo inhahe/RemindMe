@@ -61,7 +61,8 @@ public sealed class DevicesActivity : AppCompatActivity
 
     private void Refresh()
     {
-        Find<TextView>(Resource.Id.status).Text = AppState.SyncStatus;
+        var remotes = AppState.Sync?.RemoteStates() ?? [];
+        Find<TextView>(Resource.Id.status).Text = AppState.SyncStatus + string.Concat(remotes.Select(r => $"\n{r.Address}: {r.State}"));
         var list = Find<LinearLayout>(Resource.Id.device_list);
         list.RemoveAllViews();
         var now = AppState.Clock.UtcNow;
@@ -94,14 +95,7 @@ public sealed class DevicesActivity : AppCompatActivity
         list.AddView(row);
     }
 
-    private void OnPairProgress(PairProgress p) =>
-        Find<TextView>(Resource.Id.pair_text).Text = p.Stage switch
-        {
-            PairStage.CodeShown => $"On {p.PeerName}, check that it shows {p.Code![..3]} {p.Code[3..]} and accept.",
-            PairStage.Accepted => $"Linked with {p.PeerName}.",
-            PairStage.Rejected => $"{p.PeerName} said no.",
-            _ => p.Message ?? "Linking failed.",
-        };
+    private void OnPairProgress(PairProgress p) => Find<TextView>(Resource.Id.pair_text).Text = PairText.Progress(p);
 
     /// <summary>Asks whether another device may join this one's group (D3).</summary>
     private void Ask(PairPrompt p)
@@ -110,7 +104,7 @@ public sealed class DevicesActivity : AppCompatActivity
         Notifications.Cancel(this, Notifications.PairId);
         new AlertDialog.Builder(this)
             .SetTitle("Link a device?")!
-            .SetMessage($"\"{p.PeerName}\" wants to link with this phone and sync tasks with it.\n\n"
+            .SetMessage($"{PairText.Question(p)}\n\n"
                 + $"It should be showing this code:\n\n{p.Code[..3]} {p.Code[3..]}\n\n"
                 + "Accept only if the codes match.")!
             .SetPositiveButton("Link", (_, _) => _ = p.AcceptAsync())!

@@ -85,7 +85,10 @@ Open **Devices…** (in the toolbar or the tray menu).
   one and click **Link…**. The other device asks whether to link, and shows a
   six-digit code. Check that it matches the code shown on this one, then accept.
   The two devices then share all their tasks, and keep the tasks and their state
-  in sync: mark a task done on one, and its alarm stops on the others.
+  in sync: mark a task done on one, and its alarm stops on the others. It doesn't
+  matter which device you click Link on: the one linked with fewer devices joins
+  the other's group, and the prompt warns you if a device would leave others
+  behind.
 - **Over the internet**: on the device the others will reach, forward the port
   (37660 by default) to it and tick **Accept connections from outside the local
   network**. On the others, add its address (`host` or `host:port`) under

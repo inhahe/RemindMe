@@ -13,11 +13,16 @@ public static class MessageTypes
     public const string Hello = "hello";
     public const string PairRequest = "pair_request";
     public const string PairChallenge = "pair_challenge";
+    public const string PairReveal = "pair_reveal";
     public const string PairAccept = "pair_accept";
+    public const string PairGroup = "pair_group";
     public const string PairReject = "pair_reject";
     // Encrypted, within a group.
     public const string Digest = "digest";
     public const string Tasks = "tasks";
+    /// <summary>Sent after answering a peer's digest: every record the peer lacked has
+    /// been sent (frames arrive in order), so the first exchange with it is complete.</summary>
+    public const string DigestDone = "digest_done";
     // UDP discovery.
     public const string Announce = "announce";
 }
@@ -43,6 +48,11 @@ public sealed class SyncMessage
     // pairing
     /// <summary>An ephemeral ECDH P-256 public key (SubjectPublicKeyInfo, base64).</summary>
     public string? PairKey { get; set; }
+    /// <summary>The requester's commitment: SHA-256 of the key it reveals later (base64).</summary>
+    public string? Commit { get; set; }
+    /// <summary>How many other devices the sender is linked with; the side with fewer joins
+    /// the other's group.</summary>
+    public int? Members { get; set; }
     /// <summary>The group's ID and secret, AES-GCM sealed under the pairing secret (base64).</summary>
     public string? Sealed { get; set; }
     public string? Reason { get; set; }
@@ -56,9 +66,26 @@ public static class Protocol
     /// <summary>Discovery always uses this UDP port, whatever TCP port a node listens on,
     /// so several instances on one machine (or a custom port) still find each other.</summary>
     public const int DiscoveryPort = 37660;
+    /// <summary>The largest frame from a peer that has proved the group key.</summary>
     public const int MaxFrame = 32 * 1024 * 1024;
+    /// <summary>The largest frame before that: hellos and pairing messages are small, and
+    /// anything bigger from an unproven peer is only a way to exhaust memory.</summary>
+    public const int MaxUnauthenticatedFrame = 64 * 1024;
 
     public static byte[] Serialize(SyncMessage m) => JsonSerializer.SerializeToUtf8Bytes(m, Json.Wire);
+
+    /// <summary>Node IDs are 32 lowercase hex digits (a GUID in "N" form). Anything else is
+    /// refused: IDs go into key-derivation labels, which must not be ambiguous.</summary>
+    public static bool IsValidNodeId(string? id) =>
+        id is { Length: 32 } && id.All(c => c is (>= '0' and <= '9') or (>= 'a' and <= 'f'));
+
+    /// <summary>A peer-supplied device name, trimmed to something displayable.</summary>
+    public static string CleanName(string? name, string fallback)
+    {
+        var n = new string((name ?? "").Where(c => !char.IsControl(c)).ToArray()).Trim();
+        if (n.Length > 64) n = n[..64];
+        return n.Length > 0 ? n : fallback;
+    }
 
     public static SyncMessage? Deserialize(ReadOnlySpan<byte> bytes)
     {
@@ -66,42 +93,31 @@ public static class Protocol
         catch (JsonException) { return null; }
     }
 
-    /// <summary>Writes one frame: a 4-byte big-endian length, then the body.</summary>
+    /// <summary>Writes one frame: a 4-byte big-endian length, then the body, in a single
+    /// write (two writes would meet Nagle's algorithm and the peer's delayed ACK).</summary>
     public static async Task WriteFrameAsync(Stream s, ReadOnlyMemory<byte> body, CancellationToken ct)
     {
-        var header = new byte[4];
-        BinaryPrimitives.WriteInt32BigEndian(header, body.Length);
-        await s.WriteAsync(header, ct).ConfigureAwait(false);
-        await s.WriteAsync(body, ct).ConfigureAwait(false);
+        var frame = new byte[4 + body.Length];
+        BinaryPrimitives.WriteInt32BigEndian(frame, body.Length);
+        body.CopyTo(frame.AsMemory(4));
+        await s.WriteAsync(frame, ct).ConfigureAwait(false);
         await s.FlushAsync(ct).ConfigureAwait(false);
     }
 
     /// <summary>Reads one frame body; null at a clean end of stream.</summary>
-    public static async Task<byte[]?> ReadFrameAsync(Stream s, CancellationToken ct)
+    /// <param name="maxLength">The largest body accepted; a longer header ends the stream
+    /// with <see cref="InvalidDataException"/> before anything is allocated.</param>
+    public static async Task<byte[]?> ReadFrameAsync(Stream s, int maxLength, CancellationToken ct)
     {
         var header = new byte[4];
-        if (!await ReadExactlyOrEndAsync(s, header, ct).ConfigureAwait(false)) return null;
+        int got = await s.ReadAtLeastAsync(header, 4, throwOnEndOfStream: false, ct).ConfigureAwait(false);
+        if (got == 0) return null;
+        if (got < 4) throw new EndOfStreamException();
         int len = BinaryPrimitives.ReadInt32BigEndian(header);
-        if (len < 0 || len > MaxFrame) throw new InvalidDataException($"Frame length {len} is out of range.");
+        if (len < 0 || len > maxLength) throw new InvalidDataException($"Frame length {len} is out of range.");
         var body = new byte[len];
-        if (!await ReadExactlyOrEndAsync(s, body, ct).ConfigureAwait(false)) throw new EndOfStreamException();
+        await s.ReadExactlyAsync(body, ct).ConfigureAwait(false);
         return body;
-    }
-
-    private static async Task<bool> ReadExactlyOrEndAsync(Stream s, byte[] buffer, CancellationToken ct)
-    {
-        int read = 0;
-        while (read < buffer.Length)
-        {
-            int n = await s.ReadAsync(buffer.AsMemory(read), ct).ConfigureAwait(false);
-            if (n == 0)
-            {
-                if (read == 0) return false;
-                throw new EndOfStreamException();
-            }
-            read += n;
-        }
-        return true;
     }
 
     /// <summary>
@@ -139,16 +155,17 @@ public static class Protocol
             if (close < 0) return false;
             host = text[1..close];
             var rest = text[(close + 1)..];
-            return rest.Length == 0 || (rest.StartsWith(':') && int.TryParse(rest[1..], out port) && port is > 0 and < 65536);
+            return host.Length > 0
+                && (rest.Length == 0 || (rest.StartsWith(':') && int.TryParse(rest[1..], out port) && port is > 0 and < 65536));
         }
         int colon = text.LastIndexOf(':');
-        if (colon > 0 && text.IndexOf(':') == colon)
+        if (colon >= 0 && text.IndexOf(':') == colon)
         {
-            host = text[..colon];
-            return int.TryParse(text[(colon + 1)..], out port) && port is > 0 and < 65536;
+            host = text[..colon].Trim();
+            return host.Length > 0 && int.TryParse(text[(colon + 1)..], out port) && port is > 0 and < 65536;
         }
         host = text;
-        return true;
+        return !text.Any(char.IsWhiteSpace);
     }
 }
 
@@ -165,13 +182,22 @@ public static class SyncCrypto
     /// <returns>(the key this node sends with, the key it receives with).</returns>
     public static (byte[] send, byte[] receive) SessionKeys(byte[] groupKey, string myNode, byte[] myNonce, string peerNode, byte[] peerNonce)
     {
+        if (!Protocol.IsValidNodeId(myNode) || !Protocol.IsValidNodeId(peerNode) || myNode == peerNode)
+            throw new ArgumentException("Session keys need two distinct, valid node IDs.");
         bool iAmLow = string.CompareOrdinal(myNode, peerNode) < 0;
         var (lowNode, highNode) = iAmLow ? (myNode, peerNode) : (peerNode, myNode);
         var salt = iAmLow ? Concat(myNonce, peerNonce) : Concat(peerNonce, myNonce);
-        byte[] lowToHigh = HKDF.DeriveKey(HashAlgorithmName.SHA256, groupKey, 32, salt, Encoding.UTF8.GetBytes($"alarmcal v1 {lowNode}>{highNode}"));
-        byte[] highToLow = HKDF.DeriveKey(HashAlgorithmName.SHA256, groupKey, 32, salt, Encoding.UTF8.GetBytes($"alarmcal v1 {highNode}>{lowNode}"));
+        // Fixed-length IDs make each label unambiguous: no choice of IDs can make the label of
+        // one direction equal a label of another session (a reflection attack).
+        byte[] lowToHigh = HKDF.DeriveKey(HashAlgorithmName.SHA256, groupKey, 32, salt, Encoding.UTF8.GetBytes($"alarmcal v1 from {lowNode} to {highNode}"));
+        byte[] highToLow = HKDF.DeriveKey(HashAlgorithmName.SHA256, groupKey, 32, salt, Encoding.UTF8.GetBytes($"alarmcal v1 from {highNode} to {lowNode}"));
         return iAmLow ? (lowToHigh, highToLow) : (highToLow, lowToHigh);
     }
+
+    /// <summary>The requester's commitment to its pairing key, sent before it has seen the
+    /// other side's key. Without it, a man in the middle could try keys until both screens
+    /// showed the same code; with it, every choice is fixed before the code can be known.</summary>
+    public static byte[] Commitment(byte[] publicKey) => SHA256.HashData(publicKey);
 
     /// <summary>Encrypts <paramref name="plain"/> as frame number <paramref name="counter"/>:
     /// [8-byte counter][ciphertext][16-byte tag].</summary>

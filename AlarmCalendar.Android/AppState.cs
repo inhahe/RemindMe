@@ -100,7 +100,16 @@ public static class AppState
             AcceptExternalConnections = s.AcceptExternalConnections,
             RemoteAddresses = s.RemoteAddresses.ToList(),
             AcquireMulticastLock = AcquireMulticastLock,
+            LinkedDeviceCount = () => Settings.KnownPeers.Count,
         }, Log);
+        // Missed alarms wait for the first exchange; ring them as soon as it is done.
+        engine.FirstSyncCompleted += () => OnMain(() => AlarmScheduler.Reschedule(Context));
+        engine.PeerSeen += (node, name) => OnMain(() =>
+        {
+            if (Sync != engine) return;
+            Settings.RememberPeer(node, name, Clock.UtcNow);
+            SaveSettings();
+        });
         engine.IdentityChanged += id => OnMain(() =>
         {
             if (Settings.GroupId == id.GroupId) return;
@@ -119,8 +128,6 @@ public static class AppState
         engine.PeersChanged += () => OnMain(() =>
         {
             if (Sync != engine) return;
-            var linked = engine.Peers().Where(p => p.Linked && p.Connected).Select(p => (p.NodeId, p.Name));
-            if (Settings.RememberPeers(linked, Clock.UtcNow)) SaveSettings();
             SyncService.UpdateNotification(Context);
             SyncChanged?.Invoke();
         });
@@ -172,10 +179,16 @@ public static class AppState
         public void Dispose() => release();
     }
 
+    /// <summary>How long missed alarms wait at most for the first exchange with a linked device.</summary>
+    public static readonly TimeSpan SettleLimit = TimeSpan.FromSeconds(15);
+
     /// <summary>True while alarms missed before this process started should wait, so a
-    /// linked device that already marked them done can say so first.</summary>
+    /// linked device that already marked them done can say so first: until the first
+    /// exchange with a linked device completes, at most <see cref="SettleLimit"/>, and not
+    /// at all for a phone linked with nothing.</summary>
     public static bool SettlingAfterStart(DateTimeOffset now) =>
-        Settings.SyncEnabled && now - StartedUtc < TimeSpan.FromSeconds(6);
+        Settings.SyncEnabled && Settings.KnownPeers.Count > 0 && Sync?.FirstSyncDone != true
+        && now - StartedUtc < SettleLimit;
 
     // ---- Utilities ---------------------------------------------------------------------
 

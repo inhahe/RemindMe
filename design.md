@@ -183,16 +183,34 @@ separately (see *Simplification opportunities*).
   derive per-direction keys from the group secret and the two nonces (HKDF-SHA256),
   and every later frame is AES-GCM with a counter nonce. A peer with the wrong
   secret fails its first frame and is dropped. As in LanLink, **the lower node ID
-  dials**, a fresh `hello` from a known node replaces the old connection, TCP
-  keep-alive is on, and inbound connections from outside the LAN are refused
-  unless `AcceptExternalConnections` is set.
-- **Pairing (linking)**: on a session between different groups, the joining
-  device sends `pair_request` with an ephemeral ECDH P-256 key. The other replies
-  with its own key. Both show a 6-digit code derived from the shared secret, and
-  the user accepts on the receiving device, which sends `pair_accept` carrying its
-  group ID and secret, encrypted under the ECDH secret. The joiner adopts that
-  group and reconnects, and the two task lists merge. Comparing the codes defeats
-  a man in the middle on the LAN.
+  dials** (but if a same-group peer keeps announcing for 10 s with no session,
+  the higher ID dials too, in case a firewall refuses the lower one), TCP
+  keep-alive is on with `NoDelay`, and inbound connections from outside the LAN
+  are refused unless `AcceptExternalConnections` is set.
+- **Hello proves nothing; the first sealed frame does.** A session is
+  `Authenticated` once its peer's first sealed frame opens. A fresh `hello`
+  replaces a stale session (as in LanLink), but never an authenticated one: a
+  session claiming the group takes over only when it authenticates. A claimed-
+  but-unproven session is closed after 15 s. Otherwise anyone on the LAN could
+  say hello as one linked device and cut it off from another. Only authenticated
+  sessions receive broadcasts. Node IDs must be 32 hex digits, which makes the key
+  labels unambiguous. Frames are limited to 64 KB until a peer authenticates (32
+  MB after), and at most 32 unproven connections are accepted at a time.
+- **Pairing (linking)**: commit, then reveal. The requester sends
+  `pair_request {commit = SHA-256(its ECDH P-256 key), members}`, the accepter
+  answers `pair_challenge {its key, members}`, and the requester reveals its key
+  in `pair_reveal`, which must match the commitment. Each side's key is fixed
+  before it sees the other's, so a man in the middle can't search for a key that
+  makes the two 6-digit codes agree (without the commitment it could, in seconds).
+  The user compares the codes and accepts on the accepting device. **The device
+  linked with fewer others joins the other's group** (`members` comes from the
+  app's remembered peers; on a tie, the requester joins). Linking a new device
+  from an established one therefore brings the new one in. When the joiner is
+  the requester, `pair_accept` carries the accepter's group sealed under the ECDH
+  secret; otherwise `pair_accept` is empty and the requester sends its own group
+  in `pair_group`. Both prompts say which way it goes, and warn when the joiner
+  will leave devices behind. One pairing per session and one prompt at a time;
+  further requests get `pair_reject {reason: busy}`.
 - **Replication**: when a session starts, both sides send a `digest`:
   `{id, defVersion, stateVersion, doneThrough}` for every task. Each then pushes
   `tasks` for every record where it is newer in any of those three, or that the
@@ -209,10 +227,16 @@ separately (see *Simplification opportunities*).
   `ReuseAddress`, and the TCP port each node listens on travels in the
   announcement. So several instances on one machine, or a node with a custom
   port, still find each other.
-- **Startup settling (desktop)**: for 6 s after startup, an alarm missed while
-  the app was closed waits before it rings, so a linked device that already
-  marked it done can say so first. Without this, the phone and every other
-  device would ring for something already dealt with.
+- **Startup settling**: an alarm missed while the app (or phone) was off waits
+  before it rings, until the first complete exchange with a linked device
+  (`FirstSyncDone`), and for at most 15 s. A device that remembers no linked
+  peers doesn't wait at all. Completion is explicit: after answering a peer's
+  digest, a node sends `digest_done`, and frames arrive in order, so receiving it
+  means every record that peer had to send has arrived. Without the wait, the
+  phone and every other device would ring for something already dealt with.
+- **Remote addresses report their state** (`RemoteStates()`: connected,
+  can't connect, doesn't have the key, not linked) in the Devices screens. A
+  link's backoff resets only after a session that got into sync, or lasted 30 s.
 - **Code layout** (`AlarmCalendar.Core/Sync/`): `Protocol.cs` (messages,
   framing, `SyncCrypto`), `Discovery.cs`, `PeerSession.cs` (one connection, its
   keys and its pairing state), `SyncEngine.cs` (listener, dialling, sessions,

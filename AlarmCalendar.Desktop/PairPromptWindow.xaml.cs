@@ -15,7 +15,7 @@ public partial class PairPromptWindow : Window
     {
         InitializeComponent();
         _prompt = prompt;
-        Question.Text = $"\"{prompt.PeerName}\" wants to link with this device and sync tasks with it.";
+        Question.Text = PairText.Question(prompt);
         CodeText.Text = $"{prompt.Code[..3]} {prompt.Code[3..]}";
     }
 

@@ -36,14 +36,17 @@ internal sealed class Discovery : IDisposable
         _log = log;
     }
 
-    public TimeSpan Interval { get; init; } = TimeSpan.FromSeconds(3);
+    private static readonly TimeSpan Interval = TimeSpan.FromSeconds(3);
+
+    /// <summary>An announcement worth acting on: ours, with a valid node ID and port.</summary>
+    public static bool IsValid(SyncMessage? m) =>
+        m is { Type: MessageTypes.Announce, App: Protocol.App, Port: >= 1 and <= 65535 } && Protocol.IsValidNodeId(m.Node);
 
     public void Start()
     {
         _multicastLock = _acquireMulticastLock?.Invoke();
         _udp = new UdpClient(AddressFamily.InterNetwork);
         _udp.Client.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.ReuseAddress, true);
-        _udp.Client.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.Broadcast, true);
         _udp.Client.Bind(new IPEndPoint(IPAddress.Any, _port));
         _udp.EnableBroadcast = true;
         _ = BroadcastLoopAsync(_cts.Token);
@@ -110,8 +113,7 @@ internal sealed class Discovery : IDisposable
             {
                 var r = await _udp!.ReceiveAsync(ct).ConfigureAwait(false);
                 var msg = Protocol.Deserialize(r.Buffer);
-                if (msg is { Type: MessageTypes.Announce, App: Protocol.App, Node: not null, Port: not null } && msg.Node != _nodeId)
-                    Announced?.Invoke(msg, r.RemoteEndPoint.Address);
+                if (IsValid(msg) && msg!.Node != _nodeId) Announced?.Invoke(msg, r.RemoteEndPoint.Address);
             }
             catch (OperationCanceledException) { break; }
             catch (ObjectDisposedException) { break; }
@@ -120,6 +122,11 @@ internal sealed class Discovery : IDisposable
                 // A WiFi blip or sleep/wake: retry rather than ending discovery for good.
                 try { await Task.Delay(1000, ct).ConfigureAwait(false); }
                 catch (OperationCanceledException) { break; }
+            }
+            catch (Exception e)
+            {
+                // Anyone on the LAN can send anything here; no single packet may end the loop.
+                _log?.Invoke($"Ignored a bad discovery packet: {e.Message}");
             }
         }
     }

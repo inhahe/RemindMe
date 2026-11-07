@@ -29,9 +29,12 @@ public partial class DevicesWindow : Window
         Refresh();
     }
 
+    private bool _pairing;
+
     private void Refresh()
     {
-        StatusText.Text = AppHost.SyncStatus;
+        var remotes = AppHost.Sync?.RemoteStates() ?? [];
+        StatusText.Text = AppHost.SyncStatus + string.Concat(remotes.Select(r => $"\n{r.Address}: {r.State}"));
         var now = AppHost.Clock.UtcNow;
         var live = AppHost.Sync?.Peers() ?? [];
         var rows = live.Select(p => new DeviceRow(p.NodeId, p.Name,
@@ -44,27 +47,29 @@ public partial class DevicesWindow : Window
         var selected = (DeviceList.SelectedItem as DeviceRow)?.NodeId;
         DeviceList.ItemsSource = rows;
         DeviceList.SelectedItem = rows.FirstOrDefault(r => r.NodeId == selected);
-        LinkButton.IsEnabled = AppHost.Sync is not null && DeviceList.SelectedItem is DeviceRow { CanLink: true };
+        LinkButton.IsEnabled = CanLink();
     }
 
     private void DeviceList_SelectionChanged(object sender, System.Windows.Controls.SelectionChangedEventArgs e) =>
-        LinkButton.IsEnabled = AppHost.Sync is not null && DeviceList.SelectedItem is DeviceRow { CanLink: true };
+        LinkButton.IsEnabled = CanLink();
 
     private void Link_Click(object sender, RoutedEventArgs e)
     {
-        if (DeviceList.SelectedItem is not DeviceRow { CanLink: true } row || AppHost.Sync is not { } sync) return;
-        PairText.Text = $"Asking {row.Name}…";
+        if (!CanLink() || DeviceList.SelectedItem is not DeviceRow row || AppHost.Sync is not { } sync) return;
+        _pairing = true;
+        LinkButton.IsEnabled = false;
+        PairStatus.Text = $"Asking {row.Name}…";
         _ = sync.RequestPairingAsync(row.NodeId);
     }
 
-    private void OnPairProgress(PairProgress p) =>
-        PairText.Text = p.Stage switch
-        {
-            PairStage.CodeShown => $"On {p.PeerName}, check that it shows {p.Code![..3]} {p.Code[3..]} and accept.",
-            PairStage.Accepted => $"Linked with {p.PeerName}.",
-            PairStage.Rejected => $"{p.PeerName} said no.",
-            _ => p.Message ?? "Linking failed.",
-        };
+    private void OnPairProgress(PairProgress p)
+    {
+        PairStatus.Text = AlarmCalendar.PairText.Progress(p);
+        if (p.Stage != PairStage.CodeShown) _pairing = false;
+        LinkButton.IsEnabled = CanLink();
+    }
+
+    private bool CanLink() => !_pairing && AppHost.Sync is not null && DeviceList.SelectedItem is DeviceRow { CanLink: true };
 
     private void Leave_Click(object sender, RoutedEventArgs e)
     {

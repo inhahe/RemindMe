@@ -13,7 +13,10 @@ public sealed class SyncTests : IDisposable
         new(Guid.NewGuid().ToString("N"), name, group ?? Guid.NewGuid().ToString("N"),
             key ?? Convert.ToBase64String(RandomNumberGenerator.GetBytes(32)));
 
-    private (SyncEngine engine, TaskStore store) Node(SyncIdentity id, params string[] remotes)
+    private (SyncEngine engine, TaskStore store) Node(SyncIdentity id, params string[] remotes) =>
+        Node(id, 0, null, remotes);
+
+    private (SyncEngine engine, TaskStore store) Node(SyncIdentity id, int linkedDevices, List<string>? log, params string[] remotes)
     {
         var store = new TaskStore(null, id.NodeId, SystemClock.Instance);
         var engine = new SyncEngine(store, id, new SyncOptions
@@ -23,7 +26,8 @@ public sealed class SyncTests : IDisposable
             EnableDiscovery = false,
             RemoteAddresses = remotes,
             ReconnectDelay = TimeSpan.FromMilliseconds(200),
-        });
+            LinkedDeviceCount = () => linkedDevices,
+        }, log is null ? null : line => { lock (log) log.Add(line); });
         engine.Start();
         _engines.Add(engine);
         return (engine, store);
@@ -54,7 +58,6 @@ public sealed class SyncTests : IDisposable
         var fromB = Add(sb, "from B");
         await WaitFor(() => sa.Live().Count == 2 && sb.Live().Count == 2, "both tasks on both nodes");
 
-        sa.MarkDone(fromB.Id);   // nothing is triggered, so this changes nothing
         sa.Save(fromB.Id, fromB.Def with { Description = "edited on A" });
         await WaitFor(() => sb.Get(fromB.Id)!.Def.Description == "edited on A", "the edit reaching B");
     }
@@ -75,15 +78,105 @@ public sealed class SyncTests : IDisposable
     }
 
     [Fact]
-    public async Task AWrongSecretGetsNothing()
+    public async Task AWrongSecretGetsNothingAndChangesNothing()
     {
         var a = NewIdentity("A");
-        var (ea, sa) = Node(a);
+        var logA = new List<string>();
+        var (ea, sa) = Node(a, 0, logA);
         Add(sa, "secret task");
         // Claims A's group but doesn't know its key.
         var (_, sm) = Node(NewIdentity("Mallory", a.GroupId), Addr(ea));
-        await Task.Delay(1500);
-        Assert.Empty(sm.Live());
+        Add(sm, "planted task");
+        // The connection was made, and dropped when Mallory's first sealed frame didn't open.
+        await WaitFor(() => { lock (logA) return logA.Any(l => l.StartsWith("Disconnected from Mallory")); }, "A dropping Mallory");
+        Assert.DoesNotContain(sm.Live(), t => t.Def.Description == "secret task");
+        Assert.DoesNotContain(sa.Live(), t => t.Def.Description == "planted task");
+    }
+
+    [Fact]
+    public async Task AnImpostorCanNotDisplaceALinkedDevice()
+    {
+        var a = NewIdentity("A");
+        var b = NewIdentity("B", a.GroupId, a.GroupKeyBase64);
+        var logA = new List<string>();
+        var (ea, sa) = Node(a, 0, logA);
+        var (eb, sb) = Node(b, Addr(ea));
+        await WaitFor(() => ea.Peers().Any(p => p.NodeId == b.NodeId && p.Connected), "A and B in sync");
+
+        // Mallory says hello as B, in A's group, without the key; then says nothing more.
+        var (_, _) = Node(b with { Name = "Mallory", GroupKeyBase64 = NewIdentity("x").GroupKeyBase64 }, Addr(ea));
+        await Task.Delay(1000);
+        var t = Add(sb, "after the impostor");
+        await WaitFor(() => sa.Get(t.Id) is not null, "B's change still reaching A");
+        Assert.Equal("B", ea.Peers().Single(p => p.NodeId == b.NodeId).Name);
+        // The linked session was never interrupted. (Here B would redial at once over its
+        // remote link; on a LAN, where only the lower ID dials, nobody would.)
+        lock (logA) Assert.Single(logA, l => l.StartsWith("In sync with B "));
+    }
+
+    [Fact]
+    public async Task TheDeviceLinkedWithFewerJoinsTheOther()
+    {
+        // B is already linked with two devices; A, alone, asks to link with it.
+        var a = NewIdentity("A");
+        var b = NewIdentity("B");
+        var (ea, _) = Node(a, 0, null);
+        var (eb, _) = Node(b, 2, null, Addr(ea));
+        PairPrompt? prompt = null;
+        eb.PairRequested += p => prompt = p;
+        SyncIdentity? aAdopted = null;
+        ea.IdentityChanged += id => aAdopted = id;
+        await WaitFor(() => ea.Peers().Any(p => p.NodeId == b.NodeId), "A sees B");
+        await ea.RequestPairingAsync(b.NodeId);
+        await WaitFor(() => prompt is not null, "B asked");
+        Assert.False(prompt!.ThisDeviceJoins);
+        await prompt.AcceptAsync();
+        await WaitFor(() => aAdopted is not null, "A joining B's group");
+        Assert.Equal(b.GroupId, aAdopted!.GroupId);
+        Assert.Equal(b.GroupId, eb.Identity.GroupId);
+
+        // And the other way round: a device with linked devices asking a lone one brings it in.
+        var c = NewIdentity("C");
+        var (ec, _) = Node(c, 0, null);
+        var (ed, _) = Node(NewIdentity("D"), 3, null, Addr(ec));
+        PairPrompt? prompt2 = null;
+        ec.PairRequested += p => prompt2 = p;
+        await WaitFor(() => ed.Peers().Any(p => p.NodeId == c.NodeId), "D sees C");
+        var dGroup = ed.Identity.GroupId;
+        await ed.RequestPairingAsync(c.NodeId);
+        await WaitFor(() => prompt2 is not null, "C asked");
+        Assert.True(prompt2!.ThisDeviceJoins);
+        await prompt2.AcceptAsync();
+        await WaitFor(() => ec.Identity.GroupId == dGroup, "C joining D's group");
+        Assert.Equal(dGroup, ed.Identity.GroupId);
+    }
+
+    [Fact]
+    public void BadAnnouncementsAreIgnored()
+    {
+        var good = new SyncMessage { Type = MessageTypes.Announce, App = Protocol.App, Node = Guid.NewGuid().ToString("N"), Port = 37660 };
+        Assert.True(Discovery.IsValid(good));
+        Assert.False(Discovery.IsValid(new SyncMessage { Type = good.Type, App = good.App, Node = good.Node, Port = -1 }));
+        Assert.False(Discovery.IsValid(new SyncMessage { Type = good.Type, App = good.App, Node = good.Node, Port = 70000 }));
+        Assert.False(Discovery.IsValid(new SyncMessage { Type = good.Type, App = good.App, Node = "a>b", Port = 37660 }));
+    }
+
+    [Fact]
+    public async Task OversizedFramesAreRefusedBeforeAllocating()
+    {
+        var bytes = new byte[] { 0x02, 0x00, 0x00, 0x00 };   // claims 32 MB
+        await Assert.ThrowsAsync<InvalidDataException>(() =>
+            Protocol.ReadFrameAsync(new MemoryStream(bytes), Protocol.MaxUnauthenticatedFrame, default));
+    }
+
+    [Fact]
+    public void MalformedRecordsFromPeersAreSkipped()
+    {
+        var store = new TaskStore(null, Guid.NewGuid().ToString("N"), SystemClock.Instance);
+        var good = new AlarmTask { Id = Guid.NewGuid(), Def = new TaskDefinition { Description = "ok" } };
+        var changed = store.Merge([null!, good with { Id = Guid.NewGuid(), Def = null! }, good]);
+        Assert.Single(changed);
+        Assert.Single(store.All());
     }
 
     [Fact]

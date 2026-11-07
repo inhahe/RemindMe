@@ -27,7 +27,7 @@ public static class AlarmScheduler
             if (!st.ShouldAlert) continue;
             if (st.AlertDue < AppState.StartedUtc && AppState.SettlingAfterStart(now) && !RingingService.IsShowing(t.Id))
             {
-                settleUntil = AppState.StartedUtc + TimeSpan.FromSeconds(6);
+                settleUntil = AppState.StartedUtc + AppState.SettleLimit;
                 continue;
             }
             result.Add(st);

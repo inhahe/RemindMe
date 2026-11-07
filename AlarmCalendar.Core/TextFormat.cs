@@ -3,6 +3,31 @@ using System.Text;
 
 namespace AlarmCalendar;
 
+/// <summary>What both apps say about linking devices.</summary>
+public static class PairText
+{
+    private static string Devices(int n) => n == 1 ? "1 other device" : $"{n} other devices";
+
+    /// <summary>The question on the device asked to accept a link.</summary>
+    public static string Question(Sync.PairPrompt p) => p.ThisDeviceJoins
+        ? $"\"{p.PeerName}\" wants to link with this device. This device will join its sync group"
+          + (p.MyLinkedDevices > 0 ? $" and stop syncing with the {Devices(p.MyLinkedDevices)} it is linked with now." : ".")
+        : $"\"{p.PeerName}\" wants to link with this device and sync tasks with it.";
+
+    /// <summary>The requesting device's line while it waits for the other to accept.</summary>
+    public static string Progress(Sync.PairProgress p) => p.Stage switch
+    {
+        Sync.PairStage.CodeShown => $"On {p.PeerName}, check that it shows {p.Code![..3]} {p.Code[3..]} and accept."
+            + (p.ThisDeviceJoins && p.MyLinkedDevices > 0
+                ? $" This device will then join {p.PeerName}'s group and stop syncing with the {Devices(p.MyLinkedDevices)} it is linked with now."
+                : ""),
+        Sync.PairStage.Accepted when p.Message is not null => p.Message,
+        Sync.PairStage.Accepted => $"Linked with {p.PeerName}.",
+        Sync.PairStage.Rejected => p.Message ?? $"{p.PeerName} said no.",
+        _ => p.Message ?? "Linking failed.",
+    };
+}
+
 /// <summary>The words and numbers both apps show, so the two can't word things differently.</summary>
 public static class TextFormat
 {

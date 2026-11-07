@@ -55,6 +55,7 @@ public static class AppHost
             Port = s.Port,
             AcceptExternalConnections = s.AcceptExternalConnections,
             RemoteAddresses = s.RemoteAddresses.ToList(),
+            LinkedDeviceCount = () => Settings.KnownPeers.Count,
         }, Log);
         engine.IdentityChanged += id => OnUi(() =>
         {
@@ -66,13 +67,13 @@ public static class AppHost
         });
         engine.PairRequested += p => OnUi(() => new PairPromptWindow(p).Show());
         engine.PairProgressed += p => OnUi(() => PairProgressed?.Invoke(p));
-        engine.PeersChanged += () => OnUi(() =>
+        engine.PeerSeen += (node, name) => OnUi(() =>
         {
             if (Sync != engine) return;
-            var linked = engine.Peers().Where(p => p.Linked && p.Connected).Select(p => (p.NodeId, p.Name));
-            if (Settings.RememberPeers(linked, Clock.UtcNow)) SaveSettings();
-            SyncChanged?.Invoke();
+            Settings.RememberPeer(node, name, Clock.UtcNow);
+            SaveSettings();
         });
+        engine.PeersChanged += () => OnUi(() => { if (Sync == engine) SyncChanged?.Invoke(); });
         try
         {
             engine.Start();
@@ -97,10 +98,12 @@ public static class AppHost
         SyncChanged?.Invoke();
     }
 
-    /// <summary>While true, alarms missed while the app wasn't running wait a moment, so a
-    /// peer that already marked one done can say so before it rings here.</summary>
+    /// <summary>While true, alarms missed while the app wasn't running wait, so a linked
+    /// device that already marked one done can say so before it rings here: until the first
+    /// exchange with a linked device completes, for at most 15 s, and not at all for a
+    /// device linked with nothing.</summary>
     public static bool SettlingAfterStart(DateTimeOffset now) =>
-        Sync is not null && now - StartedUtc < TimeSpan.FromSeconds(6);
+        Sync is { FirstSyncDone: false } && Settings.KnownPeers.Count > 0 && now - StartedUtc < TimeSpan.FromSeconds(15);
 
     private static string SettingsPath => Path.Combine(DataDir, "settings.json");
 

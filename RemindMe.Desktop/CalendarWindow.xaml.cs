@@ -2,6 +2,7 @@ using System.Collections.ObjectModel;
 using System.Globalization;
 using System.Windows;
 using System.Windows.Automation;
+using System.Windows.Automation.Peers;
 using System.Windows.Controls;
 using System.Windows.Documents;
 using System.Windows.Input;
@@ -38,23 +39,34 @@ public partial class CalendarWindow : Window
     }
 
     /// <summary>One time a task comes up on the chosen day, as the day's list shows it.</summary>
-    public sealed class DayEntry(Guid taskId, int nth) : Observable
+    public sealed class DayEntry(Guid taskId, int fromEnd) : Observable
     {
         private string _time = "", _title = "", _waitingNote = "", _schedule = "";
 
         public Guid TaskId { get; } = taskId;
-        /// <summary>Which of the task's times on the day this is (0 for its first): with the
-        /// task, what keeps the row from one update to the next, as the time itself can move.</summary>
-        public int Nth { get; } = nth;
-        public string Time { get => _time; set => Set(ref _time, value); }
-        public string Title { get => _title; set => Set(ref _title, value); }
+        /// <summary>Which of the task's times on the day this is, counted from its last (0).
+        /// With the task, it keeps the row from one update to the next: the time itself can
+        /// move (an estimate), and marking a time done takes the task's first time away.</summary>
+        public int FromEnd { get; } = fromEnd;
+        public string Time => _time;
+        public string Title => _title;
         /// <summary>" · waiting to be marked done", or nothing.</summary>
-        public string WaitingNote { get => _waitingNote; set => Set(ref _waitingNote, value); }
-        public string Schedule { get => _schedule; set => Set(ref _schedule, value); }
+        public string WaitingNote => _waitingNote;
+        public string Schedule => _schedule;
+        /// <summary>What a screen reader says for the row (bound in CalendarWindow.xaml).</summary>
+        public string Spoken => $"{Time} {Title}{(WaitingNote.Length > 0 ? ", waiting to be marked done" : "")}, {Schedule}";
 
-        /// <summary>What a screen reader says for the row.</summary>
-        public override string ToString() =>
-            $"{Time} {Title}{(WaitingNote.Length > 0 ? ", waiting to be marked done" : "")}, {Schedule}";
+        /// <summary>Shows the time as it is now. <see cref="Spoken"/> changes once, whatever
+        /// parts of it change.</summary>
+        public void Show(string time, string title, bool waiting, string schedule)
+        {
+            bool spoken = Set(ref _time, time, nameof(Time)) | Set(ref _title, title, nameof(Title))
+                | Set(ref _waitingNote, waiting ? " · waiting to be marked done" : "", nameof(WaitingNote))
+                | Set(ref _schedule, schedule, nameof(Schedule));
+            if (spoken) Changed(nameof(Spoken));
+        }
+
+        public override string ToString() => Spoken;
     }
 
     private readonly MainWindow _main;
@@ -83,7 +95,7 @@ public partial class CalendarWindow : Window
         _chosenCell = (Style)FindResource("ChosenDayCell");
         MakeGrid();
         DayList.ItemsSource = _entries;
-        var today = TimeMath.ToWall(AppHost.Clock.UtcNow, AppHost.Clock.Zone).Date;
+        var today = Today();
         _month = new DateTime(today.Year, today.Month, 1);
         _chosen = DateOnly.FromDateTime(today);
         AppHost.Store.Changed += OnStoreChanged;
@@ -170,7 +182,11 @@ public partial class CalendarWindow : Window
         if (_chosen.Year != month.Year || _chosen.Month != month.Month) _chosen = DateOnly.FromDateTime(month);
         bool inGrid = MonthGrid.IsKeyboardFocusWithin;
         Build();
-        if (inGrid) CellOf(_chosen)?.Focus();
+        if (!inGrid || CellOf(_chosen) is not { } cell) return;
+        if (!cell.IsKeyboardFocused) { cell.Focus(); return; }
+        // The button with the focus now shows the chosen day (the buttons stay; their dates
+        // change): no focus change to tell a screen reader of it, so say so.
+        UIElementAutomationPeer.CreatePeerForElement(cell)?.RaiseAutomationEvent(AutomationEvents.AutomationFocusChanged);
     }
 
     /// <summary>Fills the grid with <see cref="_month"/>'s six weeks, and the list with the
@@ -272,47 +288,24 @@ public partial class CalendarWindow : Window
         var now = AppHost.Clock.UtcNow;
         var zone = AppHost.Clock.Zone;
         DayTitle.Text = LongDate(_chosen);
-        var entries = (_days.FirstOrDefault(d => d.Date == _chosen)?.Entries ?? [])
-            .Select(e => (Entry: e, Task: AppHost.Store.Get(e.TaskId)))
-            .Where(x => x.Task is not null)
-            .ToList();
-        // The key of a row: its task, and which of the task's times on the day it is.
-        var seen = new Dictionary<Guid, int>();
-        var keyed = entries.Select(x =>
+        // Each time with its task, and which of the task's times on the day it is, from the end.
+        var entries = _days.FirstOrDefault(d => d.Date == _chosen)?.Entries ?? [];
+        var left = entries.GroupBy(e => e.TaskId).ToDictionary(g => g.Key, g => g.Count());
+        var shown = new List<(CalendarEntry Entry, AlarmTask Task, int FromEnd)>();
+        foreach (var e in entries)
         {
-            int nth = seen.TryGetValue(x.Entry.TaskId, out var n) ? n + 1 : 0;
-            seen[x.Entry.TaskId] = nth;
-            return (x.Entry, Task: x.Task!, Nth: nth);
-        }).ToList();
-
-        // If the row with the focus goes (its task deleted or moved), the focus goes to the
-        // row now in its place, or to the chosen day if the list is left empty.
-        int focusedAt = DayList.IsKeyboardFocusWithin ? FocusedRow() : -1;
-        Rows.Reconcile(_entries, keyed, x => (x.Entry.TaskId, x.Nth), r => (r.TaskId, r.Nth),
-            x => new DayEntry(x.Entry.TaskId, x.Nth), (row, x) =>
-            {
-                row.Time = x.Entry.Text;
-                row.Title = x.Entry.Title;
-                row.WaitingNote = x.Entry.Waiting ? " · waiting to be marked done" : "";
-                row.Schedule = TextFormat.Schedule(x.Task.Def, x.Task.State, now, zone, culture);
-            });
+            int fromEnd = --left[e.TaskId];
+            if (AppHost.Store.Get(e.TaskId) is { } task) shown.Add((e, task, fromEnd));
+        }
+        // With the list emptied, the focus passes from it to the chosen day.
+        Rows.Update(DayList, _entries, shown, x => (x.Entry.TaskId, x.FromEnd), r => (r.TaskId, r.FromEnd),
+            x => new DayEntry(x.Entry.TaskId, x.FromEnd),
+            (row, x) => row.Show(x.Entry.Text, x.Entry.Title, x.Entry.Waiting,
+                TextFormat.Schedule(x.Task.Def, x.Task.State, now, zone, culture)),
+            whenEmpty: () => CellOf(_chosen));
         bool empty = _entries.Count == 0;
         DayList.Visibility = empty ? Visibility.Collapsed : Visibility.Visible;
         NothingText.Visibility = empty ? Visibility.Visible : Visibility.Collapsed;
-        if (focusedAt < 0 || DayList.IsKeyboardFocusWithin) return;
-        if (empty) { CellOf(_chosen)?.Focus(); return; }
-        int at = Math.Min(focusedAt, _entries.Count - 1);
-        // Its row may not be made yet: after the next layout.
-        Dispatcher.BeginInvoke(DispatcherPriority.Loaded, () =>
-            (DayList.ItemContainerGenerator.ContainerFromIndex(at) as ListBoxItem)?.Focus());
-    }
-
-    /// <summary>The index of the day list's row with the keyboard focus, or -1.</summary>
-    private int FocusedRow()
-    {
-        for (int i = 0; i < DayList.Items.Count; i++)
-            if (DayList.ItemContainerGenerator.ContainerFromIndex(i) is ListBoxItem { IsKeyboardFocusWithin: true }) return i;
-        return -1;
     }
 
     private void OpenChosen()

@@ -198,11 +198,13 @@ otherwise also give.
   shown.
   The 42 buttons are made once and filled anew on each update (a task
   changing, a time coming up, the month turning), and the list's rows
-  (`DayEntry`, kept by their task and which of its times on the day they are)
-  are updated in place: the focus and the selection stay where they are, and a
+  (`DayEntry`, kept by their task and which of its times on the day they are,
+  counted from the last, since marking a time done takes the first away) are
+  updated in place: the focus and the selection stay where they are, and a
   screen reader isn't sent back to the start. Store changes arriving together
   rebuild once. Turning the month with the focus in the grid moves it to the
-  chosen day; a list row with the focus that goes passes it to the row now in
+  chosen day, or, if the focused button now shows that day, tells a screen
+  reader so; a list row with the focus that goes passes it to the row now in
   its place, or to the chosen day.
 - **Android** (`CalendarActivity`, from the ⋮ menu) shows each day's first
   time, in short ("9:00a", "~6:30p", or "18:30" with a 24-hour clock), and
@@ -538,9 +540,15 @@ separately (see *Simplification opportunities*).
   tray.
 - `DevicesWindow`'s list is refreshed every 3 seconds and on every sync change.
   Its rows, the task list's and the calendar day list's are `Observable`, kept
-  by a key and updated in place by `Rows.Reconcile` (which shows a key given
-  twice once), so the selection and the keyboard focus aren't thrown off a row
-  at each refresh.
+  by a key and updated in place by `Rows.Update`, so the selection and the
+  keyboard focus aren't thrown off a row at each refresh. It runs Core's
+  `ListSync.Reconcile` (unit-tested): rows whose key is gone are removed, the
+  longest run of rows already in order stays, and every other row moves once,
+  so one task re-ranked is one move, not a row-by-row shuffle a screen reader
+  would hear; a key given twice is an error. If the row with the window's
+  focus goes, `Rows.Update` passes the focus, and the selection if it had it,
+  to the row now in its place (or a fallback), taking the keyboard focus only
+  in the active window, and setting the logical focus otherwise.
 - `TaskEditorWindow`, `SettingsWindow`, `DevicesWindow` and
   `SoundPickerWindow` are all **non-modal**. WPF's `ShowDialog` disables every
   other window of the thread, ringing alarm windows included, and an alarm must

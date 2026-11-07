@@ -93,7 +93,7 @@ public partial class MainWindow : Window
         var zone = AppHost.Clock.Zone;
         var ordered = statuses.OrderBy(AlarmEngine.ListRank).ThenBy(st => st.NextReminder ?? st.NextOccurrence ?? DateTimeOffset.MaxValue)
             .ThenBy(st => st.Task.Def.Description, StringComparer.CurrentCultureIgnoreCase);
-        Rows.Reconcile(_rows, ordered, st => st.Task.Id, r => r.Id, st => new TaskRow { Id = st.Task.Id }, (row, st) =>
+        Rows.Update(List, _rows, ordered, st => st.Task.Id, r => r.Id, st => new TaskRow { Id = st.Task.Id }, (row, st) =>
         {
             row.Latest = st;
             row.Description = TextFormat.Snippet(st.Task.Def.Description) is { Length: > 0 } s ? s : "(no description)";

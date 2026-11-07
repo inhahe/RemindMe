@@ -15,14 +15,24 @@ public partial class DevicesWindow : Window
         private string _name = "", _status = "", _address = "";
 
         public string NodeId { get; } = nodeId;
-        public string Name { get => _name; set => Set(ref _name, value); }
-        public string Status { get => _status; set { if (Set(ref _status, value)) Changed(nameof(SpokenStatus)); } }
-        public string Address { get => _address; set { if (Set(ref _address, value)) Changed(nameof(SpokenStatus)); } }
+        public string Name => _name;
+        public string Status => _status;
+        public string Address => _address;
         /// <summary>Whether Link can ask it to join this device's group (it isn't linked).</summary>
-        public bool CanLink { get; set; }
+        public bool CanLink { get; private set; }
         /// <summary>What a screen reader says after the name: the status, and the address
         /// if there is one, so two devices of one name differ.</summary>
         public string SpokenStatus => Address.Length > 0 ? $"{Status}, {Address}" : Status;
+
+        /// <summary>Shows the device as it is now. <see cref="SpokenStatus"/> changes once,
+        /// whatever parts of it change.</summary>
+        public void Show(string name, string status, string address, bool canLink)
+        {
+            Set(ref _name, name, nameof(Name));
+            CanLink = canLink;
+            bool spoken = Set(ref _status, status, nameof(Status)) | Set(ref _address, address, nameof(Address));
+            if (spoken) Changed(nameof(SpokenStatus));
+        }
 
         /// <summary>The device's name: what a screen reader says for its row, and the text
         /// typing in the list finds it by.</summary>
@@ -67,14 +77,8 @@ public partial class DevicesWindow : Window
         foreach (var k in AppHost.Settings.KnownPeers.Where(k => shown.All(r => r.NodeId != k.NodeId)))
             shown.Add((k.NodeId, k.Name, RemindMe.PairText.LastInSync(k, now, AppHost.Clock.Zone), "", false));
 
-        // A device listed twice (as settings.json can hold it) shows once.
-        Rows.Reconcile(_rows, shown, d => d.NodeId, r => r.NodeId, d => new DeviceRow(d.NodeId), (row, d) =>
-        {
-            row.Name = d.Name;
-            row.Status = d.Status;
-            row.Address = d.Address;
-            row.CanLink = d.CanLink;
-        });
+        Rows.Update(DeviceList, _rows, shown, d => d.NodeId, r => r.NodeId, d => new DeviceRow(d.NodeId),
+            (row, d) => row.Show(d.Name, d.Status, d.Address, d.CanLink));
         LinkButton.IsEnabled = CanLink();
     }
 

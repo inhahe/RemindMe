@@ -81,11 +81,16 @@
                                Text="Double-click a task, or press Enter, to edit it." />
                     <TextBlock x:Name="NothingText" DockPanel.Dock="Top" Margin="2,10,0,0" Style="{StaticResource Hint}"
                                Text="Nothing comes up." />
-                    <!-- A row (DayEntry) for each time the day's tasks come up; a screen reader
-                         reads its ToString. -->
+                    <!-- A row (DayEntry) for each time the day's tasks come up. -->
                     <ListBox x:Name="DayList" Margin="0,8,0,0" BorderThickness="0" Background="Transparent"
                              MouseDoubleClick="DayList_DoubleClick" KeyDown="DayList_KeyDown"
                              ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                        <!-- What a screen reader says for a row, told to it as it changes. -->
+                        <ListBox.ItemContainerStyle>
+                            <Style TargetType="ListBoxItem" BasedOn="{StaticResource {x:Type ListBoxItem}}">
+                                <Setter Property="AutomationProperties.Name" Value="{Binding Spoken}" />
+                            </Style>
+                        </ListBox.ItemContainerStyle>
                         <ListBox.ItemTemplate>
                             <DataTemplate>
                                 <TextBlock TextWrapping="Wrap"><Run Text="{Binding Time, Mode=OneWay}" FontWeight="SemiBold" /><Run Text="  " /><Run Text="{Binding Title, Mode=OneWay}" /><Run Text="{Binding WaitingNote, Mode=OneWay}" Foreground="{DynamicResource SystemFillColorCriticalBrush}" /><LineBreak /><Run Text="{Binding Schedule, Mode=OneWay}" FontSize="11" Foreground="{DynamicResource TextFillColorSecondaryBrush}" /></TextBlock>

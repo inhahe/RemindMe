@@ -12,7 +12,7 @@ public sealed class TaskRow : INotifyPropertyChanged
 {
     public Guid Id { get; init; }
     private string _description = "", _schedule = "", _status = "", _next = "";
-    private bool _ringing, _waiting, _finished;
+    private bool _ringing, _waiting, _finished, _paused;
 
     public string Description { get => _description; set => Set(ref _description, value); }
     public string Schedule { get => _schedule; set => Set(ref _schedule, value); }
@@ -21,6 +21,7 @@ public sealed class TaskRow : INotifyPropertyChanged
     public bool Ringing { get => _ringing; set => Set(ref _ringing, value); }
     public bool Waiting { get => _waiting; set => Set(ref _waiting, value); }
     public bool Finished { get => _finished; set => Set(ref _finished, value); }
+    public bool Paused { get => _paused; set => Set(ref _paused, value); }
     public TaskStatus? Latest { get; set; }
 
     public event PropertyChangedEventHandler? PropertyChanged;
@@ -92,7 +93,7 @@ public partial class MainWindow : Window
         var now = AppHost.Clock.UtcNow;
         var zone = AppHost.Clock.Zone;
         var byId = _rows.ToDictionary(r => r.Id);
-        var ordered = statuses.OrderBy(Rank).ThenBy(st => st.NextReminder ?? st.NextOccurrence ?? DateTimeOffset.MaxValue)
+        var ordered = statuses.OrderBy(AlarmEngine.ListRank).ThenBy(st => st.NextReminder ?? st.NextOccurrence ?? DateTimeOffset.MaxValue)
             .ThenBy(st => st.Task.Def.Description, StringComparer.CurrentCultureIgnoreCase).ToList();
 
         for (int i = 0; i < ordered.Count; i++)
@@ -111,6 +112,7 @@ public partial class MainWindow : Window
             row.Ringing = st.ShouldAlert;
             row.Waiting = st.Snoozed;
             row.Finished = st.Finished;
+            row.Paused = st.Paused;
             int at = _rows.IndexOf(row);
             if (at != i) _rows.Move(at, i);   // Move keeps the selection, unlike remove + insert
         }
@@ -127,9 +129,6 @@ public partial class MainWindow : Window
         UpdateButtons();
     }
 
-    /// <summary>Ringing first, then waiting, then scheduled, finished last.</summary>
-    private static int Rank(TaskStatus st) => st.ShouldAlert ? 0 : st.Snoozed ? 1 : st.Finished ? 3 : 2;
-
     private List<TaskRow> SelectedRows() => List.SelectedItems.Cast<TaskRow>().ToList();
 
     private void UpdateButtons()
@@ -139,6 +138,10 @@ public partial class MainWindow : Window
         DeleteButton.IsEnabled = sel.Count > 0;
         DoneButton.IsEnabled = sel.Any(r => r.Latest?.Triggered == true);
         ShowAlarmButton.IsEnabled = sel.Any(r => r.Latest?.Snoozed == true);
+        PauseButton.IsEnabled = sel.Count > 0;
+        // Resume when everything selected is paused; otherwise Pause.
+        bool resume = sel.Count > 0 && sel.All(r => r.Latest?.Paused == true);
+        PauseButton.Content = PauseMenuItem.Header = resume ? "Res_ume" : "_Pause";
     }
 
     private void List_SelectionChanged(object sender, System.Windows.Controls.SelectionChangedEventArgs e) => UpdateButtons();
@@ -173,6 +176,17 @@ public partial class MainWindow : Window
     {
         foreach (var row in SelectedRows().Where(r => r.Latest?.Triggered == true))
             AppHost.Alarms.ShowNow(row.Id);
+    }
+
+    private void PauseResume_Click(object sender, RoutedEventArgs e)
+    {
+        var sel = SelectedRows();
+        bool resume = sel.Count > 0 && sel.All(r => r.Latest?.Paused == true);
+        foreach (var row in sel)
+        {
+            if (resume) AppHost.Store.Resume(row.Id);
+            else AppHost.Store.Pause(row.Id);
+        }
     }
 
     private void RestartCountdown_Click(object sender, RoutedEventArgs e)

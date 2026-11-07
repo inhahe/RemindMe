@@ -76,6 +76,7 @@ with its own version (a hybrid logical clock, `Hlc`):
 | `CountdownEndsUtc` | When a running countdown ends. An instant, so it survives reboots (R12). |
 | `DoneThroughUtc` | Every occurrence at or before this has been dealt with. It only ever goes up. |
 | `SnoozeUntilUtc`, `SnoozeOccurrenceUtc` | After a dismissal: when to remind again, and the occurrence that was dismissed |
+| `PausedAtUtc` | When the user paused the task; `null` while it isn't paused |
 
 Per-device `AppSettings` (not synced): defaults for the sound, sound mode,
 reminder interval, time of day (09:00) and restart mode; desktop window and
@@ -124,7 +125,14 @@ sync: each device reaches the same answer independently.
 - **Saving a schedule change**: `ScheduleRevision++`, a fresh state with
   `DoneThrough = save time`, and `Anchor` cleared. Only occurrences after the save
   fire. A start of "now", the editor's default, therefore means the first alarm
-  comes one interval from now, not immediately.
+  comes one interval from now, not immediately. A paused task stays paused,
+  except a countdown restarted on purpose, which runs.
+- **Pause (S4, S6)**: `PausedAt = now`. A paused task is never triggered, so
+  pausing one that rings stops it, and it has no wake-up. **Resume**:
+  `DoneThrough = now`, so whatever came up while paused (and before) is passed
+  over rather than ringing all at once. A countdown's end moves on by the time it
+  was paused, so it takes up where it stopped, with the time it had left. Both
+  are state changes, synced like a mark-done.
 - **Next wake-up**: the earliest of each untriggered task's next occurrence and
   each snoozed task's `SnoozeUntil` (or its next `OnSchedule` occurrence, if that
   is sooner). Android hands this to `AlarmManager`. The desktop polls every

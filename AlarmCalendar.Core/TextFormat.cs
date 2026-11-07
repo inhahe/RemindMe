@@ -206,6 +206,7 @@ public static class TextFormat
     /// reminder, scheduled, or finished.</summary>
     public static string Status(TaskStatus st, DateTimeOffset now, TimeZoneInfo zone, CultureInfo? culture = null)
     {
+        if (st.Paused) return st.CountdownLeft is { } left ? $"Paused, {Clock(left)} left" : "Paused";
         if (st.Task.Def.Kind == ScheduleKind.Countdown && !st.Triggered && st.NextOccurrence is { } end)
             return $"Running, {Clock(end - now)} left";
         if (st.Finished) return st.Task.Def.Kind == ScheduleKind.Weekly ? "No days chosen" : "Done";

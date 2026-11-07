@@ -44,6 +44,12 @@ public sealed record TaskStatus
 
     /// <summary>The current alert is a reminder after a dismissal rather than a new occurrence.</summary>
     public bool IsReminder { get; init; }
+
+    /// <summary>The user paused the task: nothing about it rings until it is resumed.</summary>
+    public bool Paused { get; init; }
+
+    /// <summary>For a paused countdown that hadn't finished: the time it has left.</summary>
+    public TimeSpan? CountdownLeft { get; init; }
 }
 
 /// <summary>Evaluation of tasks against the clock, and the state changes for each user action.</summary>
@@ -59,6 +65,14 @@ public static class AlarmEngine
         var d = task.Def;
         var s = task.State;
         if (d.Deleted) return new TaskStatus { Task = task, Finished = true };
+        if (s.PausedAtUtc is { } pausedAt)
+            return new TaskStatus
+            {
+                Task = task,
+                Paused = true,
+                CountdownLeft = d.Kind == ScheduleKind.Countdown && s.CountdownEndsUtc is { } ends && ends > pausedAt
+                    && ends > s.DoneThroughUtc ? ends - pausedAt : null,
+            };
 
         bool fromDone = d.Kind == ScheduleKind.Interval && d.Restart == RestartMode.FromDone;
         var pending = Occurrences.After(d, s, s.DoneThroughUtc, zone);
@@ -171,16 +185,47 @@ public static class AlarmEngine
         };
     }
 
+    /// <summary>The state after the user pauses the task: it stops ringing, and rings no
+    /// more until resumed.</summary>
+    public static TaskState Pause(AlarmTask task, DateTimeOffset now) =>
+        task.State.PausedAtUtc is not null ? task.State : task.State with { PausedAtUtc = TimeMath.TruncateToSecond(now) };
+
+    /// <summary>The state after the user resumes a paused task. Whatever came up before now
+    /// is passed over, as if marked done, and a countdown takes up where it stopped, with the
+    /// time it had left.</summary>
+    public static TaskState Resume(AlarmTask task, DateTimeOffset now)
+    {
+        var s = task.State;
+        if (s.PausedAtUtc is not { } at) return s;
+        var pausedFor = now > at ? now - at : TimeSpan.Zero;
+        return s with
+        {
+            PausedAtUtc = null,
+            CountdownEndsUtc = s.CountdownEndsUtc is { } ends && ends > at ? ends + pausedFor : s.CountdownEndsUtc,
+            DoneThroughUtc = TimeMath.Max(s.DoneThroughUtc, now),
+            SnoozeUntilUtc = null,
+            SnoozeOccurrenceUtc = null,
+        };
+    }
+
     /// <summary>The state to store with a newly saved schedule: only occurrences after
-    /// <paramref name="now"/> fire, and a countdown starts.</summary>
+    /// <paramref name="now"/> fire, and a countdown starts (paused, if the task was).</summary>
     /// <param name="old">The task's previous state, or null for a new task.</param>
     /// <param name="def">The saved definition, carrying its new ScheduleRevision.</param>
+    /// <param name="keepPaused">A paused task stays paused (an edit), rather than running
+    /// (a countdown restarted on purpose).</param>
     /// <remarks>DoneThrough is set to <paramref name="now"/>, not raised to it: this is the
     /// one way a DoneThrough left in the future by a wrong clock gets lowered again.</remarks>
-    public static TaskState FreshState(TaskState? old, TaskDefinition def, DateTimeOffset now) => new()
+    public static TaskState FreshState(TaskState? old, TaskDefinition def, DateTimeOffset now, bool keepPaused = true) => new()
     {
         Revision = def.ScheduleRevision,
         DoneThroughUtc = now,
         CountdownEndsUtc = def.Kind == ScheduleKind.Countdown ? TimeMath.TruncateToSecond(now) + def.Duration : null,
+        PausedAtUtc = keepPaused && old?.PausedAtUtc is not null ? TimeMath.TruncateToSecond(now) : null,
     };
+
+    /// <summary>Where a task goes in a list: ringing first, then waiting to be marked done,
+    /// then scheduled, then paused, finished last.</summary>
+    public static int ListRank(TaskStatus st) =>
+        st.ShouldAlert ? 0 : st.Snoozed ? 1 : st.Paused ? 3 : st.Finished ? 4 : 2;
 }

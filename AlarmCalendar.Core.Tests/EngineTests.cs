@@ -137,6 +137,61 @@ public class EngineTests
     }
 
     [Fact]
+    public void APausedTaskStopsRingingAndPassesOverWhatCameUpMeanwhile()
+    {
+        var t = EveryHourFromNow(RestartMode.OnSchedule);
+        _clock.UtcNow = NY(2026, 6, 1, 10, 0, 5);
+        Assert.True(Status(t.Id).ShouldAlert);
+
+        _store.Pause(t.Id);
+        var st = Status(t.Id);
+        Assert.True(st.Paused);
+        Assert.False(st.ShouldAlert);
+        Assert.Equal("Paused", TextFormat.Status(st, _clock.UtcNow, NewYork));
+        _clock.UtcNow = NY(2026, 6, 1, 13, 30);
+        Assert.False(Status(t.Id).Triggered);
+        Assert.Null(AlarmEngine.NextWakeUp(_store.Live(), _clock.UtcNow, NewYork));
+
+        _store.Resume(t.Id);
+        st = Status(t.Id);
+        Assert.False(st.Triggered);   // 10:00 to 13:00 passed over
+        Assert.Equal(NY(2026, 6, 1, 14), st.NextOccurrence);
+    }
+
+    [Fact]
+    public void APausedCountdownKeepsTheTimeItHadLeft()
+    {
+        var t = _store.Save(null, new TaskDefinition { Kind = ScheduleKind.Countdown, Duration = TimeSpan.FromMinutes(25) });
+        _clock.UtcNow = NY(2026, 6, 1, 9, 10);
+        _store.Pause(t.Id);
+        var st = Status(t.Id);
+        Assert.Equal(TimeSpan.FromMinutes(15), st.CountdownLeft);
+        Assert.Equal("Paused, 15:00 left", TextFormat.Status(st, _clock.UtcNow, NewYork));
+
+        _clock.UtcNow = NY(2026, 6, 1, 11, 0);   // paused for 1 h 50 min
+        _store.Resume(t.Id);
+        Assert.Equal(NY(2026, 6, 1, 11, 15), Status(t.Id).NextOccurrence);
+        _clock.UtcNow = NY(2026, 6, 1, 11, 15, 1);
+        Assert.True(Status(t.Id).ShouldAlert);
+    }
+
+    [Fact]
+    public void EditingAPausedTaskKeepsItPausedButRestartingACountdownRunsIt()
+    {
+        var t = _store.Save(null, new TaskDefinition { Kind = ScheduleKind.Countdown, Duration = TimeSpan.FromMinutes(25) });
+        _store.Pause(t.Id);
+        _store.Save(t.Id, t.Def with { Duration = TimeSpan.FromMinutes(5) });
+        var st = Status(t.Id);
+        Assert.True(st.Paused);
+        Assert.Equal(TimeSpan.FromMinutes(5), st.CountdownLeft);
+
+        _store.Save(t.Id, _store.Get(t.Id)!.Def, restartCountdown: true);
+        st = Status(t.Id);
+        Assert.False(st.Paused);
+        Assert.Equal(NY(2026, 6, 1, 9, 5), st.NextOccurrence);
+    }
+
+    [Fact]
     public void EditingOnlyTheDescriptionKeepsTheTriggeredState()
     {
         var t = EveryHourFromNow(RestartMode.FromDone);

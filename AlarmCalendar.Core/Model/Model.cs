@@ -167,6 +167,10 @@ public sealed record TaskState
     /// <summary>The latest occurrence at the time of the dismissal. A later occurrence
     /// ends the snooze.</summary>
     public DateTimeOffset? SnoozeOccurrenceUtc { get; init; }
+
+    /// <summary>When the task was paused; null while it isn't. A paused task never rings, and
+    /// a paused countdown keeps the time it had left (<see cref="CountdownEndsUtc"/> minus this).</summary>
+    public DateTimeOffset? PausedAtUtc { get; init; }
 }
 
 public sealed record AlarmTask

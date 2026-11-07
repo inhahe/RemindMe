@@ -39,7 +39,8 @@ Derived requirements (implied by the above, not spelled out in it):
 | D4 | Android: exact alarms that fire in Doze, rescheduling after boot, an alarm screen that shows over the lock screen, and a sound that keeps playing while the app is in the background. | 4 |
 | D5 | Several alarms ringing at once don't play over each other. | 2, 4 |
 
-Suggestions, not requested. S1 is built; the rest wait for a yes:
+Suggestions, not requested at first. S1 was built on its own; on 2026-11-07 the
+user asked for all the rest (Phase 6):
 
 | ID | Suggestion |
 |---|---|
@@ -121,3 +122,13 @@ Suggestions, not requested. S1 is built; the rest wait for a yes:
     data-handling parts call for: 12 fixes, among them alerts kept across a
     process's death and announcements numbered per process, so a member's clock
     stepping back doesn't silence it.
+
+### Phase 6: the suggestions (S2–S10), asked for on 2026-11-07
+- [x] S4, S6: **Pause and resume** any task, desktop and Android; a paused countdown keeps the time it had left. Restart countdown was already in the list's menus.
+- [ ] S5: snooze presets in the alarm window
+- [ ] S7: every N weeks on chosen weekdays
+- [ ] S10: per-task volume and fade-in
+- [ ] S8: export and import of tasks
+- [ ] S2: calendar view
+- [ ] S3: wake the PC from sleep for an alarm
+- [ ] S9: releases (version, MSI, signed APK, release script)

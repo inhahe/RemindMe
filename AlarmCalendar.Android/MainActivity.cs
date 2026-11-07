@@ -63,7 +63,7 @@ public sealed class MainActivity : Screen
         var now = AppState.Clock.UtcNow;
         var zone = AppState.Clock.Zone;
         var statuses = AppState.Store.Live().Select(t => AlarmEngine.Evaluate(t, now, zone))
-            .OrderBy(st => st.ShouldAlert ? 0 : st.Snoozed ? 1 : st.Finished ? 3 : 2)
+            .OrderBy(AlarmEngine.ListRank)
             .ThenBy(st => st.NextReminder ?? st.NextOccurrence ?? DateTimeOffset.MaxValue)
             .ThenBy(st => st.Task.Def.Description, StringComparer.CurrentCultureIgnoreCase)
             .ToList();
@@ -89,7 +89,8 @@ public sealed class MainActivity : Screen
         if (st.Triggered) items.Add(0, 2, 1, "Mark done");
         if (st.Snoozed) items.Add(0, 3, 2, "Show alarm");
         if (st.Task.Def.Kind == ScheduleKind.Countdown) items.Add(0, 4, 3, "Restart countdown");
-        items.Add(0, 5, 4, "Delete");
+        items.Add(0, 6, 4, st.Paused ? "Resume" : "Pause");
+        items.Add(0, 5, 5, "Delete");
         menu.MenuItemClick += (_, e) =>
         {
             var id = st.Task.Id;
@@ -100,6 +101,10 @@ public sealed class MainActivity : Screen
                 case 3: StartActivity(AlarmActivity.IntentFor(this, id, onRequest: true)); break;
                 case 4:
                     if (AppState.Store.Get(id) is { } t) AppState.Store.Save(id, t.Def, restartCountdown: true);
+                    break;
+                case 6:
+                    if (st.Paused) AppState.Store.Resume(id);
+                    else AppState.Store.Pause(id);
                     break;
                 case 5:
                     var name = TextFormat.Snippet(st.Task.Def.Description, 40);
@@ -175,7 +180,7 @@ public sealed class TaskAdapter(Context context, Action<Guid> open, Action<TaskS
             var next = TextFormat.Next(st, now, zone);
             return new Row(st, snippet.Length > 0 ? snippet : "(no description)",
                 TextFormat.Schedule(st.Task.Def, st.Task.State, now, zone), TextFormat.Status(st, now, zone),
-                next == "—" ? "" : $"Next: {next}", st.ShouldAlert ? 1 : st.Snoozed ? 2 : st.Finished ? 3 : 0);
+                next == "—" ? "" : $"Next: {next}", st.ShouldAlert ? 1 : st.Snoozed ? 2 : st.Finished || st.Paused ? 3 : 0);
         }).ToList();
         bool sameOrder = items.Count == _items.Count && items.Select(i => i.Task.Id).SequenceEqual(_items.Select(i => i.Task.Id));
         var old = _rows;

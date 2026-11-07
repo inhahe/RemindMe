@@ -53,7 +53,13 @@ or waiting to be marked done and when it reminds next, e.g. "reminds today
 
 Double-click a task (or press Enter) to edit it, and press Delete to delete it.
 Right-click for **Mark done**, **Show alarm** (reopens a snoozed alarm without
-ringing it), and **Restart countdown**.
+ringing it), **Pause**, and **Restart countdown**.
+
+**Pause** (also on the toolbar) keeps a task without letting it ring: a ringing
+alarm stops, and nothing comes up until you **Resume** it. Whatever would have
+come up meanwhile is skipped, not rung all at once. A paused countdown keeps the
+time it had left and carries on from there. Editing a paused task keeps it
+paused; **Restart countdown** starts it running again.
 
 ## Sounds
 
@@ -123,7 +129,7 @@ The phone app has the same tasks, schedules, alarm screen, settings and sync,
 laid out for a phone:
 
 - **The list**: tap a task to edit it, long-press for Mark done, Show alarm,
-  Restart countdown and Delete, and tap **+** for a new task. The ⋮ menu has
+  Restart countdown, Pause or Resume, and Delete, and tap **+** for a new task. The ⋮ menu has
   **Devices and sync** and **Settings**.
 - **The editor**: as on Windows. **Back** or **Cancel** leaves without saving.
 - **When a task comes up**: with the phone locked, the alarm screen opens over

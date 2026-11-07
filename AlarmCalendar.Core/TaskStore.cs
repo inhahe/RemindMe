@@ -141,7 +141,11 @@ public sealed class TaskStore
                 result = old;
                 if (old.Def != def) result = result with { Def = def, DefVersion = Versions.Tick() };
                 if (reschedule)
-                    result = result with { State = AlarmEngine.FreshState(old.State, def, now), StateVersion = Versions.Tick() };
+                    result = result with
+                    {
+                        State = AlarmEngine.FreshState(old.State, def, now, keepPaused: !restartCountdown),
+                        StateVersion = Versions.Tick(),
+                    };
                 if (result == old) return old;
             }
             _tasks[result.Id] = result;
@@ -172,6 +176,10 @@ public sealed class TaskStore
     public AlarmTask? MarkDone(Guid id) => ChangeState(id, t => AlarmEngine.MarkDone(t, _clock.UtcNow, _clock.Zone));
 
     public AlarmTask? Dismiss(Guid id) => ChangeState(id, t => AlarmEngine.Dismiss(t, _clock.UtcNow, _clock.Zone));
+
+    public AlarmTask? Pause(Guid id) => ChangeState(id, t => AlarmEngine.Pause(t, _clock.UtcNow));
+
+    public AlarmTask? Resume(Guid id) => ChangeState(id, t => AlarmEngine.Resume(t, _clock.UtcNow));
 
     public void Delete(Guid id)
     {

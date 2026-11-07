@@ -52,6 +52,23 @@ the Desktop Runtime. Not seen:
 **To verify:** on a PC or VM without .NET, run each exe once, and log in again
 after running `RemindMeFD.exe`.
 
+### The tray menu, opened by a real right-click
+The tray icon's menu is a WPF menu now, so that it takes the theme. Tests can't
+right-click the icon without moving the mouse on the desktop. Posting the
+icon's right-click message instead opens the menu, which closes at once, because
+the app can't then take the foreground the way a real click on the tray lets it.
+On a real click, the menu makes its own window the foreground, as other WPF tray
+menus do, so that a click elsewhere closes it. **To verify:** right-click the
+icon (in the taskbar's hidden icons, if it's there); the menu should open at the
+mouse, light or dark like the windows, run what you choose, and close when you
+click elsewhere or press Esc.
+
+### Dark mode, set in Windows
+The windows were checked dark by building with the theme pinned to dark
+(`Fluent.Dark.xaml` in `App.xaml`), not by switching Windows to dark mode, and
+the switch while the app runs wasn't seen. **To verify:** with the app open,
+switch Settings → Personalization → Colors → "Choose your mode" to Dark and back.
+
 ### Android on a real phone
 Checked only on the emulator (API 36). Worth checking on the phone, a Samsung
 running One UI: that the alarm screen opens over the lock screen (One UI can

@@ -26,6 +26,7 @@ public partial class TaskEditorWindow : Window
     public TaskEditorWindow(AlarmTask? existing)
     {
         InitializeComponent();
+        ScreenFit.Apply(this);
         _id = existing?.Id;
         Title = existing is null ? "New task" : "Edit task";
 
@@ -114,7 +115,7 @@ public partial class TaskEditorWindow : Window
         for (int i = 0; i < 7; i++)
         {
             int day = (first + i) % 7;
-            var box = new CheckBox { Content = names[day], Margin = new Thickness(0, 0, 14, 0) };
+            var box = new CheckBox { Content = names[day], MinWidth = 0, Margin = new Thickness(0, 0, 14, 0) };
             _days[day] = box;
             DayBoxes.Children.Add(box);
         }

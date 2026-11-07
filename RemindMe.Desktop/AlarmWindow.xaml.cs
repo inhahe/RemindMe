@@ -46,7 +46,7 @@ public partial class AlarmWindow : Window
         {
             var b = new System.Windows.Controls.Button
             {
-                Content = TextFormat.Short(preset), Padding = new Thickness(8, 1, 8, 1), Margin = new Thickness(0, 0, 6, 0),
+                Content = TextFormat.Short(preset), MinWidth = 0, Margin = new Thickness(0, 0, 6, 0),
                 ToolTip = $"Close this and remind me again in {TextFormat.Short(preset)}, this once",
             };
             b.Click += (_, _) => { _remindIn = preset; Close(); };

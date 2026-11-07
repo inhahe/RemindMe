@@ -1,70 +1,113 @@
 <Window x:Class="RemindMe.Desktop.MainWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:local="clr-namespace:RemindMe.Desktop"
         Title="RemindMe" Icon="app.ico"
-        Width="980" Height="520" MinWidth="560" MinHeight="260">
+        Width="1080" Height="540" MinWidth="560" MinHeight="260">
     <Window.Resources>
-        <Style x:Key="ToolButton" TargetType="Button">
-            <Setter Property="Padding" Value="10,3" />
-            <Setter Property="Margin" Value="0,0,6,0" />
-            <Setter Property="MinWidth" Value="0" />
-        </Style>
-        <Style x:Key="RowStyle" TargetType="ListViewItem">
+        <!-- BasedOn the theme's row for a GridView: the plain list item has no columns. -->
+        <Style x:Key="RowStyle" TargetType="ListViewItem"
+               BasedOn="{StaticResource {x:Static GridView.GridViewItemContainerStyleKey}}">
             <Setter Property="HorizontalContentAlignment" Value="Stretch" />
             <EventSetter Event="MouseDoubleClick" Handler="Row_DoubleClick" />
             <Style.Triggers>
                 <DataTrigger Binding="{Binding Ringing}" Value="True">
-                    <Setter Property="Background" Value="#FFFFE5E5" />
+                    <Setter Property="Background" Value="{DynamicResource SystemFillColorCriticalBackgroundBrush}" />
                     <Setter Property="FontWeight" Value="SemiBold" />
                 </DataTrigger>
                 <DataTrigger Binding="{Binding Waiting}" Value="True">
-                    <Setter Property="Background" Value="#FFFFF6E0" />
+                    <Setter Property="Background" Value="{DynamicResource SystemFillColorCautionBackgroundBrush}" />
                 </DataTrigger>
                 <DataTrigger Binding="{Binding Finished}" Value="True">
-                    <Setter Property="Foreground" Value="#FF8A949E" />
+                    <Setter Property="Foreground" Value="{DynamicResource TextFillColorTertiaryBrush}" />
                 </DataTrigger>
                 <DataTrigger Binding="{Binding Paused}" Value="True">
-                    <Setter Property="Foreground" Value="#FF8A949E" />
+                    <Setter Property="Foreground" Value="{DynamicResource TextFillColorTertiaryBrush}" />
                     <Setter Property="FontStyle" Value="Italic" />
                 </DataTrigger>
             </Style.Triggers>
         </Style>
+        <!-- The tray icon's menu: a WPF menu, so that it takes the theme like the windows. -->
+        <ContextMenu x:Key="TrayMenu" Placement="MousePoint">
+            <MenuItem Header="_Show RemindMe" Click="TrayShow_Click" FontWeight="SemiBold" />
+            <Separator />
+            <MenuItem Header="_New task…" Click="New_Click">
+                <MenuItem.Icon><TextBlock Style="{StaticResource Icon}" Text="&#xE710;" /></MenuItem.Icon>
+            </MenuItem>
+            <MenuItem Header="Ca_lendar…" Click="Calendar_Click">
+                <MenuItem.Icon><TextBlock Style="{StaticResource Icon}" Text="&#xE787;" /></MenuItem.Icon>
+            </MenuItem>
+            <MenuItem Header="De_vices and sync…" Click="Devices_Click">
+                <MenuItem.Icon><TextBlock Style="{StaticResource Icon}" Text="&#xE895;" /></MenuItem.Icon>
+            </MenuItem>
+            <MenuItem Header="_Settings…" Click="Settings_Click">
+                <MenuItem.Icon><TextBlock Style="{StaticResource Icon}" Text="&#xE713;" /></MenuItem.Icon>
+            </MenuItem>
+            <Separator />
+            <MenuItem Header="E_xit" Click="Exit_Click">
+                <MenuItem.Icon><TextBlock Style="{StaticResource Icon}" Text="&#xE7E8;" /></MenuItem.Icon>
+            </MenuItem>
+        </ContextMenu>
     </Window.Resources>
     <DockPanel>
-        <Border DockPanel.Dock="Top" Padding="8,6" BorderBrush="#FFDDE2E7" BorderThickness="0,0,0,1" Background="#FFF7F9FB">
+        <!-- The toolbar: an icon from Windows' icon font beside each label. -->
+        <Border DockPanel.Dock="Top" Padding="8,8" BorderThickness="0,0,0,1"
+                BorderBrush="{DynamicResource DividerStrokeColorDefaultBrush}">
             <DockPanel LastChildFill="False">
-                <Button Style="{StaticResource ToolButton}" Content="_New task…" Click="New_Click" FontWeight="SemiBold" />
-                <Button Style="{StaticResource ToolButton}" x:Name="EditButton" Content="_Edit…" Click="Edit_Click" />
-                <Button Style="{StaticResource ToolButton}" x:Name="DoneButton" Content="_Mark done" Click="Done_Click" />
-                <Button Style="{StaticResource ToolButton}" x:Name="ShowAlarmButton" Content="Show _alarm" Click="ShowAlarm_Click" />
-                <Button Style="{StaticResource ToolButton}" x:Name="PauseButton" Content="_Pause" Click="PauseResume_Click"
-                        ToolTip="A paused task doesn't ring until it is resumed; a paused countdown keeps the time it has left" />
-                <Button Style="{StaticResource ToolButton}" x:Name="DeleteButton" Content="_Delete" Click="Delete_Click" />
-                <Button Style="{StaticResource ToolButton}" DockPanel.Dock="Right" Content="E_xit" Click="Exit_Click" Margin="0" />
-                <Button Style="{StaticResource ToolButton}" DockPanel.Dock="Right" Content="_Settings…" Click="Settings_Click" />
-                <Button Style="{StaticResource ToolButton}" DockPanel.Dock="Right" Content="Ca_lendar…" Click="Calendar_Click"
-                        ToolTip="A month of your tasks" />
-                <Button Style="{StaticResource ToolButton}" DockPanel.Dock="Right" Content="De_vices…" Click="Devices_Click"
-                        ToolTip="Sync with your other computers and phone" />
+                <Button Style="{StaticResource Primary}" Click="New_Click" Margin="0,0,10,0" MinWidth="0" ContentTemplate="{StaticResource WithIcon}"
+                        local:Icons.Glyph="&#xE710;" Content="_New task…" />
+                <Button Style="{StaticResource ToolButton}" x:Name="EditButton" Click="Edit_Click"
+                        local:Icons.Glyph="&#xE70F;" Content="_Edit…" />
+                <Button Style="{StaticResource ToolButton}" x:Name="DoneButton" Click="Done_Click"
+                        local:Icons.Glyph="&#xE73E;" Content="_Mark done" />
+                <Button Style="{StaticResource ToolButton}" x:Name="ShowAlarmButton" Click="ShowAlarm_Click"
+                        local:Icons.Glyph="&#xEA8F;" Content="Show _alarm" />
+                <Button Style="{StaticResource ToolButton}" x:Name="PauseButton" Click="PauseResume_Click"
+                        ToolTip="A paused task doesn't ring until it is resumed; a paused countdown keeps the time it has left"
+                        local:Icons.Glyph="&#xE769;" Content="_Pause" />
+                <Button Style="{StaticResource ToolButton}" x:Name="DeleteButton" Click="Delete_Click"
+                        local:Icons.Glyph="&#xE74D;" Content="_Delete" />
+                <Button Style="{StaticResource ToolButton}" DockPanel.Dock="Right" Click="Exit_Click" Margin="0"
+                        ToolTip="Quit RemindMe: alarms don't ring until it runs again"
+                        local:Icons.Glyph="&#xE7E8;" Content="E_xit" />
+                <Button Style="{StaticResource ToolButton}" DockPanel.Dock="Right" Click="Settings_Click"
+                        local:Icons.Glyph="&#xE713;" Content="_Settings…" />
+                <Button Style="{StaticResource ToolButton}" DockPanel.Dock="Right" Click="Calendar_Click"
+                        ToolTip="A month of your tasks"
+                        local:Icons.Glyph="&#xE787;" Content="Ca_lendar…" />
+                <Button Style="{StaticResource ToolButton}" DockPanel.Dock="Right" Click="Devices_Click"
+                        ToolTip="Sync with your other computers and phone"
+                        local:Icons.Glyph="&#xE895;" Content="De_vices…" />
             </DockPanel>
         </Border>
-        <StatusBar DockPanel.Dock="Bottom">
-            <StatusBarItem>
-                <TextBlock x:Name="StatusText" />
-            </StatusBarItem>
-        </StatusBar>
+        <Border DockPanel.Dock="Bottom" Padding="14,6" BorderThickness="0,1,0,0"
+                BorderBrush="{DynamicResource DividerStrokeColorDefaultBrush}">
+            <TextBlock x:Name="StatusText" Style="{StaticResource Hint}" />
+        </Border>
         <Grid>
             <ListView x:Name="List" ItemContainerStyle="{StaticResource RowStyle}" SelectionMode="Extended"
                       SelectionChanged="List_SelectionChanged" KeyDown="List_KeyDown" BorderThickness="0">
                 <ListView.ContextMenu>
                     <ContextMenu>
-                        <MenuItem Header="_Edit…" Click="Edit_Click" />
-                        <MenuItem Header="_Mark done" Click="Done_Click" />
-                        <MenuItem Header="Show _alarm" Click="ShowAlarm_Click" />
-                        <MenuItem x:Name="PauseMenuItem" Header="_Pause" Click="PauseResume_Click" />
-                        <MenuItem Header="_Restart countdown" Click="RestartCountdown_Click" />
+                        <MenuItem Header="_Edit…" Click="Edit_Click">
+                            <MenuItem.Icon><TextBlock Style="{StaticResource Icon}" Text="&#xE70F;" /></MenuItem.Icon>
+                        </MenuItem>
+                        <MenuItem Header="_Mark done" Click="Done_Click">
+                            <MenuItem.Icon><TextBlock Style="{StaticResource Icon}" Text="&#xE73E;" /></MenuItem.Icon>
+                        </MenuItem>
+                        <MenuItem Header="Show _alarm" Click="ShowAlarm_Click">
+                            <MenuItem.Icon><TextBlock Style="{StaticResource Icon}" Text="&#xEA8F;" /></MenuItem.Icon>
+                        </MenuItem>
+                        <MenuItem x:Name="PauseMenuItem" Header="_Pause" Click="PauseResume_Click">
+                            <MenuItem.Icon><TextBlock x:Name="PauseMenuIcon" Style="{StaticResource Icon}" Text="&#xE769;" /></MenuItem.Icon>
+                        </MenuItem>
+                        <MenuItem Header="_Restart countdown" Click="RestartCountdown_Click">
+                            <MenuItem.Icon><TextBlock Style="{StaticResource Icon}" Text="&#xE72C;" /></MenuItem.Icon>
+                        </MenuItem>
                         <Separator />
-                        <MenuItem Header="_Delete" Click="Delete_Click" />
+                        <MenuItem Header="_Delete" Click="Delete_Click">
+                            <MenuItem.Icon><TextBlock Style="{StaticResource Icon}" Text="&#xE74D;" /></MenuItem.Icon>
+                        </MenuItem>
                     </ContextMenu>
                 </ListView.ContextMenu>
                 <ListView.View>
@@ -95,7 +138,7 @@
                 </ListView.View>
             </ListView>
             <TextBlock x:Name="EmptyHint" HorizontalAlignment="Center" VerticalAlignment="Center"
-                       Foreground="#FF8A949E" TextAlignment="Center" FontSize="14"
+                       Foreground="{DynamicResource TextFillColorSecondaryBrush}" TextAlignment="Center" FontSize="14"
                        Text="No tasks yet.&#x0a;Click &quot;New task…&quot; to add one." />
         </Grid>
     </DockPanel>

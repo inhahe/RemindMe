@@ -1,22 +1,40 @@
 <Application x:Class="RemindMe.Desktop.App"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-             ShutdownMode="OnExplicitShutdown">
+             xmlns:local="clr-namespace:RemindMe.Desktop"
+             ShutdownMode="OnExplicitShutdown"
+             ThemeMode="System">
+    <!-- ThemeMode: WPF's Fluent theme styles every standard control, light or dark as
+         Windows is set. The styles here add to it, so each is BasedOn the theme's own (a
+         style without BasedOn would replace it with the old look). They name the theme's
+         styles (DefaultButtonStyle) rather than its type ({x:Type Button}): an implicit
+         style here, made when first used, would find itself under its type. Colours come
+         from the theme's brushes as DynamicResource, so they change with Windows' light or
+         dark. -->
     <Application.Resources>
-        <!-- A pane in a rounded rectangle: the outer panes of the task editor (R3). -->
+      <ResourceDictionary>
+        <!-- Merged here, ahead of the styles below, so that their BasedOn finds the Fluent
+             styles: ThemeMode alone adds them only after this file has been read. WPF then
+             takes the mode from this file's name, overriding ThemeMode above: Fluent.xaml
+             is "System", and WPF adds Windows' light or dark colours to it, and swaps them
+             when Windows changes. Fluent.Light.xaml or Fluent.Dark.xaml would fix one. -->
+        <ResourceDictionary.MergedDictionaries>
+            <ResourceDictionary Source="pack://application:,,,/PresentationFramework.Fluent;component/Themes/Fluent.xaml" />
+        </ResourceDictionary.MergedDictionaries>
+        <!-- A card: the outer panes of the task editor (R3), and Settings' sections. -->
         <Style x:Key="Pane" TargetType="Border">
-            <Setter Property="BorderBrush" Value="#FF9AA5B1" />
+            <Setter Property="BorderBrush" Value="{DynamicResource CardStrokeColorDefaultBrush}" />
             <Setter Property="BorderThickness" Value="1" />
             <Setter Property="CornerRadius" Value="8" />
-            <Setter Property="Padding" Value="10,6,10,10" />
-            <Setter Property="Margin" Value="0,2,0,8" />
-            <Setter Property="Background" Value="#FFF7F9FB" />
+            <Setter Property="Padding" Value="14,10,14,12" />
+            <Setter Property="Margin" Value="0,2,0,10" />
+            <Setter Property="Background" Value="{DynamicResource CardBackgroundFillColorDefaultBrush}" />
         </Style>
         <!-- A pane nested inside another (R4). -->
         <Style x:Key="NestedPane" TargetType="Border" BasedOn="{StaticResource Pane}">
-            <Setter Property="BorderBrush" Value="#FFB8C2CC" />
-            <Setter Property="Background" Value="White" />
-            <Setter Property="Margin" Value="0,2,0,6" />
+            <Setter Property="Background" Value="{DynamicResource CardBackgroundFillColorSecondaryBrush}" />
+            <Setter Property="Padding" Value="12,8,12,10" />
+            <Setter Property="Margin" Value="0,2,0,8" />
         </Style>
         <!-- Greys out a pane's contents when its radio button isn't chosen. -->
         <Style x:Key="PaneBody" TargetType="FrameworkElement">
@@ -26,25 +44,102 @@
                 </Trigger>
             </Style.Triggers>
         </Style>
-        <Style x:Key="PaneRadio" TargetType="RadioButton">
+        <!-- Radio buttons and check boxes a little shorter than the theme's (32), which
+             is sized for touch: the task editor would outgrow a laptop's screen. -->
+        <Style TargetType="RadioButton" BasedOn="{StaticResource DefaultRadioButtonStyle}">
+            <Setter Property="MinHeight" Value="26" />
+        </Style>
+        <Style TargetType="CheckBox" BasedOn="{StaticResource DefaultCheckBoxStyle}">
+            <Setter Property="MinHeight" Value="26" />
+            <Setter Property="VerticalAlignment" Value="Center" />
+        </Style>
+        <Style x:Key="PaneRadio" TargetType="RadioButton" BasedOn="{StaticResource DefaultRadioButtonStyle}">
+            <Setter Property="MinHeight" Value="26" />
             <Setter Property="FontWeight" Value="SemiBold" />
             <Setter Property="Margin" Value="0,0,0,4" />
         </Style>
-        <Style TargetType="Button">
-            <Setter Property="Padding" Value="12,3" />
+        <Style TargetType="Button" BasedOn="{StaticResource DefaultButtonStyle}">
             <Setter Property="MinWidth" Value="80" />
         </Style>
-        <Style x:Key="Small" TargetType="TextBox">
-            <Setter Property="Width" Value="44" />
-            <Setter Property="HorizontalContentAlignment" Value="Right" />
-            <Setter Property="VerticalContentAlignment" Value="Center" />
+        <!-- A button's text with its access key underlined, for styles whose template
+             doesn't do it (the theme's accent button shows "_Save"). -->
+        <DataTemplate x:Key="AccessKeyText">
+            <AccessText Text="{Binding}" />
+        </DataTemplate>
+        <!-- The button a window is for (Save, Mark done, OK), in the accent colour. -->
+        <Style x:Key="Primary" TargetType="Button" BasedOn="{StaticResource AccentButtonStyle}">
+            <Setter Property="MinWidth" Value="80" />
+            <Setter Property="ContentTemplate" Value="{StaticResource AccessKeyText}" />
         </Style>
-        <Style TargetType="CheckBox">
+        <!-- An icon from Windows' own icon font. -->
+        <Style x:Key="Icon" TargetType="TextBlock">
+            <Setter Property="FontFamily" Value="Segoe Fluent Icons, Segoe MDL2 Assets" />
+            <Setter Property="FontSize" Value="14" />
             <Setter Property="VerticalAlignment" Value="Center" />
         </Style>
+        <!-- A button's text (its Content, with its access key) after its icon (Icons.Glyph). -->
+        <DataTemplate x:Key="WithIcon">
+            <StackPanel Orientation="Horizontal">
+                <TextBlock Style="{StaticResource Icon}" Margin="0,0,8,0"
+                           Text="{Binding (local:Icons.Glyph), RelativeSource={RelativeSource AncestorType=Button}}" />
+                <AccessText Text="{Binding}" VerticalAlignment="Center" />
+            </StackPanel>
+        </DataTemplate>
+        <!-- A toolbar button, with an icon: no fill or border until the mouse is over it,
+             and none when disabled either, which the theme's template would draw. -->
+        <Style x:Key="ToolButton" TargetType="Button" BasedOn="{StaticResource DefaultButtonStyle}">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="Foreground" Value="{DynamicResource TextFillColorPrimaryBrush}" />
+            <Setter Property="MinWidth" Value="0" />
+            <Setter Property="Padding" Value="9,6" />
+            <Setter Property="Margin" Value="0,0,2,0" />
+            <Setter Property="ContentTemplate" Value="{StaticResource WithIcon}" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Back" Background="{TemplateBinding Background}" CornerRadius="4"
+                                Padding="{TemplateBinding Padding}">
+                            <ContentPresenter RecognizesAccessKey="True" VerticalAlignment="Center" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Back" Property="Background" Value="{DynamicResource SubtleFillColorSecondaryBrush}" />
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="Back" Property="Background" Value="{DynamicResource SubtleFillColorTertiaryBrush}" />
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter Property="Foreground" Value="{DynamicResource TextFillColorDisabledBrush}" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <!-- A box for a number. The theme hides its clear button, which would cover the
+             number, only in a box that wraps; WrapWithOverflow never breaks a number. -->
+        <Style x:Key="Small" TargetType="TextBox" BasedOn="{StaticResource DefaultTextBoxStyle}">
+            <Setter Property="Width" Value="56" />
+            <Setter Property="MinWidth" Value="0" />
+            <Setter Property="HorizontalContentAlignment" Value="Right" />
+            <Setter Property="VerticalContentAlignment" Value="Center" />
+            <Setter Property="TextWrapping" Value="WrapWithOverflow" />
+        </Style>
         <Style x:Key="Hint" TargetType="TextBlock">
-            <Setter Property="Foreground" Value="#FF5F6B76" />
+            <Setter Property="Foreground" Value="{DynamicResource TextFillColorSecondaryBrush}" />
             <Setter Property="TextWrapping" Value="Wrap" />
         </Style>
+        <!-- A problem to fix before going on. -->
+        <Style x:Key="Error" TargetType="TextBlock">
+            <Setter Property="Foreground" Value="{DynamicResource SystemFillColorCriticalBrush}" />
+            <Setter Property="TextWrapping" Value="Wrap" />
+        </Style>
+        <!-- A section's title, above its card. -->
+        <Style x:Key="Section" TargetType="TextBlock">
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="FontSize" Value="14" />
+            <Setter Property="Margin" Value="2,4,0,6" />
+        </Style>
+      </ResourceDictionary>
     </Application.Resources>
 </Application>

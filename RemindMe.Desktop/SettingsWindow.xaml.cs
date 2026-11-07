@@ -15,6 +15,7 @@ public partial class SettingsWindow : Window
     public SettingsWindow()
     {
         InitializeComponent();
+        ScreenFit.Apply(this);
         var s = AppHost.Settings;
         _sound = s.DefaultSound;
         ModeOnce.IsChecked = s.DefaultSoundMode == SoundMode.Once;

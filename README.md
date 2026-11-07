@@ -83,6 +83,10 @@ paused; **Restart countdown** (or ticking "Start the countdown again" in the
 editor) starts it running again. A task that restarts when marked done counts
 its next time from when you resume it.
 
+On Windows, RemindMe takes the look of Windows 11's own apps, light or dark as
+Windows is set (Settings → Personalization → Colors), and switches when you
+change it.
+
 ## Calendar
 
 **Calendar…** (toolbar or tray menu; on Android, the ⋮ menu) shows a month of

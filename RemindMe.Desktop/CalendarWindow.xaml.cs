@@ -1,8 +1,8 @@
 using System.Globalization;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Documents;
 using System.Windows.Input;
-using System.Windows.Media;
 using System.Windows.Threading;
 
 namespace RemindMe.Desktop;
@@ -15,11 +15,27 @@ namespace RemindMe.Desktop;
 public partial class CalendarWindow : Window
 {
     private const int LinesPerCell = 4;
-    private static readonly Brush Line = new SolidColorBrush(Color.FromRgb(0xDD, 0xE2, 0xE7));
-    private static readonly Brush TodayBack = new SolidColorBrush(Color.FromRgb(0xE8, 0xF1, 0xFD));
-    private static readonly Brush ChosenLine = new SolidColorBrush(Color.FromRgb(0x1A, 0x73, 0xE8));
-    private static readonly Brush Dim = new SolidColorBrush(Color.FromRgb(0x8A, 0x94, 0x9E));
-    private static readonly Brush WaitingText = new SolidColorBrush(Color.FromRgb(0xB0, 0x00, 0x20));
+    // The theme's text brushes, by key: set as resource references, so that the calendar
+    // follows Windows from light to dark while it is open.
+    private const string Plain = "TextFillColorPrimaryBrush";
+    private const string Quiet = "TextFillColorSecondaryBrush";
+    private const string Faint = "TextFillColorTertiaryBrush";
+    private const string Waiting = "SystemFillColorCriticalBrush";
+    private const string OnAccent = "TextOnAccentFillColorPrimaryBrush";
+
+    /// <summary>Gives an element the theme's text brush <paramref name="key"/>; returns the element.</summary>
+    private static T Ink<T>(T element, string key) where T : FrameworkElement
+    {
+        element.SetResourceReference(TextElement.ForegroundProperty, key);
+        return element;
+    }
+
+    /// <summary>The same for a run of text.</summary>
+    private static Run Ink(Run run, string key)
+    {
+        run.SetResourceReference(TextElement.ForegroundProperty, key);
+        return run;
+    }
 
     private readonly MainWindow _main;
     /// <summary>Wakes at the next time shown coming up, and at least once a minute for the date.</summary>
@@ -99,7 +115,7 @@ public partial class CalendarWindow : Window
         int firstDay = (int)culture.DateTimeFormat.FirstDayOfWeek;
         for (int c = 0; c < 7; c++)
         {
-            var head = new TextBlock { Text = names[(firstDay + c) % 7], Foreground = Dim, Margin = new Thickness(4, 0, 0, 4) };
+            var head = Ink(new TextBlock { Text = names[(firstDay + c) % 7], Margin = new Thickness(8, 0, 0, 4) }, Quiet);
             Grid.SetColumn(head, c);
             MonthGrid.Children.Add(head);
         }
@@ -116,38 +132,43 @@ public partial class CalendarWindow : Window
     private Border Cell(CalendarDay day)
     {
         var panel = new StackPanel();
-        panel.Children.Add(new TextBlock
+        var number = Ink(new TextBlock
         {
             Text = day.Date.Day.ToString(CultureInfo.CurrentCulture),
-            FontWeight = day.IsToday ? FontWeights.Bold : FontWeights.Normal,
-            Foreground = day.InMonth ? Brushes.Black : Dim,
-            Margin = new Thickness(0, 0, 0, 2),
-        });
+            FontWeight = day.IsToday ? FontWeights.SemiBold : FontWeights.Normal,
+        }, day.IsToday ? OnAccent : day.InMonth ? Plain : Faint);
+        // Today's number sits on an accent-coloured pill, as in Windows' own calendar.
+        var numberBack = new Border
+        {
+            Child = number,
+            CornerRadius = new CornerRadius(9),
+            Padding = new Thickness(6, 0, 6, 1),
+            Margin = new Thickness(-2, 0, 0, 3),
+            HorizontalAlignment = HorizontalAlignment.Left,
+        };
+        if (day.IsToday) numberBack.SetResourceReference(Border.BackgroundProperty, "AccentFillColorDefaultBrush");
+        panel.Children.Add(numberBack);
         foreach (var e in day.Entries.Take(day.Entries.Count > LinesPerCell ? LinesPerCell - 1 : LinesPerCell))
-            panel.Children.Add(new TextBlock
+            panel.Children.Add(Ink(new TextBlock
             {
                 Text = $"{e.Text} {e.Title}",
                 FontSize = 11,
                 TextTrimming = TextTrimming.CharacterEllipsis,
-                Foreground = e.Waiting ? WaitingText : day.Past || !day.InMonth ? Dim : Brushes.Black,
                 FontWeight = e.Waiting ? FontWeights.SemiBold : FontWeights.Normal,
                 FontStyle = e.Estimated ? FontStyles.Italic : FontStyles.Normal,
                 ToolTip = $"{e.Text} {e.Title}",
-            });
+            }, e.Waiting ? Waiting : day.Past || !day.InMonth ? Faint : Plain));
         if (day.Entries.Count > LinesPerCell)
-            panel.Children.Add(new TextBlock { Text = $"+{day.Entries.Count - (LinesPerCell - 1)} more", FontSize = 11, Foreground = Dim });
+            panel.Children.Add(Ink(new TextBlock { Text = $"+{day.Entries.Count - (LinesPerCell - 1)} more", FontSize = 11 }, Quiet));
 
-        bool chosen = day.Date == _chosen;
-        var cell = new Border
+        var cell = new Border { Child = panel, Style = (Style)FindResource("DayCell") };
+        if (day.Date == _chosen)
         {
-            Child = panel,
-            Padding = new Thickness(4, 2, 4, 2),
-            Margin = new Thickness(1),
-            BorderBrush = chosen ? ChosenLine : Line,
-            BorderThickness = new Thickness(chosen ? 2 : 1),
-            Background = day.IsToday ? TodayBack : Brushes.White,
-            Cursor = Cursors.Hand,
-        };
+            // A thicker border, less padding: the contents stay where they were.
+            cell.SetResourceReference(Border.BorderBrushProperty, "AccentFillColorDefaultBrush");
+            cell.BorderThickness = new Thickness(2);
+            cell.Padding = new Thickness(cell.Padding.Left - 1, cell.Padding.Top - 1, cell.Padding.Right - 1, cell.Padding.Bottom - 1);
+        }
         cell.MouseLeftButtonUp += (_, _) => { _chosen = day.Date; Build(); };
         return cell;
     }
@@ -161,7 +182,7 @@ public partial class CalendarWindow : Window
         DayList.Items.Clear();
         if (day is null || day.Entries.Count == 0)
         {
-            DayList.Items.Add(new ListBoxItem { Content = "Nothing comes up.", Foreground = Dim, IsEnabled = false });
+            DayList.Items.Add(new ListBoxItem { Content = "Nothing comes up.", IsEnabled = false });
             return;
         }
         var now = AppHost.Clock.UtcNow;
@@ -170,16 +191,12 @@ public partial class CalendarWindow : Window
         {
             if (AppHost.Store.Get(e.TaskId) is not { } t) continue;
             var text = new TextBlock { TextWrapping = TextWrapping.Wrap };
-            text.Inlines.Add(new System.Windows.Documents.Run($"{e.Text}  ") { FontWeight = FontWeights.SemiBold });
-            text.Inlines.Add(new System.Windows.Documents.Run(e.Title));
-            if (e.Waiting)
-                text.Inlines.Add(new System.Windows.Documents.Run(" · waiting to be marked done") { Foreground = WaitingText });
-            text.Inlines.Add(new System.Windows.Documents.LineBreak());
-            text.Inlines.Add(new System.Windows.Documents.Run(TextFormat.Schedule(t.Def, t.State, now, zone, culture))
-            {
-                Foreground = Dim, FontSize = 11,
-            });
-            DayList.Items.Add(new ListBoxItem { Content = text, Tag = e.TaskId, Padding = new Thickness(2, 4, 2, 4) });
+            text.Inlines.Add(new Run($"{e.Text}  ") { FontWeight = FontWeights.SemiBold });
+            text.Inlines.Add(new Run(e.Title));
+            if (e.Waiting) text.Inlines.Add(Ink(new Run(" · waiting to be marked done"), Waiting));
+            text.Inlines.Add(new LineBreak());
+            text.Inlines.Add(Ink(new Run(TextFormat.Schedule(t.Def, t.State, now, zone, culture)) { FontSize = 11 }, Quiet));
+            DayList.Items.Add(new ListBoxItem { Content = text, Tag = e.TaskId });
         }
     }
 

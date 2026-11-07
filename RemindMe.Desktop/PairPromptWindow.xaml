@@ -11,7 +11,7 @@
         <TextBlock Style="{StaticResource Hint}" Margin="0,10,0,0"
                    Text="Accept only if the codes match. Once linked, both devices share all their tasks and keep them in sync." />
         <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,14,0,0">
-            <Button Content="_Link" Click="Accept_Click" FontWeight="SemiBold" />
+            <Button Content="_Link" Click="Accept_Click" Style="{StaticResource Primary}" />
             <Button Content="_Don't link" IsCancel="True" Margin="8,0,0,0" Click="Reject_Click" />
         </StackPanel>
     </StackPanel>

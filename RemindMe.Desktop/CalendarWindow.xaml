@@ -4,18 +4,44 @@
         Title="Calendar" Icon="app.ico"
         Width="1080" Height="700" MinWidth="720" MinHeight="480"
         WindowStartupLocation="CenterOwner" ShowInTaskbar="True">
+    <Window.Resources>
+        <!-- A day in the grid: a card, shaded under the mouse. The chosen day's border is
+             set in code, in the accent colour. -->
+        <Style x:Key="DayCell" TargetType="Border">
+            <Setter Property="Background" Value="{DynamicResource CardBackgroundFillColorDefaultBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource CardStrokeColorDefaultBrush}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CornerRadius" Value="6" />
+            <Setter Property="Padding" Value="6,4" />
+            <Setter Property="Margin" Value="2" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Style.Triggers>
+                <Trigger Property="IsMouseOver" Value="True">
+                    <Setter Property="Background" Value="{DynamicResource ControlFillColorSecondaryBrush}" />
+                </Trigger>
+            </Style.Triggers>
+        </Style>
+    </Window.Resources>
     <DockPanel Margin="10">
         <DockPanel DockPanel.Dock="Top" Margin="0,0,0,8" LastChildFill="False">
-            <Button x:Name="PrevButton" Content="◀" Click="Prev_Click" Padding="10,2" MinWidth="0" ToolTip="Previous month" />
-            <TextBlock x:Name="MonthTitle" FontSize="18" FontWeight="SemiBold" Margin="12,0" MinWidth="200"
-                       TextAlignment="Center" VerticalAlignment="Center" />
-            <Button x:Name="NextButton" Content="▶" Click="Next_Click" Padding="10,2" MinWidth="0" ToolTip="Next month" />
-            <Button Content="_Today" Click="Today_Click" Padding="10,2" MinWidth="0" Margin="12,0,0,0" />
+            <!-- The arrow buttons as tall as Today: the icon font's lines are shorter than text's. -->
+            <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                <Button x:Name="PrevButton" Click="Prev_Click" MinWidth="0" MinHeight="{Binding ActualHeight, ElementName=TodayButton}"
+                        ToolTip="Previous month" AutomationProperties.Name="Previous month">
+                    <TextBlock Style="{StaticResource Icon}" Text="&#xE76B;" FontSize="12" />
+                </Button>
+                <TextBlock x:Name="MonthTitle" FontSize="18" FontWeight="SemiBold" Margin="12,0" MinWidth="200"
+                           TextAlignment="Center" VerticalAlignment="Center" />
+                <Button x:Name="NextButton" Click="Next_Click" MinWidth="0" MinHeight="{Binding ActualHeight, ElementName=TodayButton}"
+                        ToolTip="Next month" AutomationProperties.Name="Next month">
+                    <TextBlock Style="{StaticResource Icon}" Text="&#xE76C;" FontSize="12" />
+                </Button>
+                <Button x:Name="TodayButton" Content="_Today" Click="Today_Click" MinWidth="0" Margin="12,0,0,0" />
+            </StackPanel>
             <TextBlock DockPanel.Dock="Right" Style="{StaticResource Hint}" VerticalAlignment="Center"
                        Text="Red: came up, not marked done yet. ~: an estimate, for a task that restarts when marked done. Paused tasks aren't shown." />
         </DockPanel>
-        <Border DockPanel.Dock="Right" Width="320" Margin="10,0,0,0" Padding="10,8"
-                BorderBrush="#FFDDE2E7" BorderThickness="1" CornerRadius="6" Background="#FFF7F9FB">
+        <Border DockPanel.Dock="Right" Width="320" Margin="10,0,0,0" Style="{StaticResource Pane}">
             <DockPanel>
                 <TextBlock x:Name="DayTitle" DockPanel.Dock="Top" FontSize="15" FontWeight="SemiBold" TextWrapping="Wrap" />
                 <TextBlock DockPanel.Dock="Bottom" Style="{StaticResource Hint}" Margin="0,6,0,0" TextWrapping="Wrap"

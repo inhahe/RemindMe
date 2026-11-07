@@ -31,6 +31,10 @@ internal static class NativeMethods
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool FlashWindowEx(ref FLASHWINFO pwfi);
 
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool SetForegroundWindow(IntPtr hwnd);
+
     /// <summary>Flashes the taskbar button until the window comes to the foreground.</summary>
     public static void Flash(IntPtr hwnd)
     {

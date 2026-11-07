@@ -12,6 +12,7 @@ public partial class DevicesWindow : Window
     public DevicesWindow()
     {
         InitializeComponent();
+        ScreenFit.Apply(this);
         var s = AppHost.Settings;
         SyncEnabled.IsChecked = s.SyncEnabled;
         DeviceName.Text = s.DeviceName;

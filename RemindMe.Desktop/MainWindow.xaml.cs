@@ -3,6 +3,7 @@ using System.ComponentModel;
 using System.Runtime.CompilerServices;
 using System.Windows;
 using System.Windows.Input;
+using System.Windows.Interop;
 using Forms = System.Windows.Forms;
 
 namespace RemindMe.Desktop;
@@ -52,21 +53,10 @@ public partial class MainWindow : Window
         List.ItemsSource = _rows;
         RestorePlacement();
 
-        _tray = new Forms.NotifyIcon
-        {
-            Icon = LoadTrayIcon(),
-            Text = "RemindMe",
-            Visible = true,
-            ContextMenuStrip = new Forms.ContextMenuStrip(),
-        };
-        _tray.ContextMenuStrip.Items.Add("Show", null, (_, _) => ShowFromTray());
-        _tray.ContextMenuStrip.Items.Add("New task…", null, (_, _) => OpenEditor(null));
-        _tray.ContextMenuStrip.Items.Add("Calendar…", null, (_, _) => OpenCalendar());
-        _tray.ContextMenuStrip.Items.Add("Devices and sync…", null, (_, _) => OpenDevices());
-        _tray.ContextMenuStrip.Items.Add("Settings…", null, (_, _) => OpenSettings());
-        _tray.ContextMenuStrip.Items.Add(new Forms.ToolStripSeparator());
-        _tray.ContextMenuStrip.Items.Add("Exit", null, (_, _) => ExitApp());
+        _tray = new Forms.NotifyIcon { Icon = LoadTrayIcon(), Text = "RemindMe", Visible = true };
         _tray.MouseClick += (_, e) => { if (e.Button == Forms.MouseButtons.Left) ShowFromTray(); };
+        // On the button's release, as WinForms opened its own menus.
+        _tray.MouseUp += (_, e) => { if (e.Button == Forms.MouseButtons.Right) ShowTrayMenu(); };
 
         AppHost.Alarms.Evaluated += OnEvaluated;
         OnEvaluated(AppHost.Alarms.Current);
@@ -86,6 +76,19 @@ public partial class MainWindow : Window
         if (!IsVisible) Show();
         if (WindowState == WindowState.Minimized) WindowState = WindowState.Normal;
         Activate();
+    }
+
+    private void TrayShow_Click(object sender, RoutedEventArgs e) => ShowFromTray();
+
+    /// <summary>Opens the tray icon's menu (MainWindow.xaml's TrayMenu) at the mouse.</summary>
+    private void ShowTrayMenu()
+    {
+        var menu = (System.Windows.Controls.ContextMenu)Resources["TrayMenu"];
+        menu.IsOpen = true;
+        // Windows closes a menu when another window is clicked only if the menu's own window
+        // is in the foreground, which a click on the tray doesn't make it.
+        if (PresentationSource.FromVisual(menu) is HwndSource source) NativeMethods.SetForegroundWindow(source.Handle);
+        menu.Focus();
     }
 
     // ---- The list ----------------------------------------------------------------
@@ -144,6 +147,7 @@ public partial class MainWindow : Window
         // Resume when everything selected is paused; otherwise Pause.
         bool resume = sel.Count > 0 && sel.All(r => r.Latest?.Paused == true);
         PauseButton.Content = PauseMenuItem.Header = resume ? "Res_ume" : "_Pause";
+        Icons.SetGlyph(PauseButton, PauseMenuIcon.Text = resume ? Icons.Play : Icons.Pause);
     }
 
     private void List_SelectionChanged(object sender, System.Windows.Controls.SelectionChangedEventArgs e) => UpdateButtons();

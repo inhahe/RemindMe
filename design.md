@@ -568,6 +568,41 @@ separately (see *Simplification opportunities*).
 - `Fields.cs`: the editors' parsing, which lives in Core's `FieldParsing`, so
   Android uses the same rules.
 
+### Look: WPF's Fluent theme
+
+- Every window takes WPF's Fluent theme (.NET 9 and up), following Windows'
+  light or dark mode, and switching when it changes. `App.xaml` merges
+  `PresentationFramework.Fluent`'s `Themes/Fluent.xaml` itself, so that its own
+  styles can be `BasedOn` the theme's named styles (`DefaultButtonStyle`,
+  `AccentButtonStyle`, ...) while the file loads. WPF reads the mode back from
+  that file's name (`Fluent.xaml` is "System"; `Fluent.Light.xaml` or
+  `Fluent.Dark.xaml` would pin one), which overrides the `ThemeMode` attribute.
+- A style without `BasedOn` would bring back the old Aero look, and one
+  `BasedOn="{StaticResource {x:Type Button}}"` in `App.xaml` finds itself.
+- Colours are the theme's brushes as `DynamicResource`
+  (`TextFillColorSecondaryBrush`, `SystemFillColorCriticalBrush`,
+  `CardBackgroundFillColorDefaultBrush`, ...), never fixed values; code sets them
+  with `SetResourceReference` (the calendar's cells). Shared styles in
+  `App.xaml`: `Pane` and `NestedPane` (cards), `Section`, `Hint`, `Error`,
+  `Primary` (the window's main button, in the accent colour), `ToolButton` (the
+  toolbar's, flat, with its own template), `Small` (number boxes), `Icon`.
+- Icons are characters of Windows' icon font, Segoe Fluent Icons. A button keeps
+  its text as its `Content`, so screen readers name it and its access key works;
+  `Icons.Glyph`, an attached property, gives the icon, which the `WithIcon`
+  template puts before the text.
+- Workarounds for the theme: its accent button doesn't show access keys (the
+  `AccessKeyText` template does); its text box shows a clear button over the
+  text when focused unless it wraps (`Small` sets `WrapWithOverflow`, which never
+  breaks a number); its buttons are `VerticalAlignment="Center"` and
+  `HorizontalAlignment="Left"` by default.
+- `ScreenFit` keeps the tall dialogs (the editor, Settings, Devices) on the
+  screen they open on: no taller than its work area, their contents scrolling
+  above fixed buttons, and moved back inside it if centring on the owner left an
+  edge outside.
+- The tray icon is WinForms' `NotifyIcon`, with a WPF `ContextMenu`
+  (`MainWindow.xaml`'s `TrayMenu`) so the menu takes the theme too. Opening it
+  makes its window the foreground, or a click elsewhere wouldn't close it.
+
 ## Android app
 
 Plain .NET for Android (`net10.0-android`) with AndroidX views and XML layouts;

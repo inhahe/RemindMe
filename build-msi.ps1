@@ -12,8 +12,8 @@
 #>
 $ErrorActionPreference = 'Stop'
 $root = $PSScriptRoot
-$version = (Get-Content (Join-Path $root 'VERSION') -Raw).Trim()
-if ($version -notmatch '^\d+(\.\d+){1,3}$') { throw "VERSION must be like 1.2.3.4, not '$version'." }
+. (Join-Path $root 'version.ps1')
+$version = (Get-ReleaseVersion $root).Text
 $publish = Join-Path $root 'installer\publish'
 $out = Join-Path $root 'release'
 New-Item -ItemType Directory -Force $out | Out-Null

@@ -14,7 +14,8 @@
 param([string]$Repo, [switch]$DryRun)
 $ErrorActionPreference = 'Stop'
 $root = $PSScriptRoot
-$version = (Get-Content (Join-Path $root 'VERSION') -Raw).Trim()
+. (Join-Path $root 'version.ps1')
+$version = (Get-ReleaseVersion $root).Text
 $tag = "v$version"
 
 if (-not $Repo) {

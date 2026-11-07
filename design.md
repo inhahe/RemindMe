@@ -604,10 +604,14 @@ it runs on Android 10 (API 29) and up. The root namespace is
 As in LanLink, with PowerShell instead of batch files: the project folder's `&`
 is a command separator to `cmd`.
 
-- **`VERSION`** (four numbers) is the single source of the version. It becomes
-  the desktop assembly's version, Android's `versionName`, and its
+- **`VERSION`** (two to four numbers) is the single source of the version.
+  It becomes the desktop assembly's version, Android's `versionName`, and its
   `versionCode` (a·10⁶ + b·10⁴ + c·10² + d), which Android compares for
-  upgrades.
+  upgrades. `version.ps1`, which all three scripts dot-source, reads it and
+  enforces both platforms' limits. The first part can be at most 255, as MSI
+  allows. The others can be at most 99, so the `versionCode` stays unique and
+  increasing. MSI ignores the fourth part, so the installer's
+  `AllowSameVersionUpgrades` makes a fourth-part bump an upgrade anyway.
 - **`build-msi.ps1`**: a self-contained single-file `AlarmCalendar.exe`
   (win-x64), then `installer/AlarmCalendar.wxs` with WiX 7 and its UI and
   Firewall extensions.

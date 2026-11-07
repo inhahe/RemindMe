@@ -191,8 +191,9 @@ is fine for installing by hand.
 
 ### Releases
 
-The version is in `VERSION` (four numbers, e.g. `1.0.0.0`); bump it for every
-release. Each script puts its output in `release/`:
+The version is in `VERSION` (four numbers, e.g. `1.0.0.0`; the first at most
+255, the others at most 99); bump it for every release. Each script puts its
+output in `release/`:
 
 | Script | Builds |
 |---|---|

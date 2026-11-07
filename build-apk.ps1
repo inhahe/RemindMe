@@ -19,9 +19,10 @@
 #>
 $ErrorActionPreference = 'Stop'
 $root = $PSScriptRoot
-$version = (Get-Content (Join-Path $root 'VERSION') -Raw).Trim()
-if ($version -notmatch '^\d+(\.\d+){1,3}$') { throw "VERSION must be like 1.2.3.4, not '$version'." }
-$parts = @($version.Split('.') | ForEach-Object { [int]$_ }) + @(0, 0, 0)
+. (Join-Path $root 'version.ps1')
+$release = Get-ReleaseVersion $root
+$version = $release.Text
+$parts = $release.Parts
 $code = $parts[0] * 1000000 + $parts[1] * 10000 + $parts[2] * 100 + $parts[3]
 $project = Join-Path $root 'AlarmCalendar.Android\AlarmCalendar.Android.csproj'
 $out = Join-Path $root 'release'

@@ -16,16 +16,23 @@ public sealed class SyncTests : IDisposable
     private (SyncEngine engine, TaskStore store) Node(SyncIdentity id, params string[] remotes) =>
         Node(id, 0, null, remotes);
 
-    private (SyncEngine engine, TaskStore store) Node(SyncIdentity id, int linkedDevices, List<string>? log, params string[] remotes)
+    private (SyncEngine engine, TaskStore store) Node(SyncIdentity id, int linkedDevices, List<string>? log, params string[] remotes) =>
+        Node(id, linkedDevices, log, TimeSpan.FromMilliseconds(200), remotes);
+
+    private (SyncEngine engine, TaskStore store) Node(SyncIdentity id, int linkedDevices, List<string>? log,
+        TimeSpan reconnectDelay, params string[] remotes) => Node(id, linkedDevices, log, reconnectDelay, IPAddress.Loopback, remotes);
+
+    private (SyncEngine engine, TaskStore store) Node(SyncIdentity id, int linkedDevices, List<string>? log,
+        TimeSpan reconnectDelay, IPAddress bind, params string[] remotes)
     {
         var store = new TaskStore(null, id.NodeId, SystemClock.Instance);
         var engine = new SyncEngine(store, id, new SyncOptions
         {
             Port = 0,
-            BindAddress = IPAddress.Loopback,
+            BindAddress = bind,
             EnableDiscovery = false,
             RemoteAddresses = remotes,
-            ReconnectDelay = TimeSpan.FromMilliseconds(200),
+            ReconnectDelay = reconnectDelay,
             LinkedDeviceCount = () => linkedDevices,
         }, log is null ? null : line => { lock (log) log.Add(line); });
         engine.Start();
@@ -152,6 +159,25 @@ public sealed class SyncTests : IDisposable
     }
 
     [Fact]
+    public async Task ARemoteLinkReconnectsAtOnceAfterPairing()
+    {
+        // D dials C over a remote link with a long backoff; C, alone, joins D's group. D
+        // listens on 127.0.0.2 while its connections come from 127.0.0.1, so C can't dial
+        // back (as behind the emulator's NAT): only D's link can reconnect them.
+        var (ec, sc) = Node(NewIdentity("C"), 0, null);
+        var (ed, sd) = Node(NewIdentity("D"), 2, null, TimeSpan.FromSeconds(30), IPAddress.Parse("127.0.0.2"), Addr(ec));
+        PairPrompt? prompt = null;
+        ec.PairRequested += p => prompt = p;
+        await WaitFor(() => ed.Peers().Any(p => p.Name == "C"), "D connected to C");
+        await ed.RequestPairingAsync(ec.Identity.NodeId);
+        await WaitFor(() => prompt is not null, "C asked");
+        await prompt!.AcceptAsync();
+        var t = Add(sd, "after linking");
+        // Well inside the 30 s backoff: the link redialled as soon as the pairing closed it.
+        await WaitFor(() => sc.Get(t.Id) is not null, "D's task reaching C", timeoutMs: 8000);
+    }
+
+    [Fact]
     public void BadAnnouncementsAreIgnored()
     {
         var good = new SyncMessage { Type = MessageTypes.Announce, App = Protocol.App, Node = Guid.NewGuid().ToString("N"), Port = 37660 };
@@ -251,6 +277,21 @@ public sealed class SyncTests : IDisposable
     {
         Assert.True(Protocol.TryParseAddress(text, out var h, out var p));
         Assert.Equal((host, port), (h, p));
+    }
+
+    [Theory]
+    [InlineData("10.0.2.2:37671n10.0.2.2:37673")]
+    [InlineData(":4000")]
+    [InlineData("[]:4000")]
+    [InlineData("host name")]
+    [InlineData("host:99999")]
+    public void BadAddressesAreRefused(string text) => Assert.False(Protocol.TryParseAddress(text, out _, out _));
+
+    [Fact]
+    public void ABareIpv6AddressIsAHost()
+    {
+        Assert.True(Protocol.TryParseAddress("fe80::1", out var h, out var p));
+        Assert.Equal(("fe80::1", Protocol.DefaultPort), (h, p));
     }
 
     [Fact]

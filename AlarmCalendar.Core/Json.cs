@@ -1,20 +1,46 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Text.Json.Serialization.Metadata;
+using AlarmCalendar.Sync;
 
 namespace AlarmCalendar;
 
+/// <summary>Enum values as camel-case strings ("fromDone"), the format of every file and message.</summary>
+internal sealed class CamelCaseEnum<T>() : JsonStringEnumConverter<T>(JsonNamingPolicy.CamelCase) where T : struct, Enum;
+
+/// <summary>
+/// Source-generated serialization for everything Core reads and writes. No reflection, so
+/// the Android app can trim safely (reflection-based System.Text.Json is unsafe to trim).
+/// </summary>
+[JsonSourceGenerationOptions(
+    WriteIndented = true,
+    PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase,
+    DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
+    Converters = [typeof(CamelCaseEnum<ScheduleKind>), typeof(CamelCaseEnum<IntervalUnit>), typeof(CamelCaseEnum<RestartMode>),
+        typeof(CamelCaseEnum<SoundMode>), typeof(CamelCaseEnum<SoundSource>)])]
+[JsonSerializable(typeof(AppSettings))]
+[JsonSerializable(typeof(StoreFile))]
+[JsonSerializable(typeof(SyncMessage))]
+[JsonSerializable(typeof(string[]))]
+internal sealed partial class CoreJson : JsonSerializerContext;
+
 public static class Json
 {
-    public static readonly JsonSerializerOptions Options = new()
+    /// <summary>Indented, for the files people may open.</summary>
+    internal static CoreJson Files => CoreJson.Default;
+
+    /// <summary>Compact, for the wire.</summary>
+    internal static readonly CoreJson Wire = new(new JsonSerializerOptions
     {
-        WriteIndented = true,
+        WriteIndented = false,
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
         DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
-        Converters = { new JsonStringEnumConverter(JsonNamingPolicy.CamelCase) },
-    };
-
-    /// <summary>Compact form for the wire.</summary>
-    public static readonly JsonSerializerOptions Wire = new(Options) { WriteIndented = false };
+        Converters =
+        {
+            new CamelCaseEnum<ScheduleKind>(), new CamelCaseEnum<IntervalUnit>(), new CamelCaseEnum<RestartMode>(),
+            new CamelCaseEnum<SoundMode>(), new CamelCaseEnum<SoundSource>(),
+        },
+    });
 
     /// <summary>
     /// Writes <paramref name="contents"/> to <paramref name="path"/> so that a crash
@@ -45,14 +71,14 @@ public static class Json
     /// <exception cref="IOException">A file exists but stays unreadable (locked by another
     /// program, or access denied). Starting empty instead would let the next save overwrite
     /// the user's data, so the caller must not carry on as if there were none.</exception>
-    public static T? ReadWithFallback<T>(string path, Action<string>? log = null) where T : class
+    internal static T? ReadWithFallback<T>(string path, JsonTypeInfo<T> type, Action<string>? log = null) where T : class
     {
         foreach (var candidate in new[] { path, path + ".bak" })
         {
             if (!File.Exists(candidate)) continue;
             try
             {
-                var value = JsonSerializer.Deserialize<T>(ReadShared(candidate), Options);
+                var value = JsonSerializer.Deserialize(ReadShared(candidate), type);
                 if (value is not null)
                 {
                     if (candidate != path) log?.Invoke($"{Path.GetFileName(path)} was unreadable; restored from its backup.");

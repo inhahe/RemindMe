@@ -72,7 +72,7 @@ public static class Protocol
     /// anything bigger from an unproven peer is only a way to exhaust memory.</summary>
     public const int MaxUnauthenticatedFrame = 64 * 1024;
 
-    public static byte[] Serialize(SyncMessage m) => JsonSerializer.SerializeToUtf8Bytes(m, Json.Wire);
+    public static byte[] Serialize(SyncMessage m) => JsonSerializer.SerializeToUtf8Bytes(m, Json.Wire.SyncMessage);
 
     /// <summary>Node IDs are 32 lowercase hex digits (a GUID in "N" form). Anything else is
     /// refused: IDs go into key-derivation labels, which must not be ambiguous.</summary>
@@ -89,7 +89,7 @@ public static class Protocol
 
     public static SyncMessage? Deserialize(ReadOnlySpan<byte> bytes)
     {
-        try { return JsonSerializer.Deserialize<SyncMessage>(bytes, Json.Wire); }
+        try { return JsonSerializer.Deserialize(bytes, Json.Wire.SyncMessage); }
         catch (JsonException) { return null; }
     }
 
@@ -165,7 +165,9 @@ public static class Protocol
             return host.Length > 0 && int.TryParse(text[(colon + 1)..], out port) && port is > 0 and < 65536;
         }
         host = text;
-        return !text.Any(char.IsWhiteSpace);
+        // Several colons without brackets can only be a bare IPv6 address.
+        if (text.Contains(':')) return IPAddress.TryParse(text, out var v6) && v6.AddressFamily == AddressFamily.InterNetworkV6;
+        return text.All(c => char.IsLetterOrDigit(c) || c is '.' or '-' or '_');
     }
 }
 

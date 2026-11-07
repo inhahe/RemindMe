@@ -58,7 +58,7 @@ public sealed class AppSettings
     /// first run.</summary>
     public static AppSettings Load(string path, string defaultDeviceName, Action<string>? log = null)
     {
-        var s = Json.ReadWithFallback<AppSettings>(path, log) ?? new AppSettings();
+        var s = Json.ReadWithFallback(path, Json.Files.AppSettings, log) ?? new AppSettings();
         bool dirty = false;
         if (string.IsNullOrEmpty(s.NodeId)) { s.NodeId = Guid.NewGuid().ToString("N"); dirty = true; }
         if (string.IsNullOrWhiteSpace(s.DeviceName)) { s.DeviceName = defaultDeviceName; dirty = true; }
@@ -88,7 +88,7 @@ public sealed class AppSettings
     {
         try
         {
-            Json.WriteAtomically(path, JsonSerializer.Serialize(this, Json.Options));
+            Json.WriteAtomically(path, JsonSerializer.Serialize(this, Json.Files.AppSettings));
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException)
         {
@@ -97,7 +97,7 @@ public sealed class AppSettings
     }
 
     public AppSettings Clone() =>
-        JsonSerializer.Deserialize<AppSettings>(JsonSerializer.Serialize(this, Json.Options), Json.Options)!;
+        JsonSerializer.Deserialize(JsonSerializer.Serialize(this, Json.Files.AppSettings), Json.Files.AppSettings)!;
 
     /// <summary>The sound mode <paramref name="d"/> plays with on this device.</summary>
     public SoundMode SoundModeFor(TaskDefinition d) => d.SoundMode ?? DefaultSoundMode;

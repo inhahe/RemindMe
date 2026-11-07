@@ -93,6 +93,13 @@ public sealed class SyncEngine : IDisposable
     private Discovery? _discovery;
     private int _pendingPrompts;
     private int _disposed;
+    /// <summary>Completed (and replaced) to make every remote link redial at once.</summary>
+    private TaskCompletionSource _kick = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+    /// <summary>Makes every remote link redial now, without waiting out its backoff: after
+    /// a pairing or a change of group, the next connection is expected to succeed.</summary>
+    private void KickRemoteLinks() =>
+        Interlocked.Exchange(ref _kick, new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously)).TrySetResult();
 
     private sealed record Nearby(SyncMessage Msg, IPEndPoint Ep, DateTimeOffset Seen, DateTimeOffset FirstSeen);
 
@@ -355,6 +362,12 @@ public sealed class SyncEngine : IDisposable
                     if (s.IsClosed) closed.TrySetResult();
                     await Task.WhenAny(closed.Task, Task.Delay(Timeout.Infinite, ct)).ConfigureAwait(false);
                     knownNode = s.PeerNode ?? knownNode;
+                    if (s.PairCompleted)
+                    {
+                        // Linked just now: reconnect under the shared group straight away.
+                        delay = first;
+                        continue;
+                    }
                     good = s.Authenticated || DateTimeOffset.UtcNow - s.Opened > TimeSpan.FromSeconds(30);
                     if (!good) _remoteErrors[address] = s.PeerNode is null ? "it answered but didn't say hello"
                         : s.Sealed ? $"{s.PeerName} doesn't have this group's key" : $"connected to {s.PeerName}, not linked";
@@ -367,8 +380,10 @@ public sealed class SyncEngine : IDisposable
                     delay = TimeSpan.FromSeconds(Math.Min(60, Math.Max(delay.TotalSeconds * 2, first.TotalSeconds)));
                 }
             }
-            try { await Task.Delay(delay, ct).ConfigureAwait(false); }
-            catch (OperationCanceledException) { break; }
+            var kick = Volatile.Read(ref _kick).Task;
+            await Task.WhenAny(Task.Delay(delay, ct), kick).ConfigureAwait(false);
+            if (ct.IsCancellationRequested) break;
+            if (kick.IsCompleted) delay = first;
         }
     }
 
@@ -671,6 +686,7 @@ public sealed class SyncEngine : IDisposable
             PairProgressed?.Invoke(new PairProgress(node, name, PairStage.Accepted, code, null));
             return;
         }
+        s.PairCompleted = true;
         _ = s.SendAsync(new SyncMessage { Type = MessageTypes.PairGroup, Sealed = SealGroup(s) });
         _log?.Invoke($"{s.Describe()} joins this device's sync group.");
         PairProgressed?.Invoke(new PairProgress(s.PeerNode!, s.PeerName!, PairStage.Accepted, s.PairCode, null, ThisDeviceJoins: false));
@@ -679,7 +695,7 @@ public sealed class SyncEngine : IDisposable
     private string SealGroup(PeerSession s)
     {
         var id = Identity;
-        var payload = JsonSerializer.SerializeToUtf8Bytes(new[] { id.GroupId, id.GroupKeyBase64 });
+        var payload = JsonSerializer.SerializeToUtf8Bytes([id.GroupId, id.GroupKeyBase64], Json.Wire.StringArray);
         return Convert.ToBase64String(SyncCrypto.Seal(s.PairSecret!, 0, payload));
     }
 
@@ -688,18 +704,20 @@ public sealed class SyncEngine : IDisposable
     private void Adopt(PeerSession s, string? sealedGroup)
     {
         var plain = SyncCrypto.Open(s.PairSecret!, 0, Convert.FromBase64String(sealedGroup ?? ""));
-        var parts = JsonSerializer.Deserialize<string[]>(plain);
+        var parts = JsonSerializer.Deserialize(plain, Json.Wire.StringArray);
         if (parts is not [var groupId, var groupKey] || !Protocol.IsValidNodeId(groupId) || Convert.FromBase64String(groupKey).Length != 32)
             throw new CryptographicException("Malformed group.");
         var peerEp = s.RemoteEndPoint;
         var peerPort = s.PeerPort;
         var remote = s.RemoteAddress;
+        s.PairCompleted = true;
         SyncIdentity adopted;
         lock (_lock) adopted = _id = _id with { GroupId = groupId, GroupKeyBase64 = groupKey };
         IdentityChanged?.Invoke(adopted);
         _log?.Invoke($"Joined the sync group of {s.Describe()}.");
         ResetSessions();
         _discovery?.AnnounceNow();
+        KickRemoteLinks();
         // Reconnect at once rather than waiting for discovery (or a remote link's backoff).
         if (remote is null && peerEp is not null && peerPort is { } port)
             _ = DialAsync(peerEp.Address.ToString(), port, null, _cts.Token);
@@ -713,6 +731,7 @@ public sealed class SyncEngine : IDisposable
         IdentityChanged?.Invoke(changed);
         ResetSessions();
         _discovery?.AnnounceNow();
+        KickRemoteLinks();
     }
 
     /// <summary>Closes every session; they reconnect under the current identity (remote

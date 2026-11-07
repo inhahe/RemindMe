@@ -5,6 +5,15 @@ namespace AlarmCalendar;
 /// <param name="FromSync">True when the change arrived from another device.</param>
 public sealed record StoreChange(IReadOnlyList<AlarmTask> Tasks, bool FromSync);
 
+/// <summary>The contents of <c>tasks.json</c>.</summary>
+internal sealed class StoreFile
+{
+    public int Format { get; set; } = 1;
+    /// <summary>The latest version this node issued or saw, so versions keep rising across restarts.</summary>
+    public Hlc Clock { get; set; }
+    public List<AlarmTask> Tasks { get; set; } = [];
+}
+
 /// <summary>One line of a sync digest: enough to tell which side holds the newer record.</summary>
 public sealed record DigestEntry(Guid Id, Hlc DefVersion, int Revision, Hlc StateVersion, DateTimeOffset DoneThroughUtc);
 
@@ -49,13 +58,6 @@ public static class MergeRules
 /// </summary>
 public sealed class TaskStore
 {
-    private sealed class StoreFile
-    {
-        public int Format { get; set; } = 1;
-        public Hlc Clock { get; set; }
-        public List<AlarmTask> Tasks { get; set; } = [];
-    }
-
     private readonly object _lock = new();
     private readonly Dictionary<Guid, AlarmTask> _tasks = new();
     private readonly string? _path;
@@ -76,7 +78,7 @@ public sealed class TaskStore
         _clock = clock;
         _log = log;
         NodeId = nodeId;
-        var file = path is null ? null : Json.ReadWithFallback<StoreFile>(path, log);
+        var file = path is null ? null : Json.ReadWithFallback(path, Json.Files.StoreFile, log);
         foreach (var t in file?.Tasks ?? []) _tasks[t.Id] = t;
         var last = file?.Clock ?? Hlc.Zero;
         foreach (var t in _tasks.Values)
@@ -251,7 +253,7 @@ public sealed class TaskStore
         var file = new StoreFile { Clock = Versions.Last, Tasks = _tasks.Values.OrderBy(t => t.Id).ToList() };
         try
         {
-            Json.WriteAtomically(_path, System.Text.Json.JsonSerializer.Serialize(file, Json.Options));
+            Json.WriteAtomically(_path, System.Text.Json.JsonSerializer.Serialize(file, Json.Files.StoreFile));
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException)
         {

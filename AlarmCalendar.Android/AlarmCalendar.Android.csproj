@@ -16,15 +16,11 @@
     <ApplicationVersion>1</ApplicationVersion>
     <ApplicationDisplayVersion>0.1.0</ApplicationDisplayVersion>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <!-- Core serializes with source-generated System.Text.Json, so full trimming is safe;
+         trim warnings are errors (TreatWarningsAsErrors), so a reflection-based call
+         sneaking back in fails the Release build. -->
     <TrimMode>full</TrimMode>
-    <!-- The store, settings and sync messages use reflection-based System.Text.Json;
-         keep it enabled under trimming, and keep every Core type it reads. -->
-    <JsonSerializerIsReflectionEnabledByDefault>true</JsonSerializerIsReflectionEnabledByDefault>
   </PropertyGroup>
-
-  <ItemGroup>
-    <TrimmerRootAssembly Include="AlarmCalendar.Core" RootMode="All" />
-  </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\AlarmCalendar.Core\AlarmCalendar.Core.csproj" />

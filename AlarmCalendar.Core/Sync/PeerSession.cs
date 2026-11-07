@@ -57,6 +57,9 @@ internal sealed class PeerSession : IDisposable
     public bool RequesterJoins { get; set; }
     public int MyMembers { get; set; }
     public int PeerMembers { get; set; }
+    /// <summary>The pairing went through; this session is about to be replaced by one
+    /// under the joined group, so whoever dialled it should redial at once.</summary>
+    public bool PairCompleted { get; set; }
 
     public event Action<PeerSession, SyncMessage>? Received;
     /// <summary>Raised once, when the peer's first sealed frame opens.</summary>

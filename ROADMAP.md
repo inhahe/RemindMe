@@ -89,6 +89,7 @@ Suggestions, not requested. S1 is built; the rest wait for a yes:
 - [x] Desktop UI: a Devices window listing nearby, linked and remembered devices, with Link, Leave the sync group, remote addresses, the port and the external-connection gate; a pairing prompt showing the code
 - [x] Tests: in-process engines on loopback (pairing, bridging, a wrong secret, a rejected pairing), plus the merge tests from Phase 1
 - [x] Checked in the real app: two instances (`ALARMCAL_BIND=127.0.0.1`) linked through the Devices window with matching codes, then merged their tasks. A countdown made on one rang on both, and marking it done on one closed the other's popup.
+- [x] Hardened after review: commit-then-reveal pairing, the device linked with fewer others joins, sessions take over only by authenticating, untrusted input bounded and validated, first-sync-based startup settling (design.md → *Sync network*)
 - [ ] LAN discovery between two real machines. Not testable here without a Windows Firewall prompt; the code is LanLink's, adapted.
 
 ### Phase 4: Android (R2–R17 on the phone, D4)
@@ -101,6 +102,6 @@ Suggestions, not requested. S1 is built; the rest wait for a yes:
 - [ ] On a real phone: lock-screen alarm on Samsung's One UI, background sync with the screen off, LAN discovery
 
 ### Phase 5: polish and docs
-- [ ] `README.md` (the user-facing document): features, settings, how to link devices
-- [ ] `known-issues.md` kept current
-- [ ] Independent code review of each batch (global rules)
+- [x] `README.md` (the user-facing document): features, settings, how to link devices
+- [x] `known-issues.md` kept current
+- [~] Independent code review of each batch (global rules). Core and desktop: Opus `xhigh`, 14 fixes (`ad3961e`). Sync: Opus `max`, 14 fixes (`8aa87eb`), then Fable `xhigh` on the reworked sync layer. Android: Opus `xhigh`, after the Fable review.

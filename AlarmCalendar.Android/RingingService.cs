@@ -96,20 +96,28 @@ public sealed class RingingService : Service
     /// else would: answered on the alarm screen, by a notification button, or on another device.</summary>
     public static void Poke()
     {
-        if (_instance is { } s)
+        if (_instance is { } s) s.Evaluate();
+        else WithdrawAnswered(AppState.Context, AlarmScheduler.RingingNow(AppState.Clock.UtcNow, out _));
+    }
+
+    /// <summary>
+    /// Withdraws every alert whose task no longer rings: its notification, its silencing,
+    /// and its sound if the service plays it. The notifications are found among those
+    /// showing, not only in <see cref="Alerts"/>: a process that died left its notifications
+    /// up, and the one that replaced it never knew of them.
+    /// </summary>
+    private static void WithdrawAnswered(Context context, IReadOnlyCollection<TaskStatus> ringing)
+    {
+        var ids = ringing.Select(st => st.Task.Id).ToHashSet();
+        foreach (var gone in Alerts.Keys.Where(k => !ids.Contains(k)).ToList())
         {
-            s.Evaluate();
-            return;
+            Alerts.Remove(gone);
+            Silenced.Remove(gone);
+            _instance?._sound?.Stop(gone);
         }
-        if (Alerts.Count == 0) return;
-        var ringing = AlarmScheduler.RingingNow(AppState.Clock.UtcNow, out _).ToDictionary(st => st.Task.Id);
-        foreach (var (id, alert) in Alerts.ToList())
-        {
-            if (ringing.TryGetValue(id, out var st) && st.AlertDue == alert.Due) continue;
-            Alerts.Remove(id);
-            Silenced.Remove(id);
-            Notifications.Cancel(AppState.Context, Notifications.AlarmId(id));
-        }
+        var live = ids.Select(Notifications.AlarmId).ToHashSet();
+        foreach (var shown in Notifications.ShownAlarms(context))
+            if (!live.Contains(shown)) Notifications.Cancel(context, shown);
     }
 
     /// <summary>Stops the sound, and the vibration, of one task without dismissing it.</summary>
@@ -123,11 +131,8 @@ public sealed class RingingService : Service
             return;
         }
         // The safety net, where the notification itself sounds: posted again on the silent channel.
-        if (Alerts.ContainsKey(task) && AppState.Store.Get(task) is { } t)
-        {
-            var st = AlarmEngine.Evaluate(t, AppState.Clock.UtcNow, AppState.Clock.Zone);
+        if (Alerts.ContainsKey(task) && AppState.Store.Status(task) is { } st)
             Notifications.Post(AppState.Context, Notifications.AlarmId(task), Notifications.Alarm(AppState.Context, st, fallback: false));
-        }
     }
 
     public override IBinder? OnBind(Intent? intent) => null;
@@ -156,7 +161,10 @@ public sealed class RingingService : Service
         {
             // Restarted in the background (sticky, after Android killed the process), where
             // Android 12 and later may refuse a foreground service: the safety net rings instead.
+            // No longer the running service from here on, so that nothing (a Poke before the
+            // destroy) has it play over the safety net's notification, only to stop.
             AppState.Log($"The ringing service couldn't go to the foreground: {e.Message}");
+            if (_instance == this) _instance = null;
             NotifyWithoutService(this, AlarmScheduler.RingingNow(AppState.Clock.UtcNow, out _));
             StopSelf();
             return StartCommandResult.NotSticky;
@@ -172,15 +180,7 @@ public sealed class RingingService : Service
         _handler.RemoveCallbacksAndMessages(null);
         var now = AppState.Clock.UtcNow;
         var ringing = AlarmScheduler.RingingNow(now, out _);
-        var ids = ringing.Select(s => s.Task.Id).ToHashSet();
-
-        foreach (var gone in Alerts.Keys.Where(k => !ids.Contains(k)).ToList())
-        {
-            Alerts.Remove(gone);
-            Silenced.Remove(gone);
-            _sound!.Stop(gone);
-            Notifications.Cancel(this, Notifications.AlarmId(gone));
-        }
+        WithdrawAnswered(this, ringing);
 
         bool newAlert = false;
         foreach (var st in ringing)
@@ -251,7 +251,7 @@ public sealed class RingingService : Service
         _handler.RemoveCallbacksAndMessages(null);
         _sound?.StopAll();
         StopVibration();
-        _instance = null;
+        if (_instance == this) _instance = null;
         base.OnDestroy();
         AlarmScheduler.Reschedule(this);
     }

@@ -113,4 +113,7 @@ Suggestions, not requested. S1 is built; the rest wait for a yes:
   - Android and the pairing redesign: Opus `max`, 15 fixes (`4374ce7`).
   - Opus `xhigh` on that follow-up: 15 fixes, among them pairing rounds,
     announcements MACed under the group key, and the safety net withdrawing
-    alarms once answered.
+    alarms once answered (`4eff033`, `bea9b14`).
+  - Opus `max` on those two: 13 fixes, among them dated announcements against
+    replay, an IPv4-only listener without outside connections, and alarms
+    withdrawn even after the process died.

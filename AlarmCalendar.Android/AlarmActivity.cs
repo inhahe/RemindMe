@@ -30,6 +30,9 @@ public sealed class AlarmActivity : Screen
     private int _shownMinutes;
     private RestartMode _shownRestart;
     private bool _leaving;
+    /// <summary>The alert the user silenced here: a later alert of the same task sounds
+    /// again, and can be silenced again.</summary>
+    private DateTimeOffset? _silencedAlert;
 
     public static Intent IntentFor(Context c, Guid task, bool onRequest = false) =>
         new Intent(c, typeof(AlarmActivity)).PutExtra("task", task.ToString()).PutExtra("show", onRequest)
@@ -47,6 +50,7 @@ public sealed class AlarmActivity : Screen
         Find<Button>(Resource.Id.silence).Click += (_, _) =>
         {
             RingingService.Silence(_id);
+            _silencedAlert = AppState.Store.Status(_id)?.AlertDue;
             Find<Button>(Resource.Id.silence).Enabled = false;
         };
         OnBackPressedDispatcher.AddCallback(this, new BackCallback(() => Leave(done: false)));
@@ -84,6 +88,7 @@ public sealed class AlarmActivity : Screen
         _shownOnRequest = onRequest;
         ShowChoices(t.Def);
         Find<View>(Resource.Id.restart_panel).Visibility = t.Def.Kind == ScheduleKind.Interval ? ViewStates.Visible : ViewStates.Gone;
+        _silencedAlert = null;
         Find<Button>(Resource.Id.silence).Enabled = true;
         Find<TextView>(Resource.Id.error).Text = "";
         Refresh();
@@ -135,6 +140,11 @@ public sealed class AlarmActivity : Screen
         var st = AlarmEngine.Evaluate(t, now, zone);
         // Dealt with elsewhere (a notification button, another device): nothing to show here.
         if (!(st.ShouldAlert || (_shownOnRequest && st.Triggered))) { NextOrFinish(); return; }
+        if (_silencedAlert is not null && _silencedAlert != st.AlertDue)
+        {
+            _silencedAlert = null;
+            Find<Button>(Resource.Id.silence).Enabled = true;
+        }
         var d = t.Def;
         string when = st.Latest is { } l ? TextFormat.When(l, now, zone) : "";
         Find<TextView>(Resource.Id.heading).Text = $"⏰ {AlarmEngine.AlertTitle(st)} · {when} · {TextFormat.Schedule(d, t.State, now, zone)}";

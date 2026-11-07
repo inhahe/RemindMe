@@ -20,9 +20,11 @@ public sealed class SyncService : Service
     public static void Start(Context context)
     {
         try { context.StartForegroundService(new Intent(context, typeof(SyncService))); }
-        catch (Exception e) when (e is Java.Lang.IllegalStateException or ForegroundServiceStartNotAllowedException)
+        // Refused in the background (Android 12+), or by an app op or a missing permission.
+        catch (Exception e) when (e is Java.Lang.IllegalStateException or ForegroundServiceStartNotAllowedException
+            or Java.Lang.SecurityException)
         {
-            AppState.Log($"Couldn't start sync in the background now: {e.Message}");
+            AppState.Log($"Couldn't start sync now: {e.Message}");
         }
     }
 
@@ -50,7 +52,16 @@ public sealed class SyncService : Service
     {
         _instance = this;
         var n = Notifications.Sync(this, Summary());
-        StartForeground(Notifications.SyncId, n, ForegroundService.TypeConnectedDevice);
+        try { StartForeground(Notifications.SyncId, n, ForegroundService.TypeConnectedDevice); }
+        catch (Exception e) when (e is Java.Lang.IllegalStateException or ForegroundServiceStartNotAllowedException
+            or Java.Lang.SecurityException)
+        {
+            // Restarted in the background (sticky), where Android 12 and later may refuse a
+            // foreground service: sync waits for the app to be opened.
+            AppState.Log($"Sync couldn't run in the background now: {e.Message}");
+            StopSelf();
+            return StartCommandResult.NotSticky;
+        }
         if (!AppState.Settings.SyncEnabled)
         {
             StopSelf();

@@ -421,13 +421,18 @@ it runs on Android 10 (API 29) and up. The root namespace is
     taking over from the safety net, a silenced safety-net alarm), they neither
     sound nor open the alarm screen a second time. The safety net cancels before
     posting a new alert, so that one does.
-  - **Their buttons act only on the alert they were posted for** (the due time
-    travels in the intent). A leftover notification's Mark done would otherwise
-    mark a task done that isn't due, which moves an interval task that restarts
-    when done; it is withdrawn instead.
+  - **Their buttons act only while their task rings.** A leftover notification's
+    Mark done would otherwise mark a task done that isn't due, which moves an
+    interval task that restarts when done; it is withdrawn instead.
+  - **Answered alarms are withdrawn from what is showing** (`WithdrawAnswered`,
+    on every evaluation and store change): any alarm notification whose task no
+    longer rings, found among the app's notifications showing, not only those
+    this process posted. A process that died left its notifications up, and the
+    one that replaced it never knew of them.
   - The service's notification is re-posted only when the count changes.
   Silence stops a task's vibration as well as its sound; vibration repeats while
-  some unsilenced alert repeats.
+  some unsilenced alert repeats. A later alert of the same task sounds again,
+  and the alarm screen's Silence works again for it.
 - **The safety net**: if Android refuses to start `RingingService` (a battery
   manager, or an inexact alarm on Android 12 without exact-alarm access), the
   receiver posts each alert itself on `alarms_fallback`, a channel that carries
@@ -436,7 +441,9 @@ it runs on Android 10 (API 29) and up. The root namespace is
   isn't used. Silence posts it again on the silent alarm channel. Since no
   service is running to notice, `RingingService.Poke` (on every store change)
   withdraws each safety-net notification whose alarm no longer rings, answered
-  here, by a button, or on another device.
+  here, by a button, or on another device. When the service is refused the
+  foreground after starting, it stops counting as running at once, so nothing
+  has it play over the safety net and then stop.
 - `AlarmSound`: `MediaPlayer` on the alarm stream, one sound at a time, like the
   desktop's. It tries the chosen sound, then the phone's alarm, ringtone and
   notification defaults, then the first installed alarm sound. An emulator, or
@@ -456,10 +463,13 @@ it runs on Android 10 (API 29) and up. The root namespace is
   the first unlock after a restart, so a phone that rebooted overnight for an
   update still rings at 07:00. That is what Android's own clock app does. The
   cost: those files are protected by the device key only, not the user's PIN.
-  Earlier versions kept them in credential-protected storage; they move over,
-  overwriting, on the first start while the phone is unlocked, and a marker file
-  (`moved-to-device-storage`) records that it is done. Before that, a process
-  started while the phone is locked can't know the data, so it is
+  Earlier versions kept them in credential-protected storage. On the first start
+  while the phone is unlocked they are copied over, overwriting; then a marker
+  file (`moved-to-device-storage`) records that device storage holds the data;
+  only then are the old files deleted. Until the marker exists the old files are
+  the data: a start whose copy failed runs from them and copies again next time,
+  so nothing saved since is overwritten. A process started while the phone is
+  locked before that can't know the data, so it is
   `Provisional`: nothing is read or written, and sync stays off, until
   `LoadOnceUnlocked`, which the unlock broadcast (a receiver registered at run
   time), the boot-completed broadcast and the first screen opened each call.
@@ -480,7 +490,10 @@ it runs on Android 10 (API 29) and up. The root namespace is
   and with it the engine in `AppState`, alive in the background. It is
   `connectedDevice` rather than `dataSync` because Android 15 caps `dataSync` at
   6 hours a day; `CHANGE_WIFI_MULTICAST_STATE` qualifies it. It is sticky, so
-  Android restarts it, and sync, after killing the process.
+  Android restarts it, and sync, after killing the process; if Android then
+  refuses it the foreground (Android 12 and later, in the background), it stops,
+  and sync waits for the app to be opened. A start refused for any reason (the
+  background, an app op, a permission) is logged, never a crash.
 - `SoundChooser`: Android's ringtone picker (alarms, ringtones, notifications),
   or the document picker for a file, taking a persistable read grant so the file
   still plays after a reboot. Its callback is fixed when it is created, so a

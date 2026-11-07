@@ -99,8 +99,11 @@ public static class AppState
     /// Android's own clock app does). The cost: those files are protected by the device key
     /// only, not the user's PIN.
     /// <para>Earlier versions kept their files in credential-protected storage, readable only
-    /// once unlocked. They move over, overwriting, on the first unlocked start, and a marker
-    /// file records that it is done; before that, while locked, there is no data to use.</para>
+    /// once unlocked. On the first unlocked start they are copied over, overwriting, then a
+    /// marker file records that device storage holds the data, and only then are the old
+    /// files deleted. Until the marker exists the old files are the data: a start while
+    /// locked has none to use, and a start whose copy failed runs from the old files and
+    /// copies again next time, so nothing saved since is ever overwritten.</para>
     /// </summary>
     /// <returns>The directory, or null while the data can't be known yet.</returns>
     private static string? DataDirectory(Context context)
@@ -109,23 +112,26 @@ public static class AppState
         var marker = Path.Combine(dir, "moved-to-device-storage");
         if (File.Exists(marker)) return dir;
         if (!IsUnlocked(context)) return null;
-        bool moved = true;
-        if (context.FilesDir is { } old && old.AbsolutePath != dir)
-            foreach (var name in new[] { "tasks.json", "tasks.json.bak", "settings.json", "settings.json.bak", "app.log" })
-            {
-                var from = Path.Combine(old.AbsolutePath, name);
-                try { if (File.Exists(from)) File.Move(from, Path.Combine(dir, name), overwrite: true); }
-                catch (IOException e)
-                {
-                    moved = false;   // tried again at the next start
-                    global::Android.Util.Log.Warn("AlarmCalendar", $"Couldn't move {name}: {e.Message}");
-                }
-            }
-        if (moved)
+        var old = context.FilesDir?.AbsolutePath;
+        string[] names = ["tasks.json", "tasks.json.bak", "settings.json", "settings.json.bak", "app.log"];
+        try
         {
-            try { File.WriteAllText(marker, ""); }
-            catch (IOException e) { global::Android.Util.Log.Warn("AlarmCalendar", $"Couldn't write {marker}: {e.Message}"); }
+            if (old is not null && old != dir)
+                foreach (var name in names)
+                    if (File.Exists(Path.Combine(old, name))) File.Copy(Path.Combine(old, name), Path.Combine(dir, name), overwrite: true);
+            File.WriteAllText(marker, "");
         }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            global::Android.Util.Log.Warn("AlarmCalendar", $"Couldn't copy the data to device storage: {e.Message}");
+            return old ?? dir;
+        }
+        if (old is not null && old != dir)
+            foreach (var name in names)
+            {
+                try { File.Delete(Path.Combine(old, name)); }
+                catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
+            }
         return dir;
     }
 

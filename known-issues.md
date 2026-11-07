@@ -32,7 +32,7 @@ restrict full-screen intents), that background sync survives with the screen off
 - **A sticky restart refused the foreground** (`RingingService.OnStartCommand`
   falling back to the safety net): Android does this only to a service it
   restarts in the background after killing the process mid-alarm.
-- **A notification button left over from an alert already answered**: the app
+- **A notification button pressed after its task was answered**: the app
   withdraws such notifications itself, so none was left to press; the check
   that ignores one is there in case another path leaves one.
 
@@ -45,7 +45,12 @@ Checked on the emulator:
 - **The safety net**: with the `START_FOREGROUND` app op denied, the alarm rang
   as an insistent notification on the fallback channel and opened the alarm
   screen over the lock screen; Silence posted it again quietly, and Close,
-  remind me later withdrew it.
+  remind me later withdrew it. With the process killed while it rang, Mark done
+  on its notification marked the task done and withdrew the notification. With
+  sync on and the app op denied, opening the app logged the refusal instead of
+  crashing.
+- **Silence, again**: a task ringing every minute, silenced on the alarm screen,
+  sounded again at its next occurrence, and the button was usable again.
 
 ## Decisions waiting on the user
 

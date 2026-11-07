@@ -91,8 +91,8 @@ public static class Notifications
         b.SetContentIntent(openPi);
         b.SetFullScreenIntent(openPi, true);
         b.SetVisibility(NotificationCompat.VisibilityPublic);
-        b.AddAction(0, "Mark done", AlarmActionReceiver.IntentFor(context, st, AlarmActionReceiver.Done));
-        b.AddAction(0, "Remind me later", AlarmActionReceiver.IntentFor(context, st, AlarmActionReceiver.Later));
+        b.AddAction(0, "Mark done", AlarmActionReceiver.IntentFor(context, st.Task.Id, AlarmActionReceiver.Done));
+        b.AddAction(0, "Remind me later", AlarmActionReceiver.IntentFor(context, st.Task.Id, AlarmActionReceiver.Later));
         return b.Build()!;
     }
 
@@ -152,40 +152,44 @@ public static class Notifications
     }
 
     public static void Cancel(Context context, int id) => NotificationManagerCompat.From(context)!.Cancel(id);
+
+    /// <summary>The IDs of this app's alarm notifications showing now, whoever posted them.</summary>
+    public static IEnumerable<int> ShownAlarms(Context context)
+    {
+        var nm = (NotificationManager)context.GetSystemService(Context.NotificationService)!;
+        foreach (var n in nm.GetActiveNotifications() ?? [])
+            if (n.Notification?.ChannelId is AlarmChannel or FallbackChannel) yield return n.Id;
+    }
 }
 
 /// <summary>The Mark done and Remind me later buttons of an alarm notification. Each acts
-/// only on the alert it was posted for: a notification left over from one already answered
-/// must not mark the task done again (which would move an interval task that restarts when
-/// done) or snooze it.</summary>
+/// only while its task rings: a notification left over once the task was answered must not
+/// mark it done again (which would move an interval task that restarts when done) or snooze it.</summary>
 [BroadcastReceiver(Enabled = true, Exported = false)]
 public sealed class AlarmActionReceiver : BroadcastReceiver
 {
     public const string Done = "done";
     public const string Later = "later";
 
-    public static PendingIntent IntentFor(Context context, TaskStatus st, string action)
+    public static PendingIntent IntentFor(Context context, Guid task, string action)
     {
-        var i = new Intent(context, typeof(AlarmActionReceiver)).SetAction(action)
-            .PutExtra("task", st.Task.Id.ToString()).PutExtra("due", st.AlertDue?.UtcTicks ?? 0);
-        return PendingIntent.GetBroadcast(context, Notifications.AlarmId(st.Task.Id) * 2 + (action == Done ? 0 : 1), i,
+        var i = new Intent(context, typeof(AlarmActionReceiver)).SetAction(action).PutExtra("task", task.ToString());
+        return PendingIntent.GetBroadcast(context, Notifications.AlarmId(task) * 2 + (action == Done ? 0 : 1), i,
             PendingIntentFlags.Immutable | PendingIntentFlags.UpdateCurrent)!;
     }
 
     public override void OnReceive(Context? context, Intent? intent)
     {
-        if (!Guid.TryParse(intent?.GetStringExtra("task"), out var id) || AppState.Store.Get(id) is not { } t) return;
-        var st = AlarmEngine.Evaluate(t, AppState.Clock.UtcNow, AppState.Clock.Zone);
-        if (!st.ShouldAlert || st.AlertDue?.UtcTicks != intent!.GetLongExtra("due", -1))
+        if (!Guid.TryParse(intent?.GetStringExtra("task"), out var id) || AppState.Store.Status(id) is not { } st) return;
+        if (!st.ShouldAlert)
         {
-            // Every post of a task's alarm updates these buttons, so this notification is
-            // stale: withdrawn. An alert due now is posted afresh by the next evaluation.
-            AppState.Log($"Ignored a notification button for an alert already answered: {TextFormat.Snippet(t.Def.Description, 40)}");
-            Notifications.Cancel(context!, Notifications.AlarmId(id));
-            RingingService.Poke();
+            AppState.Log($"Ignored a notification button for an alarm already answered: {TextFormat.Snippet(st.Task.Def.Description, 40)}");
+            RingingService.Poke();   // withdraws the leftover notification
             return;
         }
-        if (intent.Action == Done) AppState.Store.MarkDone(id);
+        // Answering changes the store, whose handler pokes the ringing service, which
+        // withdraws the notification.
+        if (intent!.Action == Done) AppState.Store.MarkDone(id);
         else AppState.Store.Dismiss(id);
     }
 }

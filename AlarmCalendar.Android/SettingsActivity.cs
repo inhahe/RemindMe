@@ -13,6 +13,7 @@ namespace AlarmCalendar.Droid;
 [Activity(Label = "Settings", Exported = false)]
 public sealed class SettingsActivity : Screen
 {
+    private const int ExportRequest = 7101, ImportRequest = 7102;
     private SoundChooser _chooser = null!;
     private SoundRef? _sound;
     private TimeOnly _timeOfDay;
@@ -40,6 +41,12 @@ public sealed class SettingsActivity : Screen
         Find<RadioButton>(Resource.Id.restart_on_schedule).Checked = s.DefaultRestartMode == RestartMode.OnSchedule;
         Find<Button>(Resource.Id.sound).Click += (_, _) => _chooser.Show(_sound, allowDefault: false);
         Find<Button>(Resource.Id.time_of_day).Click += (_, _) => Ui.PickTime(this, _timeOfDay, v => { _timeOfDay = v; Show(); });
+        Find<Button>(Resource.Id.export_tasks).Click += (_, _) => StartActivityForResult(
+            new Intent(Intent.ActionCreateDocument).AddCategory(Intent.CategoryOpenable).SetType("application/json")
+                .PutExtra(Intent.ExtraTitle, $"alarm-calendar-tasks-{DateTime.Now:yyyy-MM-dd}.json"), ExportRequest);
+        // Any type: file managers label JSON files variously (text/plain, octet-stream).
+        Find<Button>(Resource.Id.import_tasks).Click += (_, _) => StartActivityForResult(
+            new Intent(Intent.ActionOpenDocument).AddCategory(Intent.CategoryOpenable).SetType("*/*"), ImportRequest);
         Find<Button>(Resource.Id.cancel).Click += (_, _) => Finish();
         Find<Button>(Resource.Id.save).Click += (_, _) => Save();
         if (savedInstanceState is { } saved)
@@ -127,7 +134,39 @@ public sealed class SettingsActivity : Screen
 
     protected override void OnActivityResult(int requestCode, Result resultCode, Intent? data)
     {
+        if (requestCode is ExportRequest or ImportRequest)
+        {
+            if (resultCode == Result.Ok && data?.Data is { } uri) Transfer(requestCode == ExportRequest, uri);
+            return;
+        }
         if (!_chooser.HandleResult(requestCode, resultCode, data)) base.OnActivityResult(requestCode, resultCode, data);
+    }
+
+    /// <summary>Writes the export to, or imports from, the document the user picked (S8).</summary>
+    private void Transfer(bool export, Android.Net.Uri uri)
+    {
+        var text = Find<TextView>(Resource.Id.transfer_text);
+        try
+        {
+            if (export)
+            {
+                using (var stream = ContentResolver!.OpenOutputStream(uri, "wt") ?? throw new IOException("The file couldn't be opened."))
+                using (var w = new StreamWriter(stream, new System.Text.UTF8Encoding(false)))
+                    w.Write(AppState.Store.Export());
+                int n = AppState.Store.Live().Count;
+                text.Text = $"Exported {n} task{(n == 1 ? "" : "s")}.";
+            }
+            else
+            {
+                using var stream = ContentResolver!.OpenInputStream(uri) ?? throw new IOException("The file couldn't be opened.");
+                using var r = new StreamReader(stream);
+                text.Text = TextFormat.ImportSummary(AppState.Store.Import(r.ReadToEnd()));
+            }
+        }
+        catch (Exception e) when (e is IOException or InvalidDataException or Java.Lang.Exception)
+        {
+            text.Text = $"Couldn't {(export ? "export" : "import")}: {e.Message}";
+        }
     }
 
     public override bool OnSupportNavigateUp()

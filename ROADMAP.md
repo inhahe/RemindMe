@@ -128,7 +128,7 @@ user asked for all the rest (Phase 6):
 - [x] S5: **Snooze presets** on both alarm screens: remind me in 5 min, 10 min, 30 min or 1 h, this once
 - [x] S7: **Every N weeks** on the chosen weekdays, from the week of a chosen date, in both editors
 - [x] S10: **Volume** (10–100% of the system or alarm volume) and **fade-in** (10 s to 5 min) per task, with defaults in Settings, on both platforms
-- [ ] S8: export and import of tasks
+- [x] S8: **Export and import** tasks as a JSON file, in Settings on both platforms; import merges, restores deleted tasks, and rings nothing from the past
 - [ ] S2: calendar view
 - [ ] S3: wake the PC from sleep for an alarm
 - [ ] S9: releases (version, MSI, signed APK, release script)

@@ -167,6 +167,24 @@ aside rather than overwritten. The store owns the node's `Hlc` and raises
 `Changed`, with the IDs that changed and whether the change was local or came
 from sync.
 
+**Export and import (S8)**: `Export` writes every live task to a JSON file
+(`{app, format, exportedUtc, tasks}`). `Import` reads one back:
+
+- A task this device has merges by the sync rules (`MergeRules.Merge`), so an
+  old backup can't undo newer edits.
+- One it doesn't have, or has deleted, comes back as a new revision that
+  outranks the tombstone, with a fresh `DefVersion`. Its definition, anchor, a
+  running countdown's end and a pause are kept. `DoneThrough` becomes the
+  import time, so nothing in the past rings; a paused task keeps its own, since
+  resuming passes over the past anyway.
+- The change is raised as a local one, so it reaches linked devices like an
+  edit.
+- A file that isn't an export of this app, or is from a newer format, is
+  refused with `InvalidDataException`.
+
+Both apps offer it under *Your tasks* in Settings: file dialogs on the desktop,
+the document picker on Android.
+
 ## Sync merge
 
 Each part of a task merges on its own:

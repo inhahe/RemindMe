@@ -54,6 +54,19 @@
             </StackPanel>
         </Border>
 
+        <TextBlock Text="Your tasks" FontWeight="SemiBold" Margin="0,6,0,3" />
+        <Border Style="{StaticResource Pane}" Background="White">
+            <StackPanel>
+                <WrapPanel>
+                    <Button Content="_Export tasks…" Click="Export_Click" Padding="10,2" />
+                    <Button Content="_Import tasks…" Click="Import_Click" Padding="10,2" Margin="8,0,0,0" />
+                </WrapPanel>
+                <TextBlock Style="{StaticResource Hint}" Margin="0,4,0,0" TextWrapping="Wrap"
+                           Text="Export saves every task to a file, as a backup or to move them to a device that isn't linked. Importing a file adds the tasks it has that this device doesn't (deleted ones included), and updates any it holds a newer version of; nothing that came up in the past rings. These act at once, without Save." />
+                <TextBlock x:Name="TransferText" Margin="0,4,0,0" TextWrapping="Wrap" />
+            </StackPanel>
+        </Border>
+
         <TextBlock x:Name="ErrorText" Foreground="#FFB00020" TextWrapping="Wrap" />
         <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,8,0,0">
             <Button Content="_Save" Click="Save_Click" FontWeight="SemiBold" />

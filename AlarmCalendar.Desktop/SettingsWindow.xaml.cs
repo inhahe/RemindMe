@@ -44,6 +44,46 @@ public partial class SettingsWindow : Window
 
     private void Cancel_Click(object sender, RoutedEventArgs e) => Close();
 
+    private void Export_Click(object sender, RoutedEventArgs e)
+    {
+        var dialog = new Microsoft.Win32.SaveFileDialog
+        {
+            Title = "Export tasks",
+            FileName = $"alarm-calendar-tasks-{DateTime.Now:yyyy-MM-dd}.json",
+            Filter = "Alarm & Calendar tasks (*.json)|*.json|All files|*.*",
+        };
+        if (dialog.ShowDialog(this) != true) return;
+        try
+        {
+            System.IO.File.WriteAllText(dialog.FileName, AppHost.Store.Export(), new System.Text.UTF8Encoding(false));
+            int n = AppHost.Store.Live().Count;
+            TransferText.Text = $"Exported {n} task{(n == 1 ? "" : "s")} to {dialog.FileName}.";
+        }
+        catch (Exception ex) when (ex is System.IO.IOException or UnauthorizedAccessException)
+        {
+            TransferText.Text = $"Couldn't export: {ex.Message}";
+        }
+    }
+
+    private void Import_Click(object sender, RoutedEventArgs e)
+    {
+        var dialog = new Microsoft.Win32.OpenFileDialog
+        {
+            Title = "Import tasks",
+            Filter = "Alarm & Calendar tasks (*.json)|*.json|All files|*.*",
+        };
+        if (dialog.ShowDialog(this) != true) return;
+        try
+        {
+            var r = AppHost.Store.Import(System.IO.File.ReadAllText(dialog.FileName));
+            TransferText.Text = TextFormat.ImportSummary(r);
+        }
+        catch (Exception ex) when (ex is System.IO.IOException or UnauthorizedAccessException or System.IO.InvalidDataException)
+        {
+            TransferText.Text = $"Couldn't import: {ex.Message}";
+        }
+    }
+
     private void Save_Click(object sender, RoutedEventArgs e)
     {
         var errors = new List<string>();

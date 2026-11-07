@@ -20,6 +20,7 @@ internal sealed class CamelCaseEnum<T>() : JsonStringEnumConverter<T>(JsonNaming
         typeof(CamelCaseEnum<SoundMode>), typeof(CamelCaseEnum<SoundSource>), typeof(CamelCaseEnum<DayOfWeek>)])]
 [JsonSerializable(typeof(AppSettings))]
 [JsonSerializable(typeof(StoreFile))]
+[JsonSerializable(typeof(ExportFile))]
 [JsonSerializable(typeof(SyncMessage))]
 [JsonSerializable(typeof(string[]))]
 internal sealed partial class CoreJson : JsonSerializerContext;

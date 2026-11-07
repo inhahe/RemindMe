@@ -87,6 +87,13 @@ plays instead and the alarm window says so.
 | Start with Windows (in the tray) | On by default: alarms only ring while the app runs. |
 | Closing the main window keeps the app running in the tray | On by default. Use **Exit** (toolbar or tray menu) to quit. |
 
+**Your tasks** (in Settings, on Windows and Android): **Export tasks** saves every
+task to a file, as a backup or to move them to a device you haven't linked.
+**Import tasks** reads such a file back. It adds the tasks this device doesn't
+have, including ones you deleted, and updates any the file has a newer version
+of; a backup older than your edits changes nothing. Nothing that came up in the
+past rings because of an import.
+
 ## Syncing your devices
 
 Open **Devices…** (in the toolbar or the tray menu).

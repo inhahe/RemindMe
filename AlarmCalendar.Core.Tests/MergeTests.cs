@@ -220,3 +220,83 @@ public class PersistenceTests
         finally { dir.Delete(true); }
     }
 }
+
+public class ExportImportTests
+{
+    private readonly FakeClock _clock = new(NY(2026, 6, 1, 9, 0, 0), NewYork);
+
+    private TaskStore NewStore(string node) => new(null, node, _clock);
+
+    [Fact]
+    public void AnExportImportsIntoAnotherDeviceWithoutRingingForThePast()
+    {
+        var a = NewStore("node-a");
+        var daily = a.Save(null, new TaskDefinition
+        {
+            Description = "daily", Kind = ScheduleKind.Interval, Unit = IntervalUnit.Days, Start = new DateTime(2026, 5, 1, 8, 0, 0),
+            Restart = RestartMode.OnSchedule,
+        });
+        var countdown = a.Save(null, new TaskDefinition { Description = "cd", Kind = ScheduleKind.Countdown, Duration = TimeSpan.FromHours(2) });
+        var gone = a.Save(null, new TaskDefinition { Description = "deleted", Kind = ScheduleKind.Once, At = new DateTime(2026, 7, 1, 9, 0, 0) });
+        a.Delete(gone.Id);
+        var file = a.Export();
+
+        _clock.UtcNow = NY(2026, 6, 3, 10);   // two daily occurrences later
+        var b = NewStore("node-b");
+        Assert.Equal(new ImportResult(2, 0, 0), b.Import(file));   // the deleted task isn't exported
+        Assert.False(b.Status(daily.Id)!.Triggered);                // the past is passed over
+        Assert.Equal(NY(2026, 6, 4, 8), b.Status(daily.Id)!.NextOccurrence);
+        Assert.True(b.Status(countdown.Id)!.Finished);              // it ended at 11:00 on Jun 1
+
+        Assert.Equal(new ImportResult(0, 0, 2), b.Import(file));   // again: nothing to do
+    }
+
+    [Fact]
+    public void ImportingBringsBackADeletedTaskButNotOverANewerEdit()
+    {
+        var a = NewStore("node-a");
+        var t = a.Save(null, new TaskDefinition { Description = "v1", Kind = ScheduleKind.Weekly, Days = 0b0000010 });
+        var backup = a.Export();
+        _clock.Advance(TimeSpan.FromMinutes(1));
+        a.Save(t.Id, a.Get(t.Id)!.Def with { Description = "v2" });
+        Assert.Equal(new ImportResult(0, 0, 1), a.Import(backup));
+        Assert.Equal("v2", a.Get(t.Id)!.Def.Description);
+
+        a.Delete(t.Id);
+        _clock.Advance(TimeSpan.FromMinutes(1));
+        Assert.Equal(new ImportResult(1, 0, 0), a.Import(backup));
+        var back = a.Get(t.Id)!;
+        Assert.False(back.Def.Deleted);
+        Assert.Equal("v1", back.Def.Description);
+        Assert.True(back.Def.ScheduleRevision > t.Def.ScheduleRevision);
+
+        // The restored task outranks the tombstone wherever they meet.
+        var tombstone = t with { Def = t.Def with { Deleted = true }, DefVersion = new Hlc(back.DefVersion.Ms - 1, 0, "node-z") };
+        Assert.False(MergeRules.Merge(back, tombstone).Def.Deleted);
+    }
+
+    [Fact]
+    public void APausedCountdownImportsPausedWithItsTimeLeft()
+    {
+        var a = NewStore("node-a");
+        var t = a.Save(null, new TaskDefinition { Kind = ScheduleKind.Countdown, Duration = TimeSpan.FromMinutes(30) });
+        _clock.Advance(TimeSpan.FromMinutes(10));
+        a.Pause(t.Id);
+        var file = a.Export();
+        _clock.Advance(TimeSpan.FromHours(5));
+        var b = NewStore("node-b");
+        b.Import(file);
+        var st = b.Status(t.Id)!;
+        Assert.True(st.Paused);
+        Assert.Equal(TimeSpan.FromMinutes(20), st.CountdownLeft);
+    }
+
+    [Fact]
+    public void ANonExportFileIsRefused()
+    {
+        var a = NewStore("node-a");
+        Assert.Throws<InvalidDataException>(() => a.Import("{\"tasks\": []}"));
+        Assert.Throws<InvalidDataException>(() => a.Import("not json"));
+        Assert.Throws<InvalidDataException>(() => a.Import("{\"app\": \"AlarmCalendar\", \"format\": 2, \"tasks\": []}"));
+    }
+}

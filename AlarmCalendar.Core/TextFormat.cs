@@ -102,6 +102,19 @@ public static class TextFormat
         return $"{minutes / 60}:{minutes % 60:00}";
     }
 
+    /// <summary>"Imported 3 tasks; updated 1; 2 were already up to date.": what an import did.</summary>
+    public static string ImportSummary(ImportResult r)
+    {
+        static string Tasks(int n) => $"{n} task{(n == 1 ? "" : "s")}";
+        var parts = new List<string>();
+        if (r.Added > 0) parts.Add($"imported {Tasks(r.Added)}");
+        if (r.Updated > 0) parts.Add($"updated {Tasks(r.Updated)}");
+        if (r.Unchanged > 0) parts.Add($"{Tasks(r.Unchanged)} {(r.Unchanged == 1 ? "was" : "were")} already up to date");
+        if (parts.Count == 0) return "The file has no tasks.";
+        var text = string.Join("; ", parts) + ".";
+        return char.ToUpperInvariant(text[0]) + text[1..];
+    }
+
     /// <summary>"5 min", "1 h" or "1 h 30 min": a snooze preset's label.</summary>
     public static string Short(TimeSpan span)
     {

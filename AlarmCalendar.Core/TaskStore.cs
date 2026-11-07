@@ -14,6 +14,21 @@ internal sealed class StoreFile
     public List<AlarmTask> Tasks { get; set; } = [];
 }
 
+/// <summary>A file of exported tasks (S8).</summary>
+internal sealed class ExportFile
+{
+    public string App { get; set; } = "";
+    public int Format { get; set; } = 1;
+    public DateTimeOffset ExportedUtc { get; set; }
+    public List<AlarmTask> Tasks { get; set; } = [];
+}
+
+/// <summary>What an import did.</summary>
+/// <param name="Added">Tasks this device didn't have, or had deleted.</param>
+/// <param name="Updated">Tasks the file held a newer version of.</param>
+/// <param name="Unchanged">Tasks this device already had as they are, or newer.</param>
+public sealed record ImportResult(int Added, int Updated, int Unchanged);
+
 /// <summary>One line of a sync digest: enough to tell which side holds the newer record.</summary>
 public sealed record DigestEntry(Guid Id, Hlc DefVersion, int Revision, Hlc StateVersion, DateTimeOffset DoneThroughUtc);
 
@@ -210,6 +225,83 @@ public sealed class TaskStore
         }
         Raise([result], false);
         return result;
+    }
+
+    // ---- Export and import (S8) ----------------------------------------------------
+
+    /// <summary>Every task that isn't deleted, as the JSON of an export file.</summary>
+    public string Export()
+    {
+        var file = new ExportFile { App = Sync.Protocol.App, ExportedUtc = _clock.UtcNow, Tasks = Live().OrderBy(t => t.Id).ToList() };
+        return System.Text.Json.JsonSerializer.Serialize(file, Json.Files.ExportFile);
+    }
+
+    /// <summary>
+    /// Imports an export file. A task this device has merges by the sync rules, so an old
+    /// file can't undo newer edits. One it doesn't have, or has deleted, comes back as a new
+    /// revision with whatever came up before now passed over (for a paused task, when it is
+    /// resumed), so importing doesn't ring for the past: its definition, its anchor, a
+    /// running countdown's end and a pause are kept.
+    /// The changes reach linked devices like any edit made here.
+    /// </summary>
+    /// <exception cref="InvalidDataException">The text isn't an export file of this app.</exception>
+    public ImportResult Import(string json)
+    {
+        ExportFile? file;
+        try { file = System.Text.Json.JsonSerializer.Deserialize(json, Json.Files.ExportFile); }
+        catch (System.Text.Json.JsonException e) { throw new InvalidDataException("This isn't a file of exported tasks.", e); }
+        if (file is null || file.App != Sync.Protocol.App)
+            throw new InvalidDataException("This isn't a file of exported tasks.");
+        if (file.Format > 1)
+            throw new InvalidDataException("This file was exported by a newer version of the app.");
+
+        var now = _clock.UtcNow;
+        int added = 0, updated = 0, unchanged = 0;
+        var changed = new List<AlarmTask>();
+        lock (_lock)
+        {
+            foreach (var r in file.Tasks)
+            {
+                if (r is null || r.Id == Guid.Empty || r.Def is null || r.State is null || r.Def.Deleted) continue;
+                Versions.Observe(r.DefVersion);
+                Versions.Observe(r.StateVersion);
+                if (_tasks.TryGetValue(r.Id, out var local) && !local.Def.Deleted)
+                {
+                    var merged = MergeRules.Merge(local, r);
+                    if (merged.DefVersion == local.DefVersion && merged.StateVersion == local.StateVersion && merged.State == local.State)
+                    {
+                        unchanged++;
+                        continue;
+                    }
+                    _tasks[r.Id] = merged;
+                    changed.Add(merged);
+                    updated++;
+                    continue;
+                }
+                // New here, or deleted here: a new revision, outranking any tombstone.
+                int revision = Math.Max(Math.Max(r.Def.ScheduleRevision, r.State.Revision),
+                    local is null ? 0 : Math.Max(local.Def.ScheduleRevision, local.State.Revision)) + 1;
+                var def = r.Def with { ScheduleRevision = revision, Deleted = false };
+                // A paused task keeps its own: resuming passes over the past anyway, and a
+                // paused countdown's end may lie in the past until it is resumed.
+                var doneThrough = r.State.PausedAtUtc is null ? now
+                    : r.State.DoneThroughUtc < now ? r.State.DoneThroughUtc : now;
+                var restored = new AlarmTask
+                {
+                    Id = r.Id,
+                    Def = def,
+                    DefVersion = Versions.Tick(),
+                    State = r.State with { Revision = revision, DoneThroughUtc = doneThrough, SnoozeUntilUtc = null, SnoozeOccurrenceUtc = null },
+                    StateVersion = Versions.Tick(),
+                };
+                _tasks[r.Id] = restored;
+                changed.Add(restored);
+                added++;
+            }
+            if (changed.Count > 0) SaveLocked();
+        }
+        if (changed.Count > 0) Raise(changed, false);
+        return new ImportResult(added, updated, unchanged);
     }
 
     // ---- Sync ----------------------------------------------------------------------

@@ -61,6 +61,25 @@
             </com.google.android.material.card.MaterialCardView>
 
             <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+                android:text="Your tasks" android:textStyle="bold" android:layout_marginVertical="4dp" />
+            <com.google.android.material.card.MaterialCardView style="@style/Pane">
+                <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+                    android:orientation="vertical" android:padding="10dp">
+                    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content">
+                        <Button android:id="@+id/export_tasks" style="@style/Widget.Material3.Button.OutlinedButton"
+                            android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Export tasks" />
+                        <Button android:id="@+id/import_tasks" style="@style/Widget.Material3.Button.OutlinedButton"
+                            android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Import tasks"
+                            android:layout_marginStart="8dp" />
+                    </LinearLayout>
+                    <TextView android:layout_width="match_parent" android:layout_height="wrap_content" style="@style/Hint"
+                        android:text="Export saves every task to a file, as a backup or to move them to a device that isn't linked. Importing a file adds the tasks it has that this phone doesn't (deleted ones included), and updates any it holds a newer version of; nothing that came up in the past rings. These act at once, without Save." />
+                    <TextView android:id="@+id/transfer_text" android:layout_width="match_parent" android:layout_height="wrap_content"
+                        android:layout_marginTop="4dp" />
+                </LinearLayout>
+            </com.google.android.material.card.MaterialCardView>
+
+            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
                 android:text="So that alarms reach you" android:textStyle="bold" android:layout_marginVertical="4dp" />
             <com.google.android.material.card.MaterialCardView style="@style/Pane">
                 <LinearLayout android:id="@+id/permissions" android:layout_width="match_parent" android:layout_height="wrap_content"

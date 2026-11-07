@@ -27,7 +27,6 @@ internal sealed class PairRound
     /// the timeout arrive on different threads.</summary>
     public readonly object Gate = new();
 
-    public byte[]? PeerPublic { get; set; }
     public byte[]? Secret { get; set; }
     public string? Code { get; set; }
     /// <summary>The requesting device joins the accepting device's group (otherwise the

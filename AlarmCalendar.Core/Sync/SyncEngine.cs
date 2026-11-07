@@ -16,7 +16,8 @@ public sealed record SyncOptions
 {
     public int Port { get; init; } = Protocol.DefaultPort;
     /// <summary>Address the TCP listener binds; tests use loopback. <see cref="IPAddress.Any"/>
-    /// listens on IPv4 and IPv6 both.</summary>
+    /// listens on IPv4, and on IPv6 too when <see cref="AcceptExternalConnections"/> is set
+    /// (<see cref="SyncEngine.ListensOnIpv6"/>).</summary>
     public IPAddress BindAddress { get; init; } = IPAddress.Any;
     public bool EnableDiscovery { get; init; } = true;
     public int DiscoveryPort { get; init; } = Protocol.DiscoveryPort;
@@ -103,6 +104,9 @@ public sealed class SyncEngine : IDisposable
     /// <summary>Devices remembered from announcements, at most: anyone on the LAN can
     /// announce any number of made-up devices.</summary>
     private const int MaxNearby = 256;
+    /// <summary>A member's announcement dated further than this from this device's clock is
+    /// ignored (<see cref="IsFreshMemberAnnouncement"/>).</summary>
+    private static readonly TimeSpan MaxClockDifference = TimeSpan.FromMinutes(10);
 
     private readonly TaskStore _store;
     private readonly SyncOptions _options;
@@ -117,6 +121,10 @@ public sealed class SyncEngine : IDisposable
     private readonly ConcurrentDictionary<string, byte> _dialing = new();
     private readonly ConcurrentDictionary<string, byte> _dialFailLogged = new();
     private readonly ConcurrentDictionary<string, string> _remoteErrors = new();
+    /// <summary>The time of the last announcement accepted from each member (only proven
+    /// members get here, so a flood can't grow it).</summary>
+    private readonly ConcurrentDictionary<string, long> _memberAt = new();
+    private readonly ConcurrentDictionary<string, byte> _clockLogged = new();
     private SyncIdentity _id;
     private TcpListener? _listener;
     private Discovery? _discovery;
@@ -166,9 +174,7 @@ public sealed class SyncEngine : IDisposable
     /// <exception cref="SocketException">The port is in use.</exception>
     public void Start()
     {
-        _listener = _options.BindAddress.Equals(IPAddress.Any)
-            ? StartDualModeListener(_options.Port)
-            : new TcpListener(_options.BindAddress, _options.Port);
+        _listener = ListensOnIpv6(_options) ? StartDualModeListener(_options.Port) : new TcpListener(_options.BindAddress, _options.Port);
         _listener.Start();
         ListenPort = ((IPEndPoint)_listener.LocalEndpoint).Port;
         _ = AcceptLoopAsync(_cts.Token);
@@ -177,8 +183,7 @@ public sealed class SyncEngine : IDisposable
         {
             try
             {
-                _discovery = new Discovery(_id.NodeId, _options.DiscoveryPort, () => Presence(MessageTypes.Announce),
-                    _options.AcquireMulticastLock, _log);
+                _discovery = new Discovery(_id.NodeId, _options.DiscoveryPort, Announcement, _options.AcquireMulticastLock, _log);
                 _discovery.Announced += OnAnnounced;
                 _discovery.Start();
             }
@@ -252,6 +257,16 @@ public sealed class SyncEngine : IDisposable
 
     // ---- Connections -------------------------------------------------------------------
 
+    /// <summary>
+    /// Whether the listener takes IPv6 as well as IPv4: only when bound to every address and
+    /// accepting connections from outside the LAN. Otherwise IPv4 alone, where private
+    /// addresses tell the LAN apart: a global IPv6 address doesn't say whether its owner is
+    /// down the hall or a customer of the same ISP. A LAN peer dialling a host name that
+    /// resolves to both is then refused on IPv6 at connect time, and falls back to IPv4.
+    /// (Accepting the connection and dropping it would leave it no reason to.)
+    /// </summary>
+    internal static bool ListensOnIpv6(SyncOptions o) => o.BindAddress.Equals(IPAddress.Any) && o.AcceptExternalConnections;
+
     /// <summary>A listener on IPv4 and IPv6 both, so IPv6 remote addresses work; IPv4 only
     /// where the system has no IPv6.</summary>
     private static TcpListener StartDualModeListener(int port)
@@ -278,7 +293,11 @@ public sealed class SyncEngine : IDisposable
             Type = type, App = Protocol.App, Proto = Protocol.Version,
             Node = id.NodeId, Name = id.Name, Group = id.GroupId, Port = ListenPort,
         };
-        if (type == MessageTypes.Announce) m.Mac = SyncCrypto.AnnouncementMac(id.GroupKey, m);
+        if (type == MessageTypes.Announce)
+        {
+            m.At = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+            m.Mac = SyncCrypto.AnnouncementMac(id.GroupKey, m);
+        }
         return m;
     }
 
@@ -295,7 +314,7 @@ public sealed class SyncEngine : IDisposable
             catch (ObjectDisposedException) { break; }
             catch (SocketException) { continue; }
 
-            if (!_options.AcceptExternalConnections && client.Client.RemoteEndPoint is IPEndPoint ep && !Protocol.IsLanAddress(ep.Address))
+            if (!_options.AcceptExternalConnections && client.Client.RemoteEndPoint is IPEndPoint ep && !Protocol.IsPrivateOrLan(ep.Address))
             {
                 _log?.Invoke($"Refused a connection from {Plain(ep.Address)}, outside the LAN (Accept connections from outside the LAN is off).");
                 client.Dispose();
@@ -384,7 +403,7 @@ public sealed class SyncEngine : IDisposable
         // announcement carries it), so only the MAC makes a device a member here. A claim to
         // the group without it is a forgery, and dropped.
         bool member = msg.Group == id.GroupId;
-        if (member && !SyncCrypto.HasValidMac(id.GroupKey, msg)) return;
+        if (member && !IsFreshMemberAnnouncement(msg, id, now)) return;
         bool known = _nearby.TryGetValue(node, out var old);
         // Nor may a stranger's announcement give a member's ID and push the member out.
         if (known && !member && IsMember(old!, id.GroupId) && now - old!.Seen <= PeerExpiry) return;
@@ -409,6 +428,28 @@ public sealed class SyncEngine : IDisposable
         lock (_lock) if (_sessions.ContainsKey(node)) { _nearby[node] = _nearby[node] with { FirstSeen = now }; return; }
         if (string.CompareOrdinal(id.NodeId, node) < 0 || now - (old?.FirstSeen ?? now) > HigherIdFallback)
             _ = DialNodeAsync(node, ep);
+    }
+
+    /// <summary>
+    /// The MAC shows that a member sent an announcement once; its time, that this isn't a
+    /// recording. Each member's announcements must be newer than the last one accepted from
+    /// it, so a replay (from anywhere) is ignored, and recent, so one recorded before this
+    /// process started is too. Otherwise a recording would keep a device that has left the
+    /// group a member here for good, at whatever address it was replayed from.
+    /// </summary>
+    private bool IsFreshMemberAnnouncement(SyncMessage msg, SyncIdentity id, DateTimeOffset now)
+    {
+        if (!SyncCrypto.HasValidMac(id.GroupKey, msg) || msg.At is not { } at) return false;
+        if (Math.Abs(now.ToUnixTimeSeconds() - at) > MaxClockDifference.TotalSeconds)
+        {
+            if (_clockLogged.TryAdd(msg.Node!, 0))
+                _log?.Invoke($"Ignored announcements from {Protocol.CleanName(msg.Name, msg.Node![..8])}: its clock is "
+                    + $"{TextFormat.Span(DateTimeOffset.FromUnixTimeSeconds(at).UtcDateTime, now.UtcDateTime, 2)} off this device's.");
+            return false;
+        }
+        if (_memberAt.TryGetValue(msg.Node!, out var last) && at <= last) return false;
+        _memberAt[msg.Node!] = at;
+        return true;
     }
 
     private async Task DialNodeAsync(string node, IPEndPoint ep)
@@ -763,10 +804,10 @@ public sealed class SyncEngine : IDisposable
         if (round is null || m.Round != round.Id) return;
         switch (m.Type)
         {
-            case MessageTypes.PairChallenge when round.Initiator && round.PeerPublic is null:
+            case MessageTypes.PairChallenge when round.Initiator && round.Secret is null:
                 OnPairChallenge(s, round, m);
                 break;
-            case MessageTypes.PairReveal when !round.Initiator && round.PeerPublic is null:
+            case MessageTypes.PairReveal when !round.Initiator && round.Secret is null:
                 OnPairReveal(s, round, m);
                 break;
             case MessageTypes.PairAccept when round.Initiator && round.Secret is not null:
@@ -804,7 +845,6 @@ public sealed class SyncEngine : IDisposable
         round.PeerMembers = Math.Clamp(m.Members ?? 0, 0, 10_000);
         (round.Secret, round.Code) = SyncCrypto.PairingSecret(round.Key, theirs,
             requesterKey: round.Public, accepterKey: theirs, requesterMembers: round.MyMembers, accepterMembers: round.PeerMembers);
-        round.PeerPublic = theirs;
         round.RequesterJoins = round.MyMembers <= round.PeerMembers;
         round.Key.Dispose();
         _ = s.SendAsync(new SyncMessage { Type = MessageTypes.PairReveal, Round = round.Id, PairKey = Convert.ToBase64String(round.Public) });
@@ -821,7 +861,6 @@ public sealed class SyncEngine : IDisposable
             throw new CryptographicException("The revealed pairing key doesn't match its commitment.");
         (round.Secret, round.Code) = SyncCrypto.PairingSecret(round.Key, theirs,
             requesterKey: theirs, accepterKey: round.Public, requesterMembers: round.PeerMembers, accepterMembers: round.MyMembers);
-        round.PeerPublic = theirs;
         round.RequesterJoins = round.PeerMembers <= round.MyMembers;
         round.Key.Dispose();
         Ask(s, round);

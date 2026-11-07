@@ -1,6 +1,5 @@
 using System.Buffers.Binary;
 using System.Net;
-using System.Net.NetworkInformation;
 using System.Net.Sockets;
 using System.Security.Cryptography;
 using System.Text;
@@ -47,6 +46,9 @@ public sealed class SyncMessage
     /// <summary>An announcement's HMAC under the group key (<see cref="SyncCrypto.AnnouncementMac"/>):
     /// the group ID is public, so only this shows that a device really is a member.</summary>
     public string? Mac { get; set; }
+    /// <summary>When an announcement was sent, in Unix seconds; covered by <see cref="Mac"/>, so a
+    /// recorded announcement can't be passed off as a later one.</summary>
+    public long? At { get; set; }
 
     // replication
     public List<DigestEntry>? Digest { get; set; }
@@ -73,8 +75,8 @@ public static class Protocol
     public const string App = "AlarmCalendar";
     /// <summary>Raise on every incompatible change, so mismatched builds refuse each other
     /// with a clear message instead of failing obscurely. 2: the "ready" frame, two-sided
-    /// pairing acceptance, member counts in the commitment. 3: pairing rounds, MACed
-    /// announcements.</summary>
+    /// pairing acceptance, member counts in the commitment. 3: pairing rounds, MACed and
+    /// dated announcements.</summary>
     public const int Version = 3;
     public const int DefaultPort = 37660;
     /// <summary>Discovery always uses this UDP port, whatever TCP port a node listens on,
@@ -156,35 +158,6 @@ public static class Protocol
             || (b[0] == 169 && b[1] == 254) || b[0] == 127;
     }
 
-    /// <summary>True for an address on the local network: private, link-local or loopback
-    /// (<see cref="IsPrivateOrLan"/>), or a global IPv6 address inside the on-link prefix of
-    /// one of this machine's LAN interfaces, which is how LAN peers often reach each other
-    /// over IPv6.</summary>
-    public static bool IsLanAddress(IPAddress ip) => IsLanAddress(ip, OnLinkPrefixes.Current());
-
-    /// <param name="onLink">This machine's IPv6 prefixes, as <see cref="OnLinkPrefixes"/> lists them.</param>
-    internal static bool IsLanAddress(IPAddress ip, IReadOnlyList<(IPAddress Address, int Length)> onLink)
-    {
-        if (ip.IsIPv4MappedToIPv6) ip = ip.MapToIPv4();
-        if (IsPrivateOrLan(ip)) return true;
-        // A public IPv4 subnet or a prefix shorter than /64 can span far more than a LAN (a
-        // PC plugged straight into an ISP's modem shares its subnet with other customers).
-        if (ip.AddressFamily != AddressFamily.InterNetworkV6) return false;
-        foreach (var (address, length) in onLink)
-            if (length is >= 64 and <= 128 && address.AddressFamily == AddressFamily.InterNetworkV6 && SamePrefix(address, ip, length))
-                return true;
-        return false;
-    }
-
-    private static bool SamePrefix(IPAddress a, IPAddress b, int bits)
-    {
-        byte[] x = a.GetAddressBytes(), y = b.GetAddressBytes();
-        if (bits <= 0 || bits > x.Length * 8) return false;
-        for (int i = 0; i < bits / 8; i++) if (x[i] != y[i]) return false;
-        int rest = bits % 8;
-        return rest == 0 || ((x[bits / 8] ^ y[bits / 8]) & (0xFF << (8 - rest)) & 0xFF) == 0;
-    }
-
     /// <summary>Splits "host" or "host:port" (or "[v6]:port").</summary>
     public static bool TryParseAddress(string text, out string host, out int port)
     {
@@ -211,51 +184,6 @@ public static class Protocol
         // Several colons without brackets can only be a bare IPv6 address.
         if (text.Contains(':')) return IPAddress.TryParse(text, out var v6) && v6.AddressFamily == AddressFamily.InterNetworkV6;
         return text.All(c => char.IsLetterOrDigit(c) || c is '.' or '-' or '_');
-    }
-}
-
-/// <summary>
-/// The global IPv6 prefixes of this machine's LAN interfaces (not loopback, tunnels or
-/// point-to-point links), for <see cref="Protocol.IsLanAddress(IPAddress)"/>. Cached: the
-/// accept loop asks for every connection from outside the private ranges, and listing the
-/// interfaces is slow on Windows. Refreshed when the system reports an address change, and
-/// at least every 30 s where it doesn't.
-/// </summary>
-internal static class OnLinkPrefixes
-{
-    private static (IPAddress, int)[]? _cached;
-    private static long _cachedAt;
-
-    static OnLinkPrefixes()
-    {
-        // Any failure here would make the type unusable, so none may escape.
-        try { NetworkChange.NetworkAddressChanged += (_, _) => Volatile.Write(ref _cached, null); }
-        catch (Exception) { }
-    }
-
-    public static IReadOnlyList<(IPAddress Address, int Length)> Current()
-    {
-        var cached = Volatile.Read(ref _cached);
-        if (cached is not null && Environment.TickCount64 - Volatile.Read(ref _cachedAt) < 30_000) return cached;
-        var list = new List<(IPAddress, int)>();
-        try
-        {
-            foreach (var iface in NetworkInterface.GetAllNetworkInterfaces())
-            {
-                // Android may report every interface's status as Unknown.
-                if (iface.OperationalStatus is not (OperationalStatus.Up or OperationalStatus.Unknown)
-                    || iface.NetworkInterfaceType is NetworkInterfaceType.Loopback or NetworkInterfaceType.Tunnel or NetworkInterfaceType.Ppp)
-                    continue;
-                foreach (var u in iface.GetIPProperties().UnicastAddresses)
-                    if (u.Address.AddressFamily == AddressFamily.InterNetworkV6 && !u.Address.IsIPv6LinkLocal)
-                        list.Add((u.Address, u.PrefixLength));
-            }
-        }
-        catch (Exception e) when (e is NetworkInformationException or PlatformNotSupportedException) { }
-        var result = list.ToArray();
-        Volatile.Write(ref _cachedAt, Environment.TickCount64);
-        Volatile.Write(ref _cached, result);
-        return result;
     }
 }
 
@@ -287,14 +215,7 @@ public static class SyncCrypto
     /// <summary>The MAC a member puts on its announcement, under a key derived from the
     /// group secret. It covers every field acted on: anyone can claim the group's ID, which
     /// every announcement carries, but only a member can produce this.</summary>
-    public static string AnnouncementMac(byte[] groupKey, SyncMessage m)
-    {
-        var key = HKDF.DeriveKey(HashAlgorithmName.SHA256, groupKey, 32, info: "alarmcal announce"u8.ToArray());
-        // The node and group IDs have a fixed length and the port and version are numbers, so
-        // with the name last no two announcements share this text.
-        var data = Encoding.UTF8.GetBytes($"{m.Node}\n{m.Group}\n{m.Port}\n{m.Proto}\n{m.Name}");
-        return Convert.ToBase64String(HMACSHA256.HashData(key, data));
-    }
+    public static string AnnouncementMac(byte[] groupKey, SyncMessage m) => Convert.ToBase64String(AnnouncementMacBytes(groupKey, m));
 
     /// <summary>Whether <paramref name="m"/> carries a valid <see cref="AnnouncementMac"/> under <paramref name="groupKey"/>.</summary>
     public static bool HasValidMac(byte[] groupKey, SyncMessage m)
@@ -303,7 +224,30 @@ public static class SyncCrypto
         byte[] given;
         try { given = Convert.FromBase64String(m.Mac); }
         catch (FormatException) { return false; }
-        return CryptographicOperations.FixedTimeEquals(given, Convert.FromBase64String(AnnouncementMac(groupKey, m)));
+        return CryptographicOperations.FixedTimeEquals(given, AnnouncementMacBytes(groupKey, m));
+    }
+
+    private static byte[] AnnouncementMacBytes(byte[] groupKey, SyncMessage m)
+    {
+        // The node and group IDs have a fixed length and the port, version and time are
+        // numbers, so with the name last no two announcements share this text.
+        var data = Encoding.UTF8.GetBytes($"{m.Node}\n{m.Group}\n{m.Port}\n{m.Proto}\n{m.At}\n{m.Name}");
+        return HMACSHA256.HashData(AnnouncementKey(groupKey), data);
+    }
+
+    /// <summary>The last group key's announcement key: derived once, not for every packet
+    /// (a flood of announcements claiming the group makes many). A reference, swapped whole,
+    /// so no thread sees one group's key paired with another's.</summary>
+    private static DerivedKey? _announcementKey;
+
+    private sealed record DerivedKey(byte[] GroupKey, byte[] Key);
+
+    private static byte[] AnnouncementKey(byte[] groupKey)
+    {
+        if (Volatile.Read(ref _announcementKey) is { } c && c.GroupKey.AsSpan().SequenceEqual(groupKey)) return c.Key;
+        var key = HKDF.DeriveKey(HashAlgorithmName.SHA256, groupKey, 32, info: "alarmcal announce"u8.ToArray());
+        Volatile.Write(ref _announcementKey, new DerivedKey(groupKey.ToArray(), key));
+        return key;
     }
 
     /// <summary>The requester's commitment to its pairing key and its member count, sent

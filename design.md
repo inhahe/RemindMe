@@ -176,12 +176,17 @@ separately (see *Simplification opportunities*).
 - **Port 37660**, TCP for sessions and UDP for discovery. Different from
   LanLink's 37656, so both apps can run on one machine.
 - **Discovery**: a UDP broadcast every 3 s on each interface's subnet broadcast
-  address: `{app, proto, node, name, port, group, mac}`. `group` is the sync
+  address: `{app, proto, node, name, port, group, at, mac}`. `group` is the sync
   group's public ID, not its secret, so claiming it proves nothing: `mac` is an
   HMAC-SHA256 of the other fields under a key derived from the group secret, and
   an announcement claiming this node's group without a valid one is dropped.
-  Only members so proven are shown as linked from announcements alone, and
-  dialled.
+  `at`, the sending time, makes a recording useless: each member's announcements
+  must be newer than the last one accepted from it, and within 10 minutes of this
+  device's clock. A replay, from anywhere, is ignored, so it can neither keep a
+  device that left the group a member nor point dials at the replayer. (A device
+  whose clock is further off goes unannounced, and the log says why; remote
+  links still work.) Only members so proven are shown as linked from
+  announcements alone, and dialled.
 - **Sessions**: frames of `[4B length][body]`. Each side sends a plaintext
   `hello`: `{node, name, group, nonce, proto}`. With the same group, both
   derive per-direction keys from the group secret and the two nonces (HKDF-SHA256),
@@ -190,13 +195,15 @@ separately (see *Simplification opportunities*).
   dials** (but if a same-group peer keeps announcing for 10 s with no session,
   the higher ID dials too, in case a firewall refuses the lower one), TCP
   keep-alive is on with `NoDelay`, and inbound connections from outside the LAN
-  are refused unless `AcceptExternalConnections` is set. The LAN
-  (`Protocol.IsLanAddress`) is loopback, private and link-local addresses, plus
-  global IPv6 addresses inside a /64-or-longer prefix of one of this machine's
-  interfaces (not tunnels, PPP or loopback), which is how LAN peers often reach
-  each other over IPv6. Public IPv4 subnets and wider prefixes don't count: they
-  can span an ISP's other customers. The interface prefixes are cached, and
-  refreshed when the system reports an address change, or after 30 s.
+  are refused unless `AcceptExternalConnections` is set. The LAN is loopback,
+  private and link-local addresses (`Protocol.IsPrivateOrLan`, as in LanLink). A
+  global IPv6 address can't be told apart (its owner may be down the hall or a
+  customer of the same ISP), so **without `AcceptExternalConnections` the
+  listener takes IPv4 only** (`SyncEngine.ListensOnIpv6`). A LAN peer dialling a
+  host name that resolves to both is then refused on IPv6 at connect time and
+  falls back to IPv4; accepting the connection and then dropping it would leave
+  it no reason to. With it, the listener is dual-mode (IPv4 and IPv6) when bound
+  to `Any`, so IPv6 remote addresses work. Discovery is IPv4 broadcast anyway.
 - **Hello proves nothing; the first sealed frame does.** That frame is a tiny
   `ready`, and a session is `Authenticated` once its peer's `ready` opens. The
   digest goes out only after that. It can be any size, while frames from a peer
@@ -217,12 +224,9 @@ separately (see *Simplification opportunities*).
 - **Bounded noise.** At most 256 devices are remembered from announcements. When
   the table is full, a proven member still gets in, in place of the stalest
   stranger, and a stranger's announcement can't take over a fresh member's
-  entry by giving its node ID. (A replayed member announcement from another
-  address can still point a dial at the wrong place for a few seconds, as ARP
-  spoofing could; it can't make anything a member.) Inbound connections from
-  outside the group are closed after 3 minutes idle (with no pairing under way).
-  `PeersChanged` is coalesced to about four a second. The listener is dual-mode
-  (IPv4 and IPv6) when bound to `Any`, so IPv6 remote addresses work.
+  entry by giving its node ID. Inbound connections from outside the group are
+  closed after 3 minutes idle (with no pairing under way). `PeersChanged` is
+  coalesced to about four a second.
 - **Pairing (linking)**: commit, then reveal, then **both users accept**. The
   requester sends `pair_request {commit = SHA-256(its ECDH P-256 key, members),
   members}`, the accepter answers `pair_challenge {its key, members}`, and the
@@ -291,7 +295,7 @@ separately (see *Simplification opportunities*).
   can't connect, doesn't have the key, not linked) in the Devices screens. A
   link's backoff resets only after a session that got into sync, or lasted 30 s.
 - **Code layout** (`AlarmCalendar.Core/Sync/`): `Protocol.cs` (messages,
-  framing, `SyncCrypto`, `OnLinkPrefixes`), `Discovery.cs`, `PeerSession.cs` (one
+  framing, `SyncCrypto`), `Discovery.cs`, `PeerSession.cs` (one
   connection and its keys, and `PairRound`), `SyncEngine.cs` (listener, dialling, sessions,
   replication, pairing). The engine raises its events on pool threads; the apps
   marshal them to their UI thread.

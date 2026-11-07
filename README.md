@@ -95,8 +95,8 @@ Open **Devices…** (in the toolbar or the tray menu).
   (37660 by default) to it and tick **Accept connections from outside the local
   network**. On the others, add its address (`host` or `host:port`) under
   **Devices elsewhere**, then link as above. With that box unticked, a device
-  accepts connections only from its local network: private addresses, and IPv6
-  addresses within its own network's prefix.
+  accepts connections only from private addresses, which home and office
+  networks use, and only over IPv4.
 - **Bridging**: a device linked to both a far device and the ones near it
   carries updates between them, so every linked device stays in sync.
 - **Leave the sync group…** stops this device syncing. It keeps its tasks, and the

@@ -440,12 +440,7 @@ public sealed class SyncTests : IDisposable
         // A member that isn't listening (port 9), so no session to it can hide what the
         // announcements alone do.
         var b = Guid.NewGuid().ToString("N");
-        SyncMessage Member(int port)
-        {
-            var m = new SyncMessage { Type = MessageTypes.Announce, App = Protocol.App, Proto = Protocol.Version, Node = b, Name = "B", Group = a.GroupId, Port = port };
-            m.Mac = SyncCrypto.AnnouncementMac(Convert.FromBase64String(a.GroupKeyBase64), m);
-            return m;
-        }
+        SyncMessage Member(int port) => MemberAnnouncement(a, b, port, DateTimeOffset.UtcNow);
         var tampered = Member(9);
         tampered.Port = 10;
         ea.OnAnnounced(tampered, IPAddress.Loopback);
@@ -459,6 +454,36 @@ public sealed class SyncTests : IDisposable
             Type = MessageTypes.Announce, App = Protocol.App, Node = b, Group = Guid.NewGuid().ToString("N"), Port = 9,
         }, IPAddress.Loopback);
         Assert.Contains(ea.Peers(), p => p.NodeId == b && p.Linked);
+    }
+
+    /// <summary>What member <paramref name="node"/> of <paramref name="group"/>'s group would
+    /// announce at <paramref name="at"/>.</summary>
+    private static SyncMessage MemberAnnouncement(SyncIdentity group, string node, int port, DateTimeOffset at)
+    {
+        var m = new SyncMessage
+        {
+            Type = MessageTypes.Announce, App = Protocol.App, Proto = Protocol.Version, Node = node, Name = "B",
+            Group = group.GroupId, Port = port, At = at.ToUnixTimeSeconds(),
+        };
+        m.Mac = SyncCrypto.AnnouncementMac(Convert.FromBase64String(group.GroupKeyBase64), m);
+        return m;
+    }
+
+    [Fact]
+    public void ARecordedAnnouncementCantBePassedOffAsANewOne()
+    {
+        var a = NewIdentity("A");
+        var (ea, _) = Node(a);
+        var b = Guid.NewGuid().ToString("N");
+        // Recorded long ago (the member may have left the group since): ignored.
+        ea.OnAnnounced(MemberAnnouncement(a, b, 9, DateTimeOffset.UtcNow.AddHours(-1)), IPAddress.Loopback);
+        Assert.DoesNotContain(ea.Peers(), p => p.NodeId == b);
+
+        // Recorded just now and replayed from elsewhere: the original counts, the replay doesn't.
+        var recorded = MemberAnnouncement(a, b, 9, DateTimeOffset.UtcNow);
+        ea.OnAnnounced(recorded, IPAddress.Loopback);
+        ea.OnAnnounced(recorded, IPAddress.Parse("127.0.0.5"));
+        Assert.Equal("127.0.0.1", ea.Peers().Single(p => p.NodeId == b).Address);
     }
 
     [Fact]
@@ -665,14 +690,15 @@ public sealed class SyncTests : IDisposable
     public void LanAddressClassification(string ip, bool lan) =>
         Assert.Equal(lan, Protocol.IsPrivateOrLan(IPAddress.Parse(ip)));
 
-    [Theory]
-    [InlineData("2001:db8:1:2::5", "2001:db8:1:2::1", 64, true)]
-    [InlineData("2001:db8:1:3::5", "2001:db8:1:2::1", 64, false)]
-    [InlineData("2001:db8:9::5", "2001:db8::1", 32, false)]     // a prefix far wider than a LAN
-    [InlineData("203.0.113.7", "203.0.113.1", 24, false)]      // public IPv4: an ISP's subnet, maybe
-    [InlineData("192.168.1.5", "2001:db8::1", 64, true)]       // private, whatever the prefixes
-    public void OnlyANarrowIpv6PrefixWidensTheLan(string ip, string local, int length, bool lan) =>
-        Assert.Equal(lan, Protocol.IsLanAddress(IPAddress.Parse(ip), [(IPAddress.Parse(local), length)]));
+    [Fact]
+    public void IPv6IsListenedOnOnlyWhenOutsideConnectionsAreAccepted()
+    {
+        // Without them, a LAN peer's IPv6 attempt is refused at once and it falls back to IPv4,
+        // whose private addresses tell the LAN apart.
+        Assert.False(SyncEngine.ListensOnIpv6(new SyncOptions { BindAddress = IPAddress.Any, AcceptExternalConnections = false }));
+        Assert.True(SyncEngine.ListensOnIpv6(new SyncOptions { BindAddress = IPAddress.Any, AcceptExternalConnections = true }));
+        Assert.False(SyncEngine.ListensOnIpv6(new SyncOptions { BindAddress = IPAddress.Loopback, AcceptExternalConnections = true }));
+    }
 
     [Theory]
     [InlineData("example.com", "example.com", 37660)]

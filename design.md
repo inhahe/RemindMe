@@ -524,7 +524,11 @@ separately (see *Simplification opportunities*).
   pairing).
 - The desktop app is driven with UI Automation from PowerShell, in a throwaway
   `--data-dir` whose `settings.json` sets `autostartInitialized: true` and
-  `startWithWindows: false`, so no `Run` entry is written.
+  `startWithWindows: false`, so no `Run` entry is written. **Windows are found
+  by the test instance's process ID, never by title alone**: the user's own
+  installed copy has the same titles, and a test that once picked its window by
+  title added tasks to their real data (which then synced to their phone), rang
+  an alarm, and resized the window.
 - **`REMINDME_BIND=127.0.0.1`** (an environment variable, for development
   only) makes the desktop app listen on loopback with no LAN discovery. Two
   instances on one machine can then be linked through remote addresses

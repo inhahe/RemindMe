@@ -118,7 +118,7 @@ public partial class DevicesWindow : Window
     private void Apply_Click(object sender, RoutedEventArgs e)
     {
         if (!Fields.TryInt(Port.Text, 1, 65535, out int port)) { ErrorText.Text = "The port must be a number from 1 to 65535."; return; }
-        var addresses = RemoteAddresses.Text.Split('\n').Select(l => l.Trim()).Where(l => l.Length > 0).ToList();
+        var addresses = AppSettings.CleanAddresses(RemoteAddresses.Text.Split('\n'));
         var bad = addresses.Where(a => !Protocol.TryParseAddress(a, out _, out _)).ToList();
         if (bad.Count > 0) { ErrorText.Text = $"Not a host or host:port: {string.Join(", ", bad)}"; return; }
         ErrorText.Text = "";

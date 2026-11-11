@@ -108,20 +108,35 @@ public sealed class AppSettings
             dirty = true;
         }
         if (string.IsNullOrEmpty(s.GroupId) || string.IsNullOrEmpty(s.GroupKey)) { s.NewGroup(); dirty = true; }
-        // A damaged or hand-edited file may hold lists nothing can use: a null list, a null
-        // entry, a remembered device without a node ID or twice over (only the latest counts:
-        // the pairing commitment hashes how many there are). Mended here, once, for every reader.
+        // A damaged or hand-edited file may hold what nothing can use: a null name or list, a
+        // null or blank entry, a remote address twice, a remembered device without a node ID
+        // or twice over (one entry stays, the latest, with the latest address any had, as
+        // RememberPeer keeps one: the pairing commitment hashes how many there are). Mended
+        // here, once, for every reader.
+        if (s.DeviceName is null) { s.DeviceName = ""; dirty = true; }
         var peers = s.KnownPeers ?? [];
         var usable = peers.Where(KnownPeer.IsUsable)
             .Select(k => k.Name is null ? k with { Name = k.NodeId[..8] } : k)
-            .GroupBy(k => k.NodeId).Select(g => g.MaxBy(k => k.LastSeenUtc)!).ToList();
+            .GroupBy(k => k.NodeId)
+            .Select(g =>
+            {
+                var latest = g.MaxBy(k => k.LastSeenUtc)!;
+                return latest with { Address = latest.Address ?? g.OrderBy(k => k.LastSeenUtc).LastOrDefault(k => k.Address is not null)?.Address };
+            })
+            .ToList();
         if (s.KnownPeers is null || !usable.SequenceEqual(peers)) { s.KnownPeers = usable; dirty = true; }
         var remotes = s.RemoteAddresses ?? [];
-        var usableRemotes = remotes.Where(a => !string.IsNullOrWhiteSpace(a)).ToList();
-        if (s.RemoteAddresses is null || usableRemotes.Count != remotes.Count) { s.RemoteAddresses = usableRemotes; dirty = true; }
+        var usableRemotes = CleanAddresses(remotes);
+        if (s.RemoteAddresses is null || !usableRemotes.SequenceEqual(remotes)) { s.RemoteAddresses = usableRemotes; dirty = true; }
         if (dirty) s.Save(path, log);
         return s;
     }
+
+    /// <summary>Remote addresses as they are kept: trimmed, without blanks, and each once (in any
+    /// capitals: host names don't care), in their order.</summary>
+    public static List<string> CleanAddresses(IEnumerable<string?> addresses) =>
+        addresses.Where(a => !string.IsNullOrWhiteSpace(a)).Select(a => a!.Trim())
+            .Distinct(StringComparer.OrdinalIgnoreCase).ToList();
 
     /// <summary>The name this device goes by: the one the user gave it, or else
     /// <paramref name="ownName"/>, its own name now (the computer's, the phone's).</summary>

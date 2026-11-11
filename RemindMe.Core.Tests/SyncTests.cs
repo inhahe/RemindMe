@@ -425,26 +425,78 @@ public sealed class SyncTests : IDisposable
         lock (logL) Assert.Contains("now answers as this device", logL.First(l => l.StartsWith("Higher's last address")));
     }
 
-    [Fact]
-    public async Task AnInboundSourceThatLeadsElsewhereIsNotRemembered()
+    /// <summary>
+    /// As behind a NAT: B listens on 127.0.0.2, but its connection to A comes from 127.0.0.1,
+    /// where C (<paramref name="cInGroup"/>: a device of the group, or a stranger) listens on
+    /// B's port. A's probe of that source reaches C, so nothing is remembered for B; B's
+    /// session is undisturbed, and C doesn't take the probe for a session either.
+    /// </summary>
+    private async Task ProbeReachingAnotherDevice(bool cInGroup)
     {
-        // As behind a NAT: B listens on 127.0.0.2, but its connection to A comes from
-        // 127.0.0.1, where a stranger listens on B's port. A's probe of that source reaches the
-        // stranger, so nothing is remembered for B, and B's session is undisturbed.
         var a = NewIdentity("A");
         var b = NewIdentity("B", a.GroupId, a.GroupKeyBase64);
-        var (ea, _) = Node(a);
+        var c = cInGroup ? NewIdentity("C", a.GroupId, a.GroupKeyBase64) : NewIdentity("C");
+        var logA = new List<string>();
+        var (ea, _) = Node(a, Options(0, TimeSpan.FromMilliseconds(200), IPAddress.Loopback) with
+        {
+            KnownPeers = () => [new KnownPeer(b.NodeId, "B", DateTimeOffset.UtcNow)],   // remembered, with no address yet
+        }, logA);
         var aSaw = new List<string?>();
         ea.PeerSeen += (_, _, address) => { lock (aSaw) aSaw.Add(address); };
-        var logB = new List<string>();
-        var (eb, _) = Node(b, Options(0, TimeSpan.FromMilliseconds(200), IPAddress.Parse("127.0.0.2"), Addr(ea)), logB);
         var logC = new List<string>();
-        var (ec, _) = Node(NewIdentity("Stranger"), Options(0, TimeSpan.FromMilliseconds(200), IPAddress.Loopback) with { Port = eb.ListenPort }, logC);
-        await WaitFor(() => Logged(logC, "Connected to A"), "A probing B's source, reaching the stranger");
+        var (ec, _) = Node(c, Options(0, TimeSpan.FromMilliseconds(200), IPAddress.Loopback), logC);   // first: listening before any probe
+        var logB = new List<string>();
+        var (eb, _) = Node(b, Options(0, TimeSpan.FromMilliseconds(200), IPAddress.Parse("127.0.0.2"), Addr(ea)) with { Port = ec.ListenPort }, logB);
+        await WaitFor(() => Logged(logA, "B came in from 127.0.0.1:"), "A's probe reaching C");
         await Task.Delay(500);
         lock (aSaw) Assert.All(aSaw, Assert.Null);
         Assert.Equal(1, CountLogged(logB, "In sync with A"));
         Assert.Equal(0, CountLogged(logB, "Disconnected from A"));
+        Assert.Equal(0, CountLogged(logC, "Disconnected from A"));
+        Assert.DoesNotContain(ec.Peers(), p => p.NodeId == a.NodeId);
+    }
+
+    [Fact]
+    public Task AnInboundSourceLeadingToAStrangerIsNotRemembered() => ProbeReachingAnotherDevice(cInGroup: false);
+
+    [Fact]
+    public Task AnInboundSourceLeadingToAnotherDeviceOfTheGroupIsNotRemembered() => ProbeReachingAnotherDevice(cInGroup: true);
+
+    [Fact]
+    public async Task AStaleAddressStaysUndialledAfterTheDeviceComesAndGoes()
+    {
+        // B's old address is a stranger's now, and B can't be reached at its new one (only it
+        // can dial out): the stranger is dialled once, not again each time B leaves.
+        var (a, b) = OrderedPair();
+        var logC = new List<string>();
+        var (ec, _) = Node(NewIdentity("Stranger"), Options(0, TimeSpan.FromMilliseconds(200), IPAddress.Loopback), logC);
+        var logA = new List<string>();
+        var (ea, _) = Node(a, Remembering(Known(b, Addr(ec))), logA);
+        await WaitFor(() => Logged(logA, "Higher's last address"), "A finding B's address taken");
+        // B listens where A's probe can't reach it (127.0.0.2), and dials A from 127.0.0.1.
+        var (eb, _) = Node(b, Options(0, TimeSpan.FromMilliseconds(200), IPAddress.Parse("127.0.0.2"), Addr(ea)));
+        await WaitFor(() => ea.Peers().Any(p => p.NodeId == b.NodeId && p.Connected), "B in sync with A");
+        eb.Dispose();
+        await WaitFor(() => !ea.Peers().Any(p => p.NodeId == b.NodeId && p.Connected), "B gone");
+        await Task.Delay(1500);   // several of the 200 ms backoff's dials, were it dialling
+        Assert.Equal(1, CountLogged(logC, "Connected to Lower"));
+    }
+
+    [Fact]
+    public async Task AnAddressOffEveryNetworkIsDialledAsSoonAsItIsBack()
+    {
+        // Away from home, the wait between redials mustn't grow: back home, the device is
+        // dialled within a tick.
+        var (lower, higher) = OrderedPair();
+        var (eh, _) = Node(higher, Remembering());
+        int reachable = 0;
+        var (el, _) = Node(lower, Remembering(Known(higher, Addr(eh))) with { IsReachable = _ => Volatile.Read(ref reachable) == 1 });
+        await Task.Delay(3300);   // were the wait doubling from 200 ms all along, the next dial would be ~3 s away
+        Assert.DoesNotContain(el.Peers(), p => p.NodeId == higher.NodeId && p.Connected);
+        Volatile.Write(ref reachable, 1);
+        var back = DateTime.UtcNow;
+        await WaitFor(() => el.Peers().Any(p => p.NodeId == higher.NodeId && p.Connected), "the lower dialling the higher");
+        Assert.True(DateTime.UtcNow - back < TimeSpan.FromSeconds(1.5), $"took {DateTime.UtcNow - back}");
     }
 
     [Fact]

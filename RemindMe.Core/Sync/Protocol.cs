@@ -44,6 +44,10 @@ public sealed class SyncMessage
     public string? Group { get; set; }
     public string? Nonce { get; set; }
     public int? Port { get; set; }
+    /// <summary>A hello's: this connection only checks that the device answers at this address
+    /// (SyncEngine.DialBack). The device proves the key and is hung up on; it never takes the
+    /// connection for a session. Absent otherwise; an older version ignores it.</summary>
+    public bool? Probe { get; set; }
     /// <summary>An announcement's HMAC under the group key (<see cref="SyncCrypto.AnnouncementMac"/>):
     /// the group ID is public, so only this shows that a device really is a member.</summary>
     public string? Mac { get; set; }

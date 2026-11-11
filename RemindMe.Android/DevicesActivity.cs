@@ -106,7 +106,7 @@ public sealed class DevicesActivity : Screen
             error.Text = "The port must be a number from 1 to 65535.";
             return;
         }
-        var addresses = (Find<EditText>(Resource.Id.remotes).Text ?? "").Split('\n').Select(l => l.Trim()).Where(l => l.Length > 0).ToList();
+        var addresses = AppSettings.CleanAddresses((Find<EditText>(Resource.Id.remotes).Text ?? "").Split('\n'));
         var bad = addresses.Where(a => !Protocol.TryParseAddress(a, out _, out _)).ToList();
         if (bad.Count > 0) { error.Text = $"Not a host or host:port: {string.Join(", ", bad)}"; return; }
         error.Text = "";

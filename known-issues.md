@@ -138,13 +138,27 @@ Checked on the emulator:
   started again in the tray through the shell, one that wasn't running isn't
   started, a package of the same version installs its own exe, and a failed
   upgrade restores the old files and starts them. Not seen: the per-machine
-  package doing this under UAC, or started
-  from an elevated prompt (each needs a UAC prompt), and the old version's
-  registration coming back after a failed upgrade (in the per-user copy
-  Windows Installer couldn't restore it without elevation, so it couldn't be
-  judged there). **To verify:** install the next version over 0.1.2.0 with the
-  app running: it should be running again, in the tray, when the installer
-  finishes.
+  package doing this under UAC, or started from an elevated prompt (each needs
+  a UAC prompt); its searches as the installing user there (`REMINDME_USED`
+  looks in their `%LOCALAPPDATA%`, from the elevated part of the install); and
+  the old version's registration coming back after a failed upgrade (in the
+  per-user copy Windows Installer couldn't restore it without elevation, so it
+  couldn't be judged there). **To verify:** install the next version over
+  0.1.2.0 with the app running: it should be running again, in the tray, when
+  the installer finishes.
+
+### An upgrade can start RemindMe for a user whose copy wasn't running
+The installer starts RemindMe again after an upgrade when a copy was running
+(`util:CloseApplication`, by process name) and the installing user has used
+RemindMe (their settings exist). The detection finds any user's copy, so on a
+PC shared through fast user switching, where X has used RemindMe but quit it
+and Y has it running, X's upgrade starts it in X's tray too. **The exact
+signal:** the copy that `--exit` stops knows it was stopped for an upgrade; it
+could leave a mark in its data folder, which the restarted copy (given an
+argument for it by the tray shortcut) checks, staying only when the mark is
+there. **Why not now:** the copy being stopped is the old version's, and
+0.1.2.0 leaves no mark, so the next upgrade can't use it. Once versions that
+leave the mark are what's installed, the installer can switch to it.
 
 ### F-Droid can't build .NET apps
 Choosing .NET for Android (so one Core serves both apps) rules out F-Droid. The

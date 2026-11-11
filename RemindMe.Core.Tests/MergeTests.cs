@@ -262,17 +262,26 @@ public class PersistenceTests
                 [null,
                  {"name": "no ID", "lastSeenUtc": "2026-11-11T00:00:00+00:00"},
                  {"nodeId": "{{nameless}}", "lastSeenUtc": "2026-11-11T00:00:00+00:00"},
-                 {"nodeId": "{{good}}", "name": "Phone", "lastSeenUtc": "2026-11-11T00:00:00+00:00", "address": "192.168.1.66:37660"},
-                 {"nodeId": "{{good}}", "name": "Phone, earlier", "lastSeenUtc": "2026-11-10T00:00:00+00:00"}]
+                 {"nodeId": "{{good}}", "name": "Phone", "lastSeenUtc": "2026-11-11T00:00:00+00:00"},
+                 {"nodeId": "{{good}}", "name": "Phone, earlier", "lastSeenUtc": "2026-11-10T00:00:00+00:00", "address": "192.168.1.66:37660"}]
                 """);
-            json["remoteAddresses"] = null;
+            json["deviceName"] = null;
             File.WriteAllText(path, json.ToJsonString());
             var loaded = AppSettings.Load(path, "PC", []);
-            Assert.Equal([nameless[..8], "Phone"], loaded.KnownPeers.Select(k => k.Name));   // the latest of the two
+            // One entry for the device listed twice: the latest, keeping the address the other had.
+            Assert.Equal([nameless[..8], "Phone"], loaded.KnownPeers.Select(k => k.Name));
             Assert.Equal("192.168.1.66:37660", loaded.KnownPeers[1].Address);
-            Assert.Empty(loaded.RemoteAddresses);
+            Assert.Equal("PC", loaded.NameOr("PC"));   // a null name: the device's own
             loaded.RememberPeer(good, "Phone", DateTimeOffset.UtcNow);   // nothing left to trip over
             Assert.Equal(2, AppSettings.Load(path, "PC", []).KnownPeers.Count);   // and saved so
+
+            json = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(path))!;
+            json["remoteAddresses"] = null;
+            File.WriteAllText(path, json.ToJsonString());
+            Assert.Empty(AppSettings.Load(path, "PC", []).RemoteAddresses);
+            json["remoteAddresses"] = System.Text.Json.Nodes.JsonNode.Parse("""[" home.example:4000 ", null, "", "HOME.example:4000", "10.0.0.2"]""");
+            File.WriteAllText(path, json.ToJsonString());
+            Assert.Equal(["home.example:4000", "10.0.0.2"], AppSettings.Load(path, "PC", []).RemoteAddresses);
         }
         finally { dir.Delete(true); }
     }

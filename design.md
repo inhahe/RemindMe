@@ -403,7 +403,9 @@ separately (see *Simplification opportunities*).
   now is dialled (`Protocol.IsOnSubnet`): away from home, the home LAN's can't
   answer. That leaves the wait alone, so a device back home is dialled within a
   tick of the networks being listed again: every 10 s at most
-  (`Protocol.LocalSubnets`, which discovery's broadcasts use too).
+  (`Protocol.LocalSubnets`, which discovery's broadcasts use too). The schedule
+  runs on a clock that only moves forward (`Ticks`), so setting the wall clock
+  (an alarm tried a day ahead) doesn't stall it.
   - **Which address is remembered** (`AddressToRemember`, `LanAddressOf`): a
     dialled session's, where the device answered, port and all (a port forward
     on the way may have a port of its own). An inbound session's source may be a
@@ -412,10 +414,12 @@ separately (see *Simplification opportunities*).
     the port the device's hello gave, and the address is remembered if the
     device answers there and proves the key. A NAT's address leads elsewhere, or
     nowhere, and is forgotten; a device whose address changed is found where it
-    is now, whatever became of the old one. The probe (`PeerSession.IsProbe`) is
-    never installed and sends no `ready` of its own, so the other device never
-    authenticates it and keeps its session; the same address isn't probed again
-    within a minute. Never an address outside the LAN: the last LAN one stays.
+    is now, whatever became of the old one. The probe (`PeerSession.IsProbe`)
+    is never installed and sends no `ready` of its own, and its hello says
+    `probe`, so the device it reaches answers with a `ready` and never takes it
+    for a session either (an older version ignores the field). A probe met by
+    another device is logged. The same address isn't probed again within a
+    minute. Never an address outside the LAN: the last LAN one stays.
   - **Wrong answers** (`KeepDialledSession`, for any dial made to reach a known
     node, `PeerSession.ExpectedNode`): another device of the group is kept (it
     proves the key like any session); any other device, or this device itself
@@ -423,10 +427,12 @@ separately (see *Simplification opportunities*).
     (another protocol version) says nothing about the address. A redial
     (`PeerSession.IsRedial`, not discovery's dials) answered by another device,
     by this one, or by the device without the group (it has left) marks that
-    address stale (`MarkStale`, logged once): not dialled again until the
-    device is heard announcing, is in sync again, or the engine restarts.
-  - Settings mend damaged lists when loaded (a null list or entry, a remembered
-    device without a node ID or twice over, of which the latest stays), and the
+    address stale (`MarkStale`, `_staleAddress`, logged once): not dialled
+    while it is the one remembered, however often the device comes and goes,
+    and forgotten once another address is remembered or proved.
+  - Settings mend damage when loaded: a null name, list or entry, a blank or
+    repeated remote address, a remembered device without a node ID or twice
+    over (the latest stays, with the latest address any had), and the
     engine reads the remembered devices through `KnownPeers()`, by the same rule
     (`KnownPeer.IsUsable`). The housekeeping tick survives any exception,
     logging each distinct one once: nothing else closes idle sessions, ends

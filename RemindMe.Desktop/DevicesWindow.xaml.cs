@@ -46,7 +46,7 @@ public partial class DevicesWindow : Window
         ScreenFit.Apply(this);
         var s = AppHost.Settings;
         SyncEnabled.IsChecked = s.SyncEnabled;
-        DeviceName.Text = s.NameOr(AppHost.OwnName());
+        DeviceName.Text = _shownName = s.NameOr(AppHost.OwnName());
         RemoteAddresses.Text = string.Join(Environment.NewLine, s.RemoteAddresses);
         AcceptExternal.IsChecked = s.AcceptExternalConnections;
         Port.Text = s.Port.ToString();
@@ -63,6 +63,9 @@ public partial class DevicesWindow : Window
     }
 
     private bool _pairing;
+    /// <summary>The name the box was filled with: Apply changes the name only if it was
+    /// edited, so a box left alone can't pin the name in use, which may follow the computer's.</summary>
+    private string _shownName = "";
 
     /// <summary>Shows the devices in reach, then the linked ones out of reach. Rows are
     /// updated in place, so the selection and the keyboard focus stay on their device.</summary>
@@ -121,14 +124,16 @@ public partial class DevicesWindow : Window
         ErrorText.Text = "";
         bool enabled = SyncEnabled.IsChecked == true, external = AcceptExternal.IsChecked == true;
         var name = DeviceName.Text;
+        bool renamed = name != _shownName;
         AppHost.UpdateSettings(s =>
         {
             s.SyncEnabled = enabled;
-            s.SetDeviceName(name, AppHost.OwnName());
+            if (renamed) s.SetDeviceName(name, AppHost.OwnName());
             s.RemoteAddresses = addresses;
             s.AcceptExternalConnections = external;
             s.Port = port;
         });
+        if (renamed) DeviceName.Text = _shownName = AppHost.Settings.NameOr(AppHost.OwnName());
         Refresh();
     }
 

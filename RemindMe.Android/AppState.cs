@@ -94,7 +94,7 @@ public static class AppState
         var dir = DataDirectory(Context);
         Provisional = dir is null;
         DataDir = dir ?? "";
-        Settings = dir is null ? new AppSettings { SyncEnabled = false } : AppSettings.Load(SettingsPath, OwnName(), Log);
+        Settings = dir is null ? new AppSettings { SyncEnabled = false } : AppSettings.Load(SettingsPath, OwnName(), [MakerAndModel()], Log);
         Store = new TaskStore(dir is null ? null : Path.Combine(dir, "tasks.json"), Settings.NodeId, Clock, Log);
         AutoBackup.Attach(Store, Settings.NodeId);
         Store.Changed += _ => OnMain(() =>
@@ -172,7 +172,12 @@ public static class AppState
     {
         var set = global::Android.Provider.Settings.Global.GetString(Context.ContentResolver,
             global::Android.Provider.Settings.Global.DeviceName);
-        if (!string.IsNullOrWhiteSpace(set)) return set.Trim();
+        return string.IsNullOrWhiteSpace(set) ? MakerAndModel() : set.Trim();
+    }
+
+    /// <summary>"samsung SM-S908U", "Pixel 7": what versions up to 0.1.1 stored as the name.</summary>
+    private static string MakerAndModel()
+    {
         var model = Build.Model ?? "Android";
         var maker = Build.Manufacturer ?? "";
         return model.StartsWith(maker, StringComparison.OrdinalIgnoreCase) || maker.Length == 0 ? model : $"{maker} {model}";
@@ -195,8 +200,21 @@ public static class AppState
             if (Settings.SyncEnabled) { StopSync(); SyncService.Start(Context); }
             else SyncService.Stop(Context);
         }
+        else FollowOwnName();
         AlarmScheduler.Reschedule(Context);
         if (updated.AutoBackup && !old.AutoBackup) AutoBackup.Schedule();
+    }
+
+    /// <summary>Restarts sync under the name in use if it changed while sync ran: the phone
+    /// renamed in Settings → About phone, which no event reports. Called as a screen comes to
+    /// the front, and on saving settings.</summary>
+    public static void FollowOwnName()
+    {
+        if (Sync is { } sync && sync.Identity.Name != Settings.NameOr(OwnName()))
+        {
+            StopSync();
+            SyncService.Start(Context);
+        }
     }
 
     // ---- Sync --------------------------------------------------------------------------
@@ -293,7 +311,8 @@ public static class AppState
     private static void ShowPrompt(PairPrompt p)
     {
         PairRequested?.Invoke(p);
-        if (!PromptOnScreen) Notifications.ShowPairRequest(Context, p);
+        // Quietly over the alarm screen: the request mustn't get in the way of answering it.
+        if (!PromptOnScreen) Notifications.ShowPairRequest(Context, p, quiet: Screen.AlarmInFront);
     }
 
     private static void EndPrompt(PairPrompt p)
@@ -313,12 +332,13 @@ public static class AppState
         _ = yes ? p.AcceptAsync() : p.RejectAsync();
     }
 
-    /// <summary>A screen stopped asking the question unanswered (it went to the background):
-    /// the notification stands for it again.</summary>
+    /// <summary>A screen stopped asking the question unanswered (it went to the background, or
+    /// an alarm came up over it): the notification stands for it again, quietly, as the
+    /// question has been seen.</summary>
     public static void PromptHidden()
     {
         PromptOnScreen = false;
-        if (PendingPrompt is { } p) Notifications.ShowPairRequest(Context, p);
+        if (PendingPrompt is { } p) Notifications.ShowPairRequest(Context, p, quiet: true);
     }
 
     public static void LeaveSyncGroup()

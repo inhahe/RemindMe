@@ -3,6 +3,7 @@ using Android.Views;
 using Android.Widget;
 using AndroidX.AppCompat.App;
 using Google.Android.Material.Card;
+using RemindMe.Sync;
 using AlertDialog = AndroidX.AppCompat.App.AlertDialog;
 
 namespace RemindMe.Droid;
@@ -28,13 +29,21 @@ public abstract class Screen : AppCompatActivity
     /// an alarm. Meanwhile, and while no screen is in front, a notification stands for it.</summary>
     protected virtual bool AsksToLink => true;
 
+    /// <summary>The app's screen in front, if any.</summary>
+    private static Screen? s_inFront;
+
+    /// <summary>The alarm screen is in front: a request to link waits quietly.</summary>
+    public static bool AlarmInFront => s_inFront is { AsksToLink: false };
+
     private AlertDialog? _linkDialog;
     /// <summary>The question <see cref="_linkDialog"/> asks.</summary>
-    private RemindMe.Sync.PairPrompt? _asking;
+    private PairPrompt? _asking;
 
     protected override void OnResume()
     {
         base.OnResume();
+        s_inFront = this;
+        AppState.FollowOwnName();
         if (!AsksToLink) return;
         AppState.PairRequested += AskToLink;
         AppState.PromptEnded += OnPromptEnded;
@@ -43,6 +52,7 @@ public abstract class Screen : AppCompatActivity
 
     protected override void OnPause()
     {
+        if (s_inFront == this) s_inFront = null;
         if (AsksToLink)
         {
             AppState.PairRequested -= AskToLink;
@@ -64,13 +74,13 @@ public abstract class Screen : AppCompatActivity
         _asking = null;
     }
 
-    private void OnPromptEnded(RemindMe.Sync.PairPrompt p)
+    private void OnPromptEnded(PairPrompt p)
     {
         if (_asking == p) CloseLinkDialog();
     }
 
     /// <summary>Asks whether to link; on either device, both users must accept.</summary>
-    private void AskToLink(RemindMe.Sync.PairPrompt p)
+    private void AskToLink(PairPrompt p)
     {
         if (_asking == p) return;
         CloseLinkDialog();

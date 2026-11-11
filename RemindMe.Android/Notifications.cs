@@ -164,10 +164,14 @@ public static class Notifications
     }
 
     /// <summary>A pairing request while no screen of the app is in front to ask (or only the
-    /// alarm's): tapping it opens the Devices screen, which asks.</summary>
-    public static void ShowPairRequest(Context context, PairPrompt p)
+    /// alarm's): tapping it brings the app forward as it was, and the screen in front asks.</summary>
+    /// <param name="quiet">Without a sound or pop-up: over the alarm screen, or once seen.</param>
+    public static void ShowPairRequest(Context context, PairPrompt p, bool quiet)
     {
-        var open = PendingIntent.GetActivity(context, PairId, new Intent(context, typeof(DevicesActivity)),
+        // As the launcher opens the app: its task as it was, or a new one.
+        var launch = context.PackageManager!.GetLaunchIntentForPackage(context.PackageName!)!;
+        launch.AddFlags(ActivityFlags.NewTask | ActivityFlags.ResetTaskIfNeeded);
+        var open = PendingIntent.GetActivity(context, PairId, launch,
             PendingIntentFlags.Immutable | PendingIntentFlags.UpdateCurrent);
         var b = new NotificationCompat.Builder(context, PairChannel);
         b.SetSmallIcon(Resource.Drawable.ic_stat_alarm);
@@ -176,6 +180,7 @@ public static class Notifications
         b.SetAutoCancel(true);
         b.SetContentIntent(open);
         b.SetPriority(NotificationCompat.PriorityHigh);
+        b.SetSilent(quiet);
         Post(context, PairId, b.Build()!);
     }
 

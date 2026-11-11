@@ -497,10 +497,16 @@ separately (see *Simplification opportunities*).
   its own name, read at each start (`NameOr`): the computer's as typed
   (`Dns.GetHostName`, not the capitals of `Environment.MachineName`), or the
   phone's from Settings → About phone (`Settings.Global.DEVICE_NAME`), else its
-  maker and model. `SetDeviceName` stores a name blank or equal to the device's
-  own (in any case) as empty, so it follows a rename. Up to 0.1.1 the own name
-  was stored on first run: `Load` empties one still equal to it; one that
-  differs can't be told from a name given.
+  maker and model. `SetDeviceName` stores a name blank, or exactly the device's
+  own, as empty, so it follows a rename; the Devices screens apply the box only
+  if it was edited, so a box filled before a rename can't pin the old name. Up
+  to 0.1.1 the first run stored a default name (Windows' NetBIOS name, in
+  capitals and at most 15 characters; Android's maker and model): `Load` of a
+  file without `Format` empties one equal, in any case, to that default or to
+  the device's own name now, once; another can't be told from a name given.
+  Android restarts sync under the new name when the phone was renamed while the
+  app ran (`FollowOwnName`, as a screen comes to the front); on Windows a
+  rename takes a restart of the computer.
   Settings windows change only their own fields, through `UpdateSettings(edit)`
   (`AppHost` on desktop, `AppState` on Android), on the settings as they are at
   save time. A window that saved the copy it took on opening would silently
@@ -800,8 +806,11 @@ it runs on Android 10 (API 29) and up. The root namespace is
   with the screen off, which then gets only the notification (Samsung shows it
   as edge lighting, not a pop-up), is asked as soon as the app is back in front.
   The alarm screen doesn't ask (`AsksToLink`): the question mustn't get in the
-  way of answering an alarm. An answer or a withdrawal removes the question and
-  its notification, and brings up the next.
+  way of answering an alarm, so a request arriving over it, and one hidden by
+  it, waits in a quiet notification. Tapping the notification brings the app
+  forward as it was (the launcher's intent), whose screen in front asks. An
+  answer or a withdrawal removes the question and its notification, and brings
+  up the next.
 - **Startup settling** holds only alarms genuinely missed, those due more than a
   minute before the process started (`AlarmEngine.MissedWhileNotRunning`). On
   Android the alarm usually starts the process itself, a moment after it is due,

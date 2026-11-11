@@ -209,10 +209,10 @@ public class PersistenceTests
         try
         {
             var path = Path.Combine(dir.FullName, "settings.json");
-            var s = AppSettings.Load(path, "PC");
+            var s = AppSettings.Load(path, "PC", []);
             Assert.NotEmpty(s.NodeId);
             Assert.Equal(32, Convert.FromBase64String(s.GroupKey).Length);
-            var again = AppSettings.Load(path, "other");
+            var again = AppSettings.Load(path, "other", []);
             Assert.Equal(s.NodeId, again.NodeId);
             Assert.Equal(new TimeOnly(9, 0), again.DefaultTimeOfDay);
         }
@@ -226,38 +226,66 @@ public class PersistenceTests
         try
         {
             var path = Path.Combine(dir.FullName, "settings.json");
-            Assert.Equal("DESKTOP-1", AppSettings.Load(path, "DESKTOP-1").NameOr("DESKTOP-1"));
+            Assert.Equal("DESKTOP-1", AppSettings.Load(path, "DESKTOP-1", []).NameOr("DESKTOP-1"));
             // The computer renamed: the next start goes by the new name.
-            var renamed = AppSettings.Load(path, "Logoplex4");
+            var renamed = AppSettings.Load(path, "Logoplex4", []);
             Assert.Equal("Logoplex4", renamed.NameOr("Logoplex4"));
 
             // A name given sticks through a rename; blank, or the device's own, follows it again.
             renamed.SetDeviceName(" Study PC ", "Logoplex4");
             Assert.Equal("Study PC", renamed.NameOr("Logoplex4"));
             renamed.Save(path);
-            Assert.Equal("Study PC", AppSettings.Load(path, "Elsewhere").NameOr("Elsewhere"));
+            Assert.Equal("Study PC", AppSettings.Load(path, "Elsewhere", []).NameOr("Elsewhere"));
             renamed.SetDeviceName("  ", "Logoplex4");
             Assert.Equal("Elsewhere", renamed.NameOr("Elsewhere"));
             renamed.SetDeviceName("Logoplex4", "Logoplex4");
             Assert.Equal("Elsewhere", renamed.NameOr("Elsewhere"));
+            // The own name in other capitals is a name of its own.
+            renamed.SetDeviceName("PIXEL 7", "Pixel 7");
+            Assert.Equal("PIXEL 7", renamed.NameOr("Pixel 7"));
         }
         finally { dir.Delete(true); }
     }
 
-    [Fact]
-    public void AnOwnNameStoredByAnEarlierVersionFollowsTheDeviceFromNowOn()
+    /// <summary>The name stored once a settings file from 0.1.1 or earlier (no format), which
+    /// holds <paramref name="stored"/>, is loaded on a device now named <paramref name="ownName"/>.</summary>
+    private static string Upgraded(string stored, string ownName, params string[] earlierDefaults)
     {
         var dir = Directory.CreateTempSubdirectory();
         try
         {
             var path = Path.Combine(dir.FullName, "settings.json");
-            // Stored in capitals (Windows' NetBIOS form), the name was the computer's all the same.
-            File.WriteAllText(path, """{ "nodeId": "n1", "deviceName": "MYPC" }""");
-            Assert.Equal("", AppSettings.Load(path, "MyPc").DeviceName);
-            Assert.Equal("Logoplex4", AppSettings.Load(path, "Logoplex4").NameOr("Logoplex4"));
-            // One that differs from the device's name now can't be told from a name given.
-            File.WriteAllText(path, """{ "nodeId": "n1", "deviceName": "DESKTOP-1" }""");
-            Assert.Equal("DESKTOP-1", AppSettings.Load(path, "Logoplex4").NameOr("Logoplex4"));
+            File.WriteAllText(path, $$"""{ "nodeId": "n1", "deviceName": "{{stored}}" }""");
+            Assert.Equal(AppSettings.CurrentFormat, AppSettings.Load(path, ownName, earlierDefaults).Format);
+            return AppSettings.Load(path, ownName, earlierDefaults).DeviceName;   // as saved
+        }
+        finally { dir.Delete(true); }
+    }
+
+    [Fact]
+    public void ANameAnEarlierVersionStoredFollowsTheDeviceFromNowOn()
+    {
+        Assert.Equal("", Upgraded("DESKTOP-1", "DESKTOP-1"));
+        // Windows' NetBIOS name: in capitals, and at most 15 characters.
+        Assert.Equal("", Upgraded("MYPC", "MyPc", "MYPC"));
+        Assert.Equal("", Upgraded("LOGOPLEX-WORKST", "Logoplex-Workstation", "LOGOPLEX-WORKST"));
+        // Android's maker and model; the phone's own name is the one set in About phone.
+        Assert.Equal("", Upgraded("samsung SM-S908U", "Galaxy S22 Ultra", "samsung SM-S908U"));
+        // Another name can't be told from one given.
+        Assert.Equal("DESKTOP-1", Upgraded("DESKTOP-1", "Logoplex4", "LOGOPLEX4"));
+    }
+
+    [Fact]
+    public void TheUpgradeRunsOnceOnly()
+    {
+        var dir = Directory.CreateTempSubdirectory();
+        try
+        {
+            var path = Path.Combine(dir.FullName, "settings.json");
+            File.WriteAllText(path, """{ "nodeId": "n1", "deviceName": "Office" }""");
+            Assert.Equal("Office", AppSettings.Load(path, "Logoplex4", ["LOGOPLEX4"]).DeviceName);
+            // The computer later renamed to the name given, in capitals: the name given stays.
+            Assert.Equal("Office", AppSettings.Load(path, "OFFICE", ["OFFICE"]).DeviceName);
         }
         finally { dir.Delete(true); }
     }

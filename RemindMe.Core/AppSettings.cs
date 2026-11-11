@@ -70,19 +70,35 @@ public sealed class AppSettings
     /// to list while they are away.</summary>
     public List<KnownPeer> KnownPeers { get; set; } = [];
 
+    /// <summary>The settings file's format: 0 (no field) for one from 0.1.1 or earlier, which
+    /// stored a default name as <see cref="DeviceName"/>; <see cref="CurrentFormat"/> since.</summary>
+    public int Format { get; set; }
+    public const int CurrentFormat = 1;
+
     /// <summary>Loads the settings, creating the node ID and a one-device sync group on
-    /// first run.</summary>
+    /// first run, and bringing a file of an earlier format up to date.</summary>
     /// <param name="ownName">This device's own name now (the computer's, the phone's).</param>
-    public static AppSettings Load(string path, string ownName, Action<string>? log = null)
+    /// <param name="earlierDefaults">The names earlier versions stored on first run (the
+    /// computer's NetBIOS name, the phone's maker and model), which may differ from
+    /// <paramref name="ownName"/>.</param>
+    public static AppSettings Load(string path, string ownName, IReadOnlyCollection<string> earlierDefaults,
+        Action<string>? log = null)
     {
         var s = Json.ReadWithFallback(path, Json.Files.AppSettings, log) ?? new AppSettings();
         bool dirty = false;
         if (string.IsNullOrEmpty(s.NodeId)) { s.NodeId = Guid.NewGuid().ToString("N"); dirty = true; }
-        // Up to 0.1.1, the device's own name was stored on first run. One still the same
-        // follows it from now on; one that differs can't be told from a name the user gave.
-        var given = s.DeviceName;
-        s.SetDeviceName(given ?? "", ownName);
-        if (s.DeviceName != given) dirty = true;
+        if (s.Format < 1)
+        {
+            // A name an earlier version stored on first run follows the device's name from
+            // now on. In any case: Windows' NetBIOS name is in capitals. Another name can't
+            // be told from one the user gave, and stays.
+            var stored = (s.DeviceName ?? "").Trim();
+            if (earlierDefaults.Append(ownName).Any(n => string.Equals(n.Trim(), stored, StringComparison.OrdinalIgnoreCase)))
+                stored = "";
+            s.DeviceName = stored;
+            s.Format = CurrentFormat;
+            dirty = true;
+        }
         if (string.IsNullOrEmpty(s.GroupId) || string.IsNullOrEmpty(s.GroupKey)) { s.NewGroup(); dirty = true; }
         if (dirty) s.Save(path, log);
         return s;
@@ -93,13 +109,12 @@ public sealed class AppSettings
     public string NameOr(string ownName) => DeviceName.Length > 0 ? DeviceName : ownName;
 
     /// <summary>Gives this device the name <paramref name="name"/>, as typed. Blank, or the
-    /// device's own name <paramref name="ownName"/> in any case (Windows' names ignore it, and
-    /// up to 0.1.1 stored the computer's in capitals), means it goes by its own name, whatever
-    /// that becomes.</summary>
+    /// device's own name <paramref name="ownName"/> exactly, means it goes by its own name,
+    /// whatever that becomes; the same name in other capitals is a name of its own.</summary>
     public void SetDeviceName(string name, string ownName)
     {
         name = name.Trim();
-        DeviceName = name.Length == 0 || string.Equals(name, ownName, StringComparison.OrdinalIgnoreCase) ? "" : name;
+        DeviceName = name.Length == 0 || name == ownName ? "" : name;
     }
 
     /// <summary>Starts a sync group of its own, linked to nothing.</summary>

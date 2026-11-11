@@ -2,13 +2,12 @@ using Android.App;
 using Android.OS;
 using Android.Views;
 using Android.Widget;
-using AndroidX.AppCompat.App;
 using RemindMe.Sync;
 
 namespace RemindMe.Droid;
 
 /// <summary>Sync (R17, D3): devices in reach and in the group, linking, and the sync
-/// settings, as the desktop's Devices window. It also answers pairing requests.</summary>
+/// settings, as the desktop's Devices window. (Every screen answers requests to link: Screen.)</summary>
 [Activity(Label = "Devices and sync", Exported = false, LaunchMode = Android.Content.PM.LaunchMode.SingleTop)]
 public sealed class DevicesActivity : Screen
 {
@@ -21,7 +20,7 @@ public sealed class DevicesActivity : Screen
         Ui.SetupToolbar(this, "Devices and sync", back: true);
         var s = AppState.Settings;
         Find<CompoundButton>(Resource.Id.sync_enabled).Checked = s.SyncEnabled;
-        Find<EditText>(Resource.Id.device_name).Text = s.NameOr(AppState.OwnName());
+        ShowName();
         Find<EditText>(Resource.Id.remotes).Text = string.Join("\n", s.RemoteAddresses);
         Find<CompoundButton>(Resource.Id.accept_external).Checked = s.AcceptExternalConnections;
         Find<EditText>(Resource.Id.port).Text = s.Port.ToString();
@@ -31,9 +30,18 @@ public sealed class DevicesActivity : Screen
             "Leave", () => { AppState.LeaveSyncGroup(); Refresh(); });
     }
 
+    /// <summary>The name the box was filled with: Apply changes the name only if it was
+    /// edited, so a box left alone can't pin the name in use, which may follow the phone's.</summary>
+    private string _shownName = "";
+
+    private void ShowName() =>
+        Find<EditText>(Resource.Id.device_name).Text = _shownName = AppState.Settings.NameOr(AppState.OwnName());
+
     protected override void OnResume()
     {
         base.OnResume();
+        // Back from renaming the phone, say: an unedited box shows the name in use now.
+        if ((Find<EditText>(Resource.Id.device_name).Text ?? "") == _shownName) ShowName();
         AppState.SyncChanged += Refresh;
         AppState.PairProgressed += OnPairProgress;
         Tick();
@@ -52,7 +60,6 @@ public sealed class DevicesActivity : Screen
         Refresh();
         _handler.PostDelayed(Tick, 3000);
     }
-
 
     private void Refresh()
     {
@@ -106,15 +113,17 @@ public sealed class DevicesActivity : Screen
         bool enabled = Find<CompoundButton>(Resource.Id.sync_enabled).Checked;
         bool external = Find<CompoundButton>(Resource.Id.accept_external).Checked;
         var nameText = Find<EditText>(Resource.Id.device_name).Text ?? "";
+        bool renamed = nameText != _shownName;
         var ownName = AppState.OwnName();
         AppState.UpdateSettings(s =>
         {
             s.SyncEnabled = enabled;
-            s.SetDeviceName(nameText, ownName);
+            if (renamed) s.SetDeviceName(nameText, ownName);
             s.RemoteAddresses = addresses;
             s.AcceptExternalConnections = external;
             s.Port = port;
         });
+        if (renamed) ShowName();
         Ui.Toast(this, "Saved");
         Refresh();
     }

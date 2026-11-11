@@ -146,7 +146,8 @@ public static class AppHost
             && string.Equals(Path.GetFullPath(dataDir).TrimEnd('\\'), DefaultDataDir, StringComparison.OrdinalIgnoreCase)
             ? Path.Combine(documents, "RemindMe backups")
             : Path.Combine(dataDir, "backups");
-        Settings = AppSettings.Load(SettingsPath, OwnName(), Log);
+        // Up to 0.1.1 the first run stored Environment.MachineName.
+        Settings = AppSettings.Load(SettingsPath, OwnName(), [Environment.MachineName], Log);
         Store = new TaskStore(Path.Combine(dataDir, "tasks.json"), Settings.NodeId, Clock, Log);
         Sounds = new SoundService();
         Alarms = new AlarmCoordinator(Store, Sounds);

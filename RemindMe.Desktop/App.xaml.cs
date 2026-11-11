@@ -31,12 +31,32 @@ public partial class App : Application
         // One instance per data directory: a second launch brings the first one forward.
         // (--data-dir gives tests and experiments an instance of their own.)
         string tag = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(dataDir.ToLowerInvariant())))[..16];
-        _instanceMutex = new Mutex(true, $"{AppHost.Name}-{tag}", out bool first);
+        string name = $"{AppHost.Name}-{tag}";
+        bool first;
+        try { _instanceMutex = new Mutex(true, name, out first); }
+        catch (UnauthorizedAccessException)
+        {
+            // A copy running as administrator holds it (started from an elevated prompt, say),
+            // and this one can't reach it, to bring it forward or ask it to exit.
+            if (!exit)
+                MessageBox.Show("RemindMe is already running as administrator, so it can't be brought forward from here.\n\n"
+                    + "Quit it from its icon in the notification area, then start RemindMe again.",
+                    "RemindMe", MessageBoxButton.OK, MessageBoxImage.Information);
+            Shutdown(1);
+            return;
+        }
+        if (first)
+        {
+            // Made at once, so that a launch during this copy's startup finds them. A signal
+            // that comes before the window exists waits in its event until the waits below.
+            _showSignal = new EventWaitHandle(false, EventResetMode.AutoReset, $"{name}-show");
+            _exitSignal = new EventWaitHandle(false, EventResetMode.AutoReset, $"{name}-exit");
+        }
         if (exit)
         {
             // --exit (the installer, before replacing the exe): the running copy, if any, is
             // told to exit, and this waits until it has, so its files are free.
-            if (!first && EventWaitHandle.TryOpenExisting($"{AppHost.Name}-{tag}-exit", out var quit))
+            if (!first && OpenSignal($"{name}-exit") is { } quit)
             {
                 quit.Set();
                 try { _instanceMutex.WaitOne(TimeSpan.FromSeconds(15)); }
@@ -47,8 +67,7 @@ public partial class App : Application
         }
         if (!first)
         {
-            if (!minimized && EventWaitHandle.TryOpenExisting($"{AppHost.Name}-{tag}-show", out var show))
-                show.Set();
+            if (!minimized) OpenSignal($"{name}-show")?.Set();
             Shutdown();
             return;
         }
@@ -86,12 +105,25 @@ public partial class App : Application
         MainWindow = main;
         if (!minimized) main.ShowFromTray();
 
-        _showSignal = new EventWaitHandle(false, EventResetMode.AutoReset, $"{AppHost.Name}-{tag}-show");
-        _showWait = ThreadPool.RegisterWaitForSingleObject(_showSignal,
+        _showWait = ThreadPool.RegisterWaitForSingleObject(_showSignal!,
             (_, _) => Dispatcher.BeginInvoke(main.ShowFromTray), null, Timeout.Infinite, executeOnlyOnce: false);
-        _exitSignal = new EventWaitHandle(false, EventResetMode.AutoReset, $"{AppHost.Name}-{tag}-exit");
-        _exitWait = ThreadPool.RegisterWaitForSingleObject(_exitSignal,
+        _exitWait = ThreadPool.RegisterWaitForSingleObject(_exitSignal!,
             (_, _) => Dispatcher.BeginInvoke(main.ExitApp), null, Timeout.Infinite, executeOnlyOnce: true);
+    }
+
+    /// <summary>The running copy's named event <paramref name="name"/>, waiting up to 5 s for
+    /// it: that copy makes it right after taking the mutex, and a launch can come in between.</summary>
+    /// <returns>Null if it never appeared, or can't be opened (a copy running as administrator).</returns>
+    private static EventWaitHandle? OpenSignal(string name)
+    {
+        var deadline = DateTime.UtcNow.AddSeconds(5);
+        while (true)
+        {
+            try { if (EventWaitHandle.TryOpenExisting(name, out var signal)) return signal; }
+            catch (UnauthorizedAccessException) { return null; }
+            if (DateTime.UtcNow > deadline) return null;
+            Thread.Sleep(100);
+        }
     }
 
     protected override void OnExit(ExitEventArgs e)

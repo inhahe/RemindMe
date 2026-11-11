@@ -953,7 +953,9 @@ has an `&`, a command separator to `cmd`.
     and waits until it has exited, so the exe can be replaced. If a copy was
     running (`util:CloseApplication`, asked only to detect, sets
     `REMINDME_RUNNING`; it is moved to just before `StopRunningApp`, from where
-    the extension puts it, after the copy is gone), the new one is started in
+    the extension puts it, after the copy is gone), and the installing user has
+    used RemindMe (`REMINDME_USED`: its settings in their profile; the
+    detection finds any user's copy), the new one is started in
     the tray after `InstallFinalize` (`RestartApp`), whatever the last page's
     box says and with no UI at all: an upgrade doesn't leave a running app
     stopped until the next sign-in, nor start one that wasn't. With the box

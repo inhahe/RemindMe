@@ -66,6 +66,9 @@ internal sealed class PeerSession : IDisposable
     public IPEndPoint? RemoteEndPoint { get; }
     /// <summary>The configured remote address this session was dialled for, if any.</summary>
     public string? RemoteAddress { get; init; }
+    /// <summary>Dialled to reach this node (at an address it announced, or was last in sync
+    /// from): another device answering there is hung up on.</summary>
+    public string? ExpectedNode { get; init; }
     public DateTimeOffset Opened { get; } = DateTimeOffset.UtcNow;
 
     // Filled in by the peer's hello.

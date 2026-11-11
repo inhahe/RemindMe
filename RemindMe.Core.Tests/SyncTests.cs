@@ -283,10 +283,100 @@ public sealed class SyncTests : IDisposable
         var (eb, _) = Node(NewIdentity("B", a.GroupId, a.GroupKeyBase64), Addr(ea));
         await WaitFor(() => ea.Peers().Any(p => p.Connected && p.Linked), "A and B in sync");
         var seen = new List<string>();
-        ea.PeerSeen += (_, name) => { lock (seen) seen.Add(name); };
+        ea.PeerSeen += (_, name, _) => { lock (seen) seen.Add(name); };
         ea.LeaveGroup(Guid.NewGuid().ToString("N"), Convert.ToBase64String(RandomNumberGenerator.GetBytes(32)));
         await Task.Delay(500);
         lock (seen) Assert.Empty(seen);
+    }
+
+    /// <summary>Two identities of one group, the first with the lower node ID (the one that dials).</summary>
+    private static (SyncIdentity lower, SyncIdentity higher) OrderedPair()
+    {
+        var a = NewIdentity("Lower");
+        var b = NewIdentity("Higher", a.GroupId, a.GroupKeyBase64);
+        if (string.CompareOrdinal(a.NodeId, b.NodeId) > 0) (a, b) = (b with { Name = "Lower" }, a with { Name = "Higher" });
+        return (a, b);
+    }
+
+    /// <summary>Options for a node that remembers <paramref name="known"/> (discovery off, no
+    /// remote addresses: a redial is the only way it can connect).</summary>
+    private static SyncOptions Remembering(params KnownPeer[] known) =>
+        Options(0, TimeSpan.FromMilliseconds(200), IPAddress.Loopback) with
+        {
+            KnownPeers = () => known,
+            HousekeepingInterval = TimeSpan.FromMilliseconds(100),
+            HigherIdFallback = TimeSpan.FromMilliseconds(500),
+        };
+
+    private static KnownPeer Known(SyncIdentity who, string address) => new(who.NodeId, who.Name, DateTimeOffset.UtcNow, address);
+
+    [Fact]
+    public async Task EachSideRemembersTheOthersListenerAddress()
+    {
+        var a = NewIdentity("A");
+        var (ea, _) = Node(a);
+        var aSaw = new List<string?>();
+        ea.PeerSeen += (_, _, address) => { lock (aSaw) aSaw.Add(address); };
+        var b = NewIdentity("B", a.GroupId, a.GroupKeyBase64);
+        var store = new TaskStore(null, b.NodeId, SystemClock.Instance);
+        var eb = new SyncEngine(store, b, Options(0, TimeSpan.FromMilliseconds(200), IPAddress.Loopback, Addr(ea)));
+        _engines.Add(eb);
+        var bSaw = new List<string?>();
+        eb.PeerSeen += (_, _, address) => { lock (bSaw) bSaw.Add(address); };
+        eb.Start();
+        await WaitFor(() => { lock (aSaw) lock (bSaw) return aSaw.Count > 0 && bSaw.Count > 0; }, "both in sync");
+        // A was dialled from an ephemeral port; B's hello gave its listener's.
+        lock (aSaw) Assert.Equal(Addr(eb), aSaw[0]);
+        lock (bSaw) Assert.Equal(Addr(ea), bSaw[0]);
+    }
+
+    [Fact]
+    public async Task ALinkedDeviceNotHeardAnnouncingIsDialledAtItsLastAddress()
+    {
+        var (lower, higher) = OrderedPair();
+        var (eh, sh) = Node(higher, Remembering());
+        var (_, sl) = Node(lower, Remembering(Known(higher, Addr(eh))));
+        var t = Add(sh, "from the higher");
+        await WaitFor(() => sl.Get(t.Id) is not null, "the lower dialling the higher, and syncing");
+    }
+
+    [Fact]
+    public async Task TheHigherIdRedialsTooWhenTheLowerDoesNot()
+    {
+        // The lower one's remembered address may be stale (a phone given a new one by DHCP).
+        var (lower, higher) = OrderedPair();
+        var (el, sl) = Node(lower, Remembering());
+        var (_, sh) = Node(higher, Remembering(Known(lower, Addr(el))));
+        var t = Add(sl, "from the lower");
+        await WaitFor(() => sh.Get(t.Id) is not null, "the higher dialling the lower after the fallback, and syncing");
+    }
+
+    [Fact]
+    public async Task ARedialAnsweredByAnotherDeviceHangsUpAndIsNotRepeated()
+    {
+        // The remembered device's address now belongs to another device, of the same group even.
+        var (lower, higher) = OrderedPair();
+        var logC = new List<string>();
+        var (ec, _) = Node(NewIdentity("Other", lower.GroupId, lower.GroupKeyBase64), Options(0, TimeSpan.FromMilliseconds(200), IPAddress.Loopback), logC);
+        var (el, _) = Node(lower, Remembering(Known(higher, Addr(ec))));
+        await WaitFor(() => { lock (logC) return logC.Any(l => l.StartsWith("Disconnected from Lower")); }, "the lower hanging up on the other device");
+        await Task.Delay(1500);   // several of the 200 ms backoff's dials, were it still dialling
+        lock (logC) Assert.Single(logC, l => l.StartsWith("Disconnected from Lower"));
+        Assert.DoesNotContain(el.Peers(), p => p.NodeId == ec.Identity.NodeId);
+    }
+
+    [Fact]
+    public async Task ARedialledDeviceThatLeftTheGroupIsNotDialledAgain()
+    {
+        var (lower, higher) = OrderedPair();
+        var logH = new List<string>();
+        var left = higher with { GroupId = Guid.NewGuid().ToString("N"), GroupKeyBase64 = Convert.ToBase64String(RandomNumberGenerator.GetBytes(32)) };
+        var (eh, _) = Node(left, Options(0, TimeSpan.FromMilliseconds(200), IPAddress.Loopback), logH);
+        var (el, _) = Node(lower, Remembering(Known(higher, Addr(eh))));
+        await WaitFor(() => { lock (logH) return logH.Any(l => l.StartsWith("Connected to Lower")); }, "the lower dialling the device that left");
+        await Task.Delay(1500);   // several of the 200 ms backoff's dials, were it still dialling
+        lock (logH) Assert.Single(logH, l => l.StartsWith("Connected to Lower"));
+        Assert.DoesNotContain(el.Peers(), p => p.NodeId == higher.NodeId && p.Connected);
     }
 
     [Fact]
@@ -750,6 +840,7 @@ public sealed class SyncTests : IDisposable
     [InlineData("example.com", "example.com", 37660)]
     [InlineData("example.com:4000", "example.com", 4000)]
     [InlineData("[::1]:5000", "::1", 5000)]
+    [InlineData("[fe80::1%5]:37660", "fe80::1%5", 37660)]   // a link-local LAN address remembered for a peer
     public void AddressParsing(string text, string host, int port)
     {
         Assert.True(Protocol.TryParseAddress(text, out var h, out var p));

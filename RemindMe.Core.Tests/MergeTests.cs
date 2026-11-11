@@ -247,6 +247,28 @@ public class PersistenceTests
         finally { dir.Delete(true); }
     }
 
+    [Fact]
+    public void ALinkedDevicesLastLanAddressIsKeptAndSaved()
+    {
+        var dir = Directory.CreateTempSubdirectory();
+        try
+        {
+            var path = Path.Combine(dir.FullName, "settings.json");
+            var s = AppSettings.Load(path, "PC", []);
+            var node = Guid.NewGuid().ToString("N");
+            var t0 = DateTimeOffset.UtcNow;
+            s.RememberPeer(node, "Phone", t0, "192.168.1.66:37660");
+            // In sync over the internet: no LAN address, so the last one stays.
+            s.RememberPeer(node, "Phone renamed", t0.AddMinutes(1), null);
+            var k = Assert.Single(s.KnownPeers);
+            Assert.Equal(("Phone renamed", "192.168.1.66:37660"), (k.Name, k.Address));
+            s.RememberPeer(node, "Phone renamed", t0.AddMinutes(2), "192.168.1.70:37660");
+            s.Save(path);
+            Assert.Equal("192.168.1.70:37660", Assert.Single(AppSettings.Load(path, "PC", []).KnownPeers).Address);
+        }
+        finally { dir.Delete(true); }
+    }
+
     /// <summary>The name stored once a settings file from 0.1.1 or earlier (no format), which
     /// holds <paramref name="stored"/>, is loaded on a device now named <paramref name="ownName"/>.</summary>
     private static string Upgraded(string stored, string ownName, params string[] earlierDefaults)

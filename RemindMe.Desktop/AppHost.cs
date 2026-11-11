@@ -57,6 +57,7 @@ public static class AppHost
             RemoteAddresses = s.RemoteAddresses.ToList(),
             LinkedDeviceCount = () => Settings.KnownPeers.Count,
             IsLinkedPeer = node => Settings.IsKnownPeer(node),
+            KnownPeers = () => Settings.KnownPeers,
         }, Log);
         engine.IdentityChanged += id => OnUi(() =>
         {
@@ -68,10 +69,10 @@ public static class AppHost
         });
         engine.PairRequested += p => OnUi(() => new PairPromptWindow(p).Show());
         engine.PairProgressed += p => OnUi(() => PairProgressed?.Invoke(p));
-        engine.PeerSeen += (node, name) => OnUi(() =>
+        engine.PeerSeen += (node, name, address) => OnUi(() =>
         {
             if (Sync != engine) return;
-            Settings.RememberPeer(node, name, Clock.UtcNow);
+            Settings.RememberPeer(node, name, Clock.UtcNow, address);
             SaveSettings();
         });
         engine.PeersChanged += () => OnUi(() => { if (Sync == engine) SyncChanged?.Invoke(); });

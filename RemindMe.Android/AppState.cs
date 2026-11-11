@@ -233,13 +233,14 @@ public static class AppState
             AcquireMulticastLock = AcquireMulticastLock,
             LinkedDeviceCount = () => Settings.KnownPeers.Count,
             IsLinkedPeer = node => Settings.IsKnownPeer(node),
+            KnownPeers = () => Settings.KnownPeers,
         }, Log);
         // Missed alarms wait for the first exchange; ring them as soon as it is done.
         engine.FirstSyncCompleted += () => OnMain(() => AlarmScheduler.Reschedule(Context));
-        engine.PeerSeen += (node, name) => OnMain(() =>
+        engine.PeerSeen += (node, name, address) => OnMain(() =>
         {
             if (Sync != engine) return;
-            Settings.RememberPeer(node, name, Clock.UtcNow);
+            Settings.RememberPeer(node, name, Clock.UtcNow, address);
             SaveSettings();
         });
         engine.IdentityChanged += id => OnMain(() =>

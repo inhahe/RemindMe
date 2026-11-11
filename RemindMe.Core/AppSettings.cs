@@ -4,7 +4,9 @@ using System.Text.Json;
 namespace RemindMe;
 
 /// <param name="LastSeenUtc">When a sync session with it was last open.</param>
-public sealed record KnownPeer(string NodeId, string Name, DateTimeOffset LastSeenUtc);
+/// <param name="Address">Its listener's address on the LAN when last in sync ("ip:port"),
+/// which the sync engine dials to reach it again; null if never seen on the LAN.</param>
+public sealed record KnownPeer(string NodeId, string Name, DateTimeOffset LastSeenUtc, string? Address = null);
 
 /// <summary>Per-device settings. Not synced: each device keeps its own defaults, and
 /// its own sync identity.</summary>
@@ -127,14 +129,17 @@ public sealed class AppSettings
 
     /// <summary>Records that the linked device <paramref name="node"/> was in sync at
     /// <paramref name="now"/> (when its session proved the key, and again when it closed).</summary>
+    /// <param name="address">Its listener's LAN address then ("ip:port"); null keeps the one
+    /// remembered (it was reached over the internet, say).</param>
     /// <remarks>Copy-on-write: the sync engine reads <see cref="KnownPeers"/> from its own
     /// threads, so the list is replaced, never changed in place.</remarks>
-    public void RememberPeer(string node, string name, DateTimeOffset now)
+    public void RememberPeer(string node, string name, DateTimeOffset now, string? address = null)
     {
         var list = new List<KnownPeer>(KnownPeers);
         int i = list.FindIndex(p => p.NodeId == node);
-        if (i >= 0) list[i] = new KnownPeer(node, name, now);
-        else list.Add(new KnownPeer(node, name, now));
+        var peer = new KnownPeer(node, name, now, address ?? (i >= 0 ? list[i].Address : null));
+        if (i >= 0) list[i] = peer;
+        else list.Add(peer);
         KnownPeers = list;
     }
 

@@ -25,7 +25,8 @@ public sealed record SyncOptions
     public IReadOnlyList<string> RemoteAddresses { get; init; } = [];
     /// <summary>Android's WiFi MulticastLock; null elsewhere.</summary>
     public Func<IDisposable?>? AcquireMulticastLock { get; init; }
-    /// <summary>The first wait before redialling a remote address; it doubles up to a minute.</summary>
+    /// <summary>The first wait before redialling a remote address, or a missing linked device
+    /// at its last address; it doubles up to a minute.</summary>
     public TimeSpan ReconnectDelay { get; init; } = TimeSpan.FromSeconds(5);
     /// <summary>How many other devices this one is linked with (the app's remembered
     /// peers). When two devices pair, the one with fewer joins the other's group.</summary>
@@ -34,14 +35,23 @@ public sealed record SyncOptions
     /// inbound connection claiming such an ID but not the group never speaks for that
     /// device here; it may only ask to pair.</summary>
     public Func<string, bool>? IsLinkedPeer { get; init; }
+    /// <summary>The devices this one has been in sync with (the app's remembered peers), with
+    /// the LAN address each was last in sync from: one that is neither connected nor heard
+    /// announcing is dialled there (SyncEngine.DialKnownPeers).</summary>
+    public Func<IReadOnlyList<KnownPeer>>? KnownPeers { get; init; }
 
     /// <summary>An inbound connection from outside the group, with no pairing under way, is
     /// closed after sitting idle this long.</summary>
     internal TimeSpan UnlinkedIdleTimeout { get; init; } = TimeSpan.FromMinutes(3);
     /// <summary>A pairing left unanswered this long is abandoned.</summary>
     internal TimeSpan PairingTimeout { get; init; } = TimeSpan.FromMinutes(5);
-    /// <summary>How often those two timeouts and the nearby list's expiry are checked.</summary>
+    /// <summary>How often those two timeouts and the nearby list's expiry are checked, and
+    /// missing linked devices redialled.</summary>
     internal TimeSpan HousekeepingInterval { get; init; } = TimeSpan.FromSeconds(5);
+    /// <summary>A linked device that announces, or is missing, but never connects is dialled
+    /// by the higher ID too after this long: the lower one's dials may be blocked by a
+    /// firewall, or go to an address the device no longer has.</summary>
+    internal TimeSpan HigherIdFallback { get; init; } = TimeSpan.FromSeconds(10);
 }
 
 /// <summary>A device this node knows of, for the Devices screen.</summary>
@@ -96,9 +106,6 @@ public sealed class SyncEngine : IDisposable
 {
     private static readonly TimeSpan PeerExpiry = TimeSpan.FromSeconds(12);
     private static readonly TimeSpan HandshakeTimeout = TimeSpan.FromSeconds(15);
-    /// <summary>A same-group peer that announces but never connects is dialled by the
-    /// higher ID too after this long: the lower one's dials may be blocked by a firewall.</summary>
-    private static readonly TimeSpan HigherIdFallback = TimeSpan.FromSeconds(10);
     /// <summary>Connections that haven't proved the group key, at most.</summary>
     private const int MaxUnprovenSessions = 32;
     /// <summary>Devices remembered from announcements, at most: anyone on the LAN can
@@ -121,6 +128,8 @@ public sealed class SyncEngine : IDisposable
     private readonly ConcurrentDictionary<string, byte> _dialing = new();
     private readonly ConcurrentDictionary<string, byte> _dialFailLogged = new();
     private readonly ConcurrentDictionary<string, string> _remoteErrors = new();
+    /// <summary>Linked devices being redialled at their last address, by node ID.</summary>
+    private readonly ConcurrentDictionary<string, Redial> _redial = new();
     /// <summary>The last announcement accepted from each member (only proven members get
     /// here, so a flood can't grow it).</summary>
     private readonly ConcurrentDictionary<string, LastAnnouncement> _memberLast = new();
@@ -130,6 +139,10 @@ public sealed class SyncEngine : IDisposable
     private long _announced;
 
     private sealed record LastAnnouncement(string Boot, long Seq, long At);
+    /// <param name="MissingSince">When the device was first found not connected.</param>
+    /// <param name="Next">When it may be dialled next.</param>
+    /// <param name="Delay">The wait after that dial, doubling up to a minute.</param>
+    private sealed record Redial(DateTimeOffset MissingSince, DateTimeOffset Next, TimeSpan Delay);
     private SyncIdentity _id;
     private TcpListener? _listener;
     private Discovery? _discovery;
@@ -152,9 +165,11 @@ public sealed class SyncEngine : IDisposable
     public event Action<PairProgress>? PairProgressed;
     /// <summary>This node joined another group by pairing; the app must persist the new identity.</summary>
     public event Action<SyncIdentity>? IdentityChanged;
-    /// <summary>(node, name): a device of this group was in sync just now (its session
-    /// authenticated, or closed after being in sync).</summary>
-    public event Action<string, string>? PeerSeen;
+    /// <summary>(node, name, address): a device of this group was in sync just now (its
+    /// session authenticated, or closed after being in sync). The address is its listener's
+    /// on the LAN ("ip:port"), for <see cref="SyncOptions.KnownPeers"/>; null when it was
+    /// reached from outside the LAN or its port is unknown.</summary>
+    public event Action<string, string, string?>? PeerSeen;
     /// <summary>The first complete exchange with a linked device finished (see <see cref="FirstSyncDone"/>).</summary>
     public event Action? FirstSyncCompleted;
 
@@ -339,8 +354,11 @@ public sealed class SyncEngine : IDisposable
     }
 
     /// <summary>Connects to <paramref name="host"/>:<paramref name="port"/>.</summary>
+    /// <param name="remoteAddress">The configured remote address dialled, if any.</param>
+    /// <param name="expectedNode">The node meant to answer, if known: another is hung up on.</param>
     /// <returns>The session, its hello sent; null when the connection failed.</returns>
-    private async Task<PeerSession?> DialAsync(string host, int port, string? remoteAddress, CancellationToken ct)
+    private async Task<PeerSession?> DialAsync(string host, int port, string? remoteAddress, CancellationToken ct,
+        string? expectedNode = null)
     {
         var client = new TcpClient();
         try
@@ -356,7 +374,7 @@ public sealed class SyncEngine : IDisposable
                 _remoteErrors[remoteAddress] = e is SocketException se ? $"can't connect: {se.Message}" : "can't connect: no answer";
             return null;
         }
-        var session = new PeerSession(client, isOutgoing: true) { RemoteAddress = remoteAddress };
+        var session = new PeerSession(client, isOutgoing: true) { RemoteAddress = remoteAddress, ExpectedNode = expectedNode };
         await BeginSessionAsync(session).ConfigureAwait(false);
         return session;
     }
@@ -396,8 +414,17 @@ public sealed class SyncEngine : IDisposable
         _log?.Invoke($"Disconnected from {s.Describe()}.");
         // Only for this group: sessions closed by leaving a group must not bring the old
         // group's devices back into the list of linked ones.
-        if (s.Authenticated && s.PeerGroup == Identity.GroupId) PeerSeen?.Invoke(s.PeerNode!, s.PeerName!);
+        if (s.Authenticated && s.PeerGroup == Identity.GroupId) PeerSeen?.Invoke(s.PeerNode!, s.PeerName!, LanAddressOf(s));
         RaisePeersChanged();
+    }
+
+    /// <summary>The peer's listener on the LAN ("ip:port": its address, with the port its
+    /// hello gave), or null when it is outside the LAN or gave no port.</summary>
+    private static string? LanAddressOf(PeerSession s)
+    {
+        if (s.RemoteEndPoint is not { } ep || s.PeerPort is not { } port) return null;
+        var address = Plain(ep.Address);
+        return Protocol.IsPrivateOrLan(address) ? new IPEndPoint(address, port).ToString() : null;
     }
 
     internal void OnAnnounced(SyncMessage msg, IPAddress from)
@@ -433,7 +460,7 @@ public sealed class SyncEngine : IDisposable
         // dialled; others wait for a pairing.
         if (!member) return;
         lock (_lock) if (_sessions.ContainsKey(node)) { _nearby[node] = _nearby[node] with { FirstSeen = now }; return; }
-        if (string.CompareOrdinal(id.NodeId, node) < 0 || now - (old?.FirstSeen ?? now) > HigherIdFallback)
+        if (string.CompareOrdinal(id.NodeId, node) < 0 || now - (old?.FirstSeen ?? now) > _options.HigherIdFallback)
             _ = DialNodeAsync(node, ep);
     }
 
@@ -477,7 +504,7 @@ public sealed class SyncEngine : IDisposable
         if (!_dialing.TryAdd(node, 0)) return;
         try
         {
-            var s = await DialAsync(ep.Address.ToString(), ep.Port, null, _cts.Token).ConfigureAwait(false);
+            var s = await DialAsync(ep.Address.ToString(), ep.Port, null, _cts.Token, expectedNode: node).ConfigureAwait(false);
             if (s is null && _dialFailLogged.TryAdd(node, 0)) _log?.Invoke($"Could not connect to {ep}; will keep trying.");
         }
         finally { _dialing.TryRemove(node, out _); }
@@ -580,6 +607,35 @@ public sealed class SyncEngine : IDisposable
                 EndPairing(s, r, PairStage.Failed, "Nobody answered in time.");
             }
             if (expired) RaisePeersChanged();
+            DialKnownPeers(now);
+        }
+    }
+
+    /// <summary>
+    /// Dials each linked device that is neither connected nor heard announcing, at the LAN
+    /// address it was last in sync from. Announcements are broadcasts, which don't always get
+    /// through (a phone's Wi-Fi power saving, some routers); without this, two devices whose
+    /// connection dropped would wait for one that may never come. As with announcements, the
+    /// lower ID dials, and the higher one too once the device has been missing for
+    /// <see cref="SyncOptions.HigherIdFallback"/>. After each dial it waits
+    /// <see cref="SyncOptions.ReconnectDelay"/>, doubling up to a minute.
+    /// </summary>
+    private void DialKnownPeers(DateTimeOffset now)
+    {
+        var id = Identity;
+        foreach (var k in _options.KnownPeers?.Invoke() ?? [])
+        {
+            if (k.Address is null || !Protocol.TryParseAddress(k.Address, out var host, out var port)
+                || !IPAddress.TryParse(host, out var ip)) continue;
+            bool connected;
+            lock (_lock) connected = _sessions.ContainsKey(k.NodeId);
+            bool announcing = _nearby.TryGetValue(k.NodeId, out var n) && now - n.Seen <= PeerExpiry && IsMember(n, id.GroupId);
+            if (connected || announcing) { _redial.TryRemove(k.NodeId, out _); continue; }
+            var r = _redial.GetOrAdd(k.NodeId, _ => new Redial(now, now, _options.ReconnectDelay));
+            bool mayDial = string.CompareOrdinal(id.NodeId, k.NodeId) < 0 || now - r.MissingSince > _options.HigherIdFallback;
+            if (!mayDial || now < r.Next) continue;
+            _redial[k.NodeId] = r with { Next = now + r.Delay, Delay = TimeSpan.FromSeconds(Math.Min(60, r.Delay.TotalSeconds * 2)) };
+            _ = DialNodeAsync(k.NodeId, new IPEndPoint(ip, port));
         }
     }
 
@@ -641,6 +697,16 @@ public sealed class SyncEngine : IDisposable
         if (hello.Proto != Protocol.Version)
             _log?.Invoke($"A device speaking sync protocol {hello.Proto} connected from {s.RemoteEndPoint}; this one speaks {Protocol.Version}. Update both to the same version.");
         if (!s.AcceptHello(hello, id.NodeId, id.GroupId, id.GroupKey)) { s.Close(); return; }
+        if (s.ExpectedNode is { } expected)
+        {
+            // Dialled at a linked device's last address, but another device answered (the address
+            // is someone else's now), or the device has left the group: that address isn't dialled
+            // again until the device is back (heard announcing, or in sync) or this engine restarts.
+            bool redialled = _redial.TryGetValue(expected, out var r);
+            bool stale = s.PeerNode != expected || (redialled && !s.Sealed);
+            if (stale && redialled) _redial[expected] = r! with { Next = DateTimeOffset.MaxValue };
+            if (stale) { s.Close(); return; }
+        }
         // Claims a remembered linked device's ID without the group: an impostor angling to have
         // that device shown "not linked" (and re-linked), or a device that has left the group.
         // It never speaks for that device here, but it may still ask to pair, through the
@@ -691,7 +757,8 @@ public sealed class SyncEngine : IDisposable
         _remoteErrors.TryRemove(s.RemoteAddress ?? "", out _);
         _log?.Invoke($"In sync with {s.Describe()}.");
         _ = s.SendAsync(new SyncMessage { Type = MessageTypes.Digest, Digest = _store.Digest().ToList() });
-        if (s.PeerGroup == Identity.GroupId) PeerSeen?.Invoke(s.PeerNode!, s.PeerName!);
+        _redial.TryRemove(s.PeerNode!, out _);
+        if (s.PeerGroup == Identity.GroupId) PeerSeen?.Invoke(s.PeerNode!, s.PeerName!, LanAddressOf(s));
         RaisePeersChanged();
     }
 

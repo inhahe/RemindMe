@@ -164,7 +164,9 @@ Open **Devices…** (in the toolbar or the tray menu).
   in sync: mark a task done on one, and its alarm stops on the others. It doesn't
   matter which device you click Link on: the one linked with fewer devices joins
   the other's group, and the prompt warns you if a device would leave others
-  behind.
+  behind. Linked devices reconnect by themselves, at the address where they
+  were last in sync, even on networks that block how devices announce
+  themselves (as some routers, and phones saving power, do).
 - **Over the internet**: on the device the others will reach, forward the port
   (37660 by default) to it and tick **Accept connections from outside the local
   network**. On the others, add its address (`host` or `host:port`) under

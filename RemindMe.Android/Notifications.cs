@@ -57,19 +57,20 @@ public static class Notifications
     /// <summary>
     /// A status channel: news of nothing, so no badge on the app's icon (the alarms and link
     /// requests have one). A channel's badge can't be turned off once it exists, so these
-    /// replace earlier versions' channels, which are deleted; unless the user changed how the
-    /// old one shows (turned it off, silent, minimized, or up). That one stays in use, as the
-    /// user set it: the app can't carry the choice over, since Android raises a foreground
-    /// service's channel that the app makes off or minimized, though not one the user did.
-    /// Turned off, it shows nothing to badge.
+    /// replace earlier versions' channels, which are deleted; unless the user has the old one
+    /// off. That one stays in use while it is, so it stays off: Android raises a foreground
+    /// service's channel that the app makes off (or minimized), though not one the user did.
+    /// Off, it neither alerts nor shows anything to badge. Once it is on again, the next start
+    /// moves to the new channel. Other choices (silent, minimized) aren't carried over, for
+    /// that same reason: kept, a raised importance would make the ringing service's alert.
     /// </summary>
     /// <param name="id">The channel's ID.</param>
     /// <param name="oldId">Its predecessor's, from an earlier version.</param>
-    /// <returns>The ID to post on: <paramref name="id"/>, or <paramref name="oldId"/> while
-    /// that one carries the user's choice.</returns>
+    /// <returns>The ID to post on: <paramref name="id"/>, or <paramref name="oldId"/> while the
+    /// user has that one off.</returns>
     private static string StatusChannel(NotificationManager nm, string id, string oldId, string name, string description)
     {
-        if (nm.GetNotificationChannel(oldId) is { HasUserSetImportance: true }) return oldId;
+        if (nm.GetNotificationChannel(oldId) is { Importance: NotificationImportance.None }) return oldId;
         var channel = new NotificationChannel(id, name, NotificationImportance.Low) { Description = description };
         channel.SetShowBadge(false);
         nm.CreateNotificationChannel(channel);

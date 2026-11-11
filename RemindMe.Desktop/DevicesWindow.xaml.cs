@@ -46,7 +46,7 @@ public partial class DevicesWindow : Window
         ScreenFit.Apply(this);
         var s = AppHost.Settings;
         SyncEnabled.IsChecked = s.SyncEnabled;
-        DeviceName.Text = s.DeviceName;
+        DeviceName.Text = s.NameOr(AppHost.OwnName());
         RemoteAddresses.Text = string.Join(Environment.NewLine, s.RemoteAddresses);
         AcceptExternal.IsChecked = s.AcceptExternalConnections;
         Port.Text = s.Port.ToString();
@@ -120,11 +120,11 @@ public partial class DevicesWindow : Window
         if (bad.Count > 0) { ErrorText.Text = $"Not a host or host:port: {string.Join(", ", bad)}"; return; }
         ErrorText.Text = "";
         bool enabled = SyncEnabled.IsChecked == true, external = AcceptExternal.IsChecked == true;
-        var name = DeviceName.Text.Trim().Length > 0 ? DeviceName.Text.Trim() : Environment.MachineName;
+        var name = DeviceName.Text;
         AppHost.UpdateSettings(s =>
         {
             s.SyncEnabled = enabled;
-            s.DeviceName = name;
+            s.SetDeviceName(name, AppHost.OwnName());
             s.RemoteAddresses = addresses;
             s.AcceptExternalConnections = external;
             s.Port = port;

@@ -94,7 +94,7 @@ public static class AppState
         var dir = DataDirectory(Context);
         Provisional = dir is null;
         DataDir = dir ?? "";
-        Settings = dir is null ? new AppSettings { SyncEnabled = false } : AppSettings.Load(SettingsPath, DefaultDeviceName(), Log);
+        Settings = dir is null ? new AppSettings { SyncEnabled = false } : AppSettings.Load(SettingsPath, OwnName(), Log);
         Store = new TaskStore(dir is null ? null : Path.Combine(dir, "tasks.json"), Settings.NodeId, Clock, Log);
         AutoBackup.Attach(Store, Settings.NodeId);
         Store.Changed += _ => OnMain(() =>
@@ -166,8 +166,13 @@ public static class AppState
         return dir;
     }
 
-    private static string DefaultDeviceName()
+    /// <summary>The phone's own name: the one set in Settings → About phone, or else its
+    /// maker and model. The name it goes by unless the user gives it another.</summary>
+    public static string OwnName()
     {
+        var set = global::Android.Provider.Settings.Global.GetString(Context.ContentResolver,
+            global::Android.Provider.Settings.Global.DeviceName);
+        if (!string.IsNullOrWhiteSpace(set)) return set.Trim();
         var model = Build.Model ?? "Android";
         var maker = Build.Manufacturer ?? "";
         return model.StartsWith(maker, StringComparison.OrdinalIgnoreCase) || maker.Length == 0 ? model : $"{maker} {model}";
@@ -202,7 +207,7 @@ public static class AppState
     {
         if (Sync is not null || !Settings.SyncEnabled || Provisional) return;
         var s = Settings;
-        var engine = new SyncEngine(Store, new SyncIdentity(s.NodeId, s.DeviceName, s.GroupId, s.GroupKey), new SyncOptions
+        var engine = new SyncEngine(Store, new SyncIdentity(s.NodeId, s.NameOr(OwnName()), s.GroupId, s.GroupKey), new SyncOptions
         {
             Port = s.Port,
             AcceptExternalConnections = s.AcceptExternalConnections,

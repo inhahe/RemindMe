@@ -492,7 +492,15 @@ separately (see *Simplification opportunities*).
   replication, pairing). The engine raises its events on pool threads; the apps
   marshal them to their UI thread.
 - **Identity**: the node ID, device name, group ID and group secret live in
-  `AppSettings`. Pairing raises `IdentityChanged` for the app to persist.
+  `AppSettings`. Pairing raises `IdentityChanged` for the app to persist. The
+  stored `DeviceName` is only a name the user gave; empty, the device goes by
+  its own name, read at each start (`NameOr`): the computer's as typed
+  (`Dns.GetHostName`, not the capitals of `Environment.MachineName`), or the
+  phone's from Settings → About phone (`Settings.Global.DEVICE_NAME`), else its
+  maker and model. `SetDeviceName` stores a name blank or equal to the device's
+  own (in any case) as empty, so it follows a rename. Up to 0.1.1 the own name
+  was stored on first run: `Load` empties one still equal to it; one that
+  differs can't be told from a name given.
   Settings windows change only their own fields, through `UpdateSettings(edit)`
   (`AppHost` on desktop, `AppState` on Android), on the settings as they are at
   save time. A window that saved the copy it took on opening would silently

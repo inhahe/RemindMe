@@ -48,7 +48,7 @@ public static class AppHost
         // LAN discovery, so testing never raises a Windows Firewall prompt (design.md → Testing).
         var bind = Environment.GetEnvironmentVariable("REMINDME_BIND");
         var bindAddress = bind is not null && System.Net.IPAddress.TryParse(bind, out var ip) ? ip : null;
-        var engine = new SyncEngine(Store, new SyncIdentity(s.NodeId, s.DeviceName, s.GroupId, s.GroupKey), new SyncOptions
+        var engine = new SyncEngine(Store, new SyncIdentity(s.NodeId, s.NameOr(OwnName()), s.GroupId, s.GroupKey), new SyncOptions
         {
             BindAddress = bindAddress ?? System.Net.IPAddress.Any,
             EnableDiscovery = bindAddress is null,
@@ -128,6 +128,15 @@ public static class AppHost
 
     public static BackupService Backup { get; private set; } = null!;
 
+    /// <summary>The computer's own name, as it was typed ("Logoplex4"): the name this device
+    /// goes by unless the user gives it another. Environment.MachineName is the capitals of
+    /// the old NetBIOS form ("LOGOPLEX4").</summary>
+    public static string OwnName()
+    {
+        try { return System.Net.Dns.GetHostName(); }
+        catch (System.Net.Sockets.SocketException) { return Environment.MachineName; }
+    }
+
     public static void Initialize(string dataDir)
     {
         DataDir = dataDir;
@@ -137,7 +146,7 @@ public static class AppHost
             && string.Equals(Path.GetFullPath(dataDir).TrimEnd('\\'), DefaultDataDir, StringComparison.OrdinalIgnoreCase)
             ? Path.Combine(documents, "RemindMe backups")
             : Path.Combine(dataDir, "backups");
-        Settings = AppSettings.Load(SettingsPath, Environment.MachineName, Log);
+        Settings = AppSettings.Load(SettingsPath, OwnName(), Log);
         Store = new TaskStore(Path.Combine(dataDir, "tasks.json"), Settings.NodeId, Clock, Log);
         Sounds = new SoundService();
         Alarms = new AlarmCoordinator(Store, Sounds);

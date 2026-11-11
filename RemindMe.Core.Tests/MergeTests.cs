@@ -214,8 +214,50 @@ public class PersistenceTests
             Assert.Equal(32, Convert.FromBase64String(s.GroupKey).Length);
             var again = AppSettings.Load(path, "other");
             Assert.Equal(s.NodeId, again.NodeId);
-            Assert.Equal("PC", again.DeviceName);
             Assert.Equal(new TimeOnly(9, 0), again.DefaultTimeOfDay);
+        }
+        finally { dir.Delete(true); }
+    }
+
+    [Fact]
+    public void ADeviceGoesByItsOwnNameAsItChangesUnlessGivenAnother()
+    {
+        var dir = Directory.CreateTempSubdirectory();
+        try
+        {
+            var path = Path.Combine(dir.FullName, "settings.json");
+            Assert.Equal("DESKTOP-1", AppSettings.Load(path, "DESKTOP-1").NameOr("DESKTOP-1"));
+            // The computer renamed: the next start goes by the new name.
+            var renamed = AppSettings.Load(path, "Logoplex4");
+            Assert.Equal("Logoplex4", renamed.NameOr("Logoplex4"));
+
+            // A name given sticks through a rename; blank, or the device's own, follows it again.
+            renamed.SetDeviceName(" Study PC ", "Logoplex4");
+            Assert.Equal("Study PC", renamed.NameOr("Logoplex4"));
+            renamed.Save(path);
+            Assert.Equal("Study PC", AppSettings.Load(path, "Elsewhere").NameOr("Elsewhere"));
+            renamed.SetDeviceName("  ", "Logoplex4");
+            Assert.Equal("Elsewhere", renamed.NameOr("Elsewhere"));
+            renamed.SetDeviceName("Logoplex4", "Logoplex4");
+            Assert.Equal("Elsewhere", renamed.NameOr("Elsewhere"));
+        }
+        finally { dir.Delete(true); }
+    }
+
+    [Fact]
+    public void AnOwnNameStoredByAnEarlierVersionFollowsTheDeviceFromNowOn()
+    {
+        var dir = Directory.CreateTempSubdirectory();
+        try
+        {
+            var path = Path.Combine(dir.FullName, "settings.json");
+            // Stored in capitals (Windows' NetBIOS form), the name was the computer's all the same.
+            File.WriteAllText(path, """{ "nodeId": "n1", "deviceName": "MYPC" }""");
+            Assert.Equal("", AppSettings.Load(path, "MyPc").DeviceName);
+            Assert.Equal("Logoplex4", AppSettings.Load(path, "Logoplex4").NameOr("Logoplex4"));
+            // One that differs from the device's name now can't be told from a name given.
+            File.WriteAllText(path, """{ "nodeId": "n1", "deviceName": "DESKTOP-1" }""");
+            Assert.Equal("DESKTOP-1", AppSettings.Load(path, "Logoplex4").NameOr("Logoplex4"));
         }
         finally { dir.Delete(true); }
     }

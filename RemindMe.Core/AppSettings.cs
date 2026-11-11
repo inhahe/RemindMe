@@ -52,6 +52,9 @@ public sealed class AppSettings
 
     /// <summary>This device's node ID, created on first run.</summary>
     public string NodeId { get; set; } = "";
+    /// <summary>The name the user gave this device, which its linked devices show. Empty
+    /// means it goes by its own name (the computer's, the phone's), following that as it
+    /// changes: see <see cref="NameOr"/>. <see cref="SetDeviceName"/> keeps it so.</summary>
     public string DeviceName { get; set; } = "";
     public bool SyncEnabled { get; set; } = true;
     public int Port { get; set; } = 37660;
@@ -69,15 +72,34 @@ public sealed class AppSettings
 
     /// <summary>Loads the settings, creating the node ID and a one-device sync group on
     /// first run.</summary>
-    public static AppSettings Load(string path, string defaultDeviceName, Action<string>? log = null)
+    /// <param name="ownName">This device's own name now (the computer's, the phone's).</param>
+    public static AppSettings Load(string path, string ownName, Action<string>? log = null)
     {
         var s = Json.ReadWithFallback(path, Json.Files.AppSettings, log) ?? new AppSettings();
         bool dirty = false;
         if (string.IsNullOrEmpty(s.NodeId)) { s.NodeId = Guid.NewGuid().ToString("N"); dirty = true; }
-        if (string.IsNullOrWhiteSpace(s.DeviceName)) { s.DeviceName = defaultDeviceName; dirty = true; }
+        // Up to 0.1.1, the device's own name was stored on first run. One still the same
+        // follows it from now on; one that differs can't be told from a name the user gave.
+        var given = s.DeviceName;
+        s.SetDeviceName(given ?? "", ownName);
+        if (s.DeviceName != given) dirty = true;
         if (string.IsNullOrEmpty(s.GroupId) || string.IsNullOrEmpty(s.GroupKey)) { s.NewGroup(); dirty = true; }
         if (dirty) s.Save(path, log);
         return s;
+    }
+
+    /// <summary>The name this device goes by: the one the user gave it, or else
+    /// <paramref name="ownName"/>, its own name now (the computer's, the phone's).</summary>
+    public string NameOr(string ownName) => DeviceName.Length > 0 ? DeviceName : ownName;
+
+    /// <summary>Gives this device the name <paramref name="name"/>, as typed. Blank, or the
+    /// device's own name <paramref name="ownName"/> in any case (Windows' names ignore it, and
+    /// up to 0.1.1 stored the computer's in capitals), means it goes by its own name, whatever
+    /// that becomes.</summary>
+    public void SetDeviceName(string name, string ownName)
+    {
+        name = name.Trim();
+        DeviceName = name.Length == 0 || string.Equals(name, ownName, StringComparison.OrdinalIgnoreCase) ? "" : name;
     }
 
     /// <summary>Starts a sync group of its own, linked to nothing.</summary>

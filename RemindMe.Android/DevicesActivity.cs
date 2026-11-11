@@ -22,7 +22,7 @@ public sealed class DevicesActivity : Screen
         Ui.SetupToolbar(this, "Devices and sync", back: true);
         var s = AppState.Settings;
         Find<CompoundButton>(Resource.Id.sync_enabled).Checked = s.SyncEnabled;
-        Find<EditText>(Resource.Id.device_name).Text = s.DeviceName;
+        Find<EditText>(Resource.Id.device_name).Text = s.NameOr(AppState.OwnName());
         Find<EditText>(Resource.Id.remotes).Text = string.Join("\n", s.RemoteAddresses);
         Find<CompoundButton>(Resource.Id.accept_external).Checked = s.AcceptExternalConnections;
         Find<EditText>(Resource.Id.port).Text = s.Port.ToString();
@@ -153,11 +153,12 @@ public sealed class DevicesActivity : Screen
         error.Text = "";
         bool enabled = Find<CompoundButton>(Resource.Id.sync_enabled).Checked;
         bool external = Find<CompoundButton>(Resource.Id.accept_external).Checked;
-        var nameText = Find<EditText>(Resource.Id.device_name).Text?.Trim() ?? "";
+        var nameText = Find<EditText>(Resource.Id.device_name).Text ?? "";
+        var ownName = AppState.OwnName();
         AppState.UpdateSettings(s =>
         {
             s.SyncEnabled = enabled;
-            if (nameText.Length > 0) s.DeviceName = nameText;
+            s.SetDeviceName(nameText, ownName);
             s.RemoteAddresses = addresses;
             s.AcceptExternalConnections = external;
             s.Port = port;

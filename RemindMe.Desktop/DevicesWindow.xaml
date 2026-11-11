@@ -53,6 +53,8 @@
                             <Label Content="This device's _name: " Target="{Binding ElementName=DeviceName}" Padding="0" VerticalAlignment="Center" />
                             <TextBox x:Name="DeviceName" Width="220" VerticalContentAlignment="Center" />
                         </WrapPanel>
+                        <TextBlock Style="{StaticResource Hint}" Margin="0,2,0,0"
+                                   Text="What your other devices call this one. Left as the computer's name, or empty, it follows the computer's name if that changes." />
                         <TextBlock Text="Devices elsewhere (over the internet), one per line, as host or host:port:" Margin="0,8,0,2" />
                         <TextBox x:Name="RemoteAddresses" AcceptsReturn="True" Height="54" VerticalScrollBarVisibility="Auto" />
                         <CheckBox x:Name="AcceptExternal" Margin="0,8,0,0"

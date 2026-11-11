@@ -175,6 +175,9 @@ Open **Devices…** (in the toolbar or the tray menu).
   carries updates between them, so every linked device stays in sync.
 - **Leave the sync group…** stops this device syncing. It keeps its tasks, and the
   others keep theirs.
+- **This device's name** is what your other devices call it. It is the computer's
+  name (on a phone, the name in Settings → About phone) and changes with it,
+  unless you type another. Empty it to go back to following the device's name.
 
 Only linked devices can read or change your tasks: traffic between them is
 encrypted, and a device without the group's key gets nothing. The first time

@@ -256,9 +256,9 @@ The installer puts the program in `Program Files\RemindMe`, adds it to the
 Start menu, and lets it through Windows Firewall on private and domain networks,
 so sync works without the first-run prompt. It can start it when it finishes. An
 upgrade closes the running copy first (`RemindMe.exe --exit`), installs over the
-previous version and, if RemindMe starts with Windows, starts it again in the
-tray. An upgrade that fails or is cancelled puts the previous version back and
-starts it again. Tasks and settings stay where they are, per user.
+previous version, and starts it again in the tray if it was running. An upgrade
+that fails or is cancelled puts the previous version back, and starts that again
+if it was running. Tasks and settings stay where they are, per user.
 
 ## License
 

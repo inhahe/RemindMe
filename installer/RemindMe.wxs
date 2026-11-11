@@ -2,7 +2,8 @@
 <!-- The Windows installer (S9). build-msi.ps1 builds it; see design.md -> Releases. -->
 <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
      xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui"
-     xmlns:fw="http://wixtoolset.org/schemas/v4/wxs/firewall">
+     xmlns:fw="http://wixtoolset.org/schemas/v4/wxs/firewall"
+     xmlns:util="http://wixtoolset.org/schemas/v4/wxs/util">
 
   <!-- Supplied by build-msi.ps1 with -d. Built without it, these defaults serve, and
        License.rtf (below) must be put on a bind path: the script writes it from LICENSE. -->
@@ -26,6 +27,11 @@
          its GUID (a new resource goes in a new component). -->
     <MajorUpgrade AllowSameVersionUpgrades="yes" Schedule="afterInstallExecute"
                   DowngradeErrorMessage="A newer version of RemindMe is already installed. Setup will now exit." />
+    <!-- Installed over the old version, a file is otherwise only replaced by a higher file
+         version: a package of the same version (a rebuild), or one older only in the fourth
+         part (which Windows counts as the same version), would keep the old exe. "a": every
+         file is the package's own. -->
+    <Property Id="REINSTALLMODE" Value="amus" />
 
     <MediaTemplate EmbedCab="yes" />
 
@@ -54,15 +60,13 @@
     <CustomAction Id="StopRunningApp" Directory="INSTALLFOLDER"
                   ExeCommand="&quot;[INSTALLFOLDER]RemindMe.exe&quot; --exit"
                   Execute="immediate" Return="ignore" Impersonate="yes" />
-    <!-- Whether the installing user has RemindMe start with Windows (the app's own
-         setting, a Run entry it writes): if so, an upgrade starts it again at once rather
-         than leaving it stopped, alarms and all, until the next sign-in. -->
-    <Property Id="REMINDME_AUTOSTART" Secure="yes">
-      <RegistrySearch Id="AutostartEntry" Root="HKCU" Key="Software\Microsoft\Windows\CurrentVersion\Run"
-                      Name="RemindMe" Type="raw" Bitness="always64" />
-    </Property>
+    <!-- Whether a copy runs when the upgrade begins (any RemindMe.exe, found by name):
+         if so, it is started again afterwards, rather than left stopped, alarms and all, until
+         the next sign-in. Detection only: StopRunningApp is what stops it, gracefully. -->
+    <util:CloseApplication Id="DetectRunningApp" Target="RemindMe.exe" Property="REMINDME_RUNNING"
+                           CloseMessage="no" EndSessionMessage="no" PromptToContinue="no" RebootPrompt="no" />
 
-    <!-- After an upgrade, with autostart on: started again in the tray, as at sign-in,
+    <!-- After an upgrade, if a copy was running: started again in the tray, as at sign-in,
          whether or not the last page's box is ticked, or there is no last page (msiexec
          /passive or /qn). Through the shell, so with the user's own rights even when the
          install runs elevated (from an elevated prompt): a copy started elevated couldn't
@@ -80,11 +84,15 @@
                   ExeCommand="&quot;[INSTALLFOLDER]RemindMe.exe&quot; --minimized"
                   Execute="rollback" Return="asyncNoWait" Impersonate="yes" />
     <InstallExecuteSequence>
+      <!-- The detection (DetectRunningApp) has to come before StopRunningApp; the extension
+           would place it just before InstallFiles. Asked only to detect, it schedules no
+           deferred part, so it may run before InstallInitialize. -->
+      <Custom Action="override Wix4CloseApplications_$(sys.BUILDARCHSHORT)" Before="StopRunningApp" />
       <Custom Action="StopRunningApp" Before="InstallValidate" Condition="WIX_UPGRADE_DETECTED" />
       <Custom Action="RestartAppOnRollback" After="InstallInitialize"
-              Condition="WIX_UPGRADE_DETECTED AND NOT REMOVE AND REMINDME_AUTOSTART" />
+              Condition="WIX_UPGRADE_DETECTED AND NOT REMOVE AND REMINDME_RUNNING" />
       <Custom Action="RestartApp" After="InstallFinalize"
-              Condition="WIX_UPGRADE_DETECTED AND NOT REMOVE AND REMINDME_AUTOSTART" />
+              Condition="WIX_UPGRADE_DETECTED AND NOT REMOVE AND REMINDME_RUNNING" />
     </InstallExecuteSequence>
 
     <!-- "Launch RemindMe now" on the last page: alarms only ring while it runs. Through the

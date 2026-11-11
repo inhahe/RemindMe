@@ -903,7 +903,8 @@ has an `&`, a command separator to `cmd`.
   price: an older MSI that differs only in the fourth part installs over a
   newer one without the downgrade message.
 - **`build-msi.ps1`**: two single-file builds of the desktop app (win-x64),
-  then `installer/RemindMe.wxs` with WiX 7 and its UI and Firewall extensions.
+  then `installer/RemindMe.wxs` with WiX 7 and its UI, Firewall and Util
+  extensions.
   Everything goes into `release/<version>/`.
   - The self-contained build, with .NET included (around 70 MB, compressed),
     goes into the MSI and beside it as `RemindMe.exe`.
@@ -942,19 +943,25 @@ has an `&`, a command separator to `cmd`.
     (`App.OnStartup`).
   - **An upgrade** first runs the installed exe with `--exit`, which signals the
     running copy (through a named event per data folder, like the "show" one)
-    and waits until it has exited, so the exe can be replaced. After
-    `InstallFinalize`, if the user has RemindMe start with Windows (the app's Run
-    entry, `REMINDME_AUTOSTART`), it starts the new one in the tray
-    (`RestartApp`), whatever the last page's box says and with no UI at all: an
-    upgrade doesn't leave the app stopped until the next sign-in. With the box
-    ticked too, the second launch brings the window forward; a launch during
-    the first copy's startup waits for its signals (`App.OpenSignal`).
+    and waits until it has exited, so the exe can be replaced. If a copy was
+    running (`util:CloseApplication`, asked only to detect, sets
+    `REMINDME_RUNNING`; it is moved to just before `StopRunningApp`, from where
+    the extension puts it, after the copy is gone), the new one is started in
+    the tray after `InstallFinalize` (`RestartApp`), whatever the last page's
+    box says and with no UI at all: an upgrade doesn't leave a running app
+    stopped until the next sign-in, nor start one that wasn't. With the box
+    ticked too, the second launch brings the window forward; a launch during the
+    first copy's startup waits for its signals (`App.OpenSignal`).
   - The new version is installed over the old one, which is then removed, in
     one transaction (`MajorUpgrade Schedule="afterInstallExecute"`): an upgrade
     that fails or is cancelled puts the old version back, and
-    `RestartAppOnRollback` starts it again. That schedule needs the component
-    rules kept: a component's resources never change under its GUID, so a new
-    resource gets a new component (the tray shortcut has its own).
+    `RestartAppOnRollback` starts it again (if it was running). That schedule
+    needs the component rules kept: a component's resources never change under
+    its GUID, so a new resource gets a new component (the tray shortcut has its
+    own). Installed over the old version, a file would otherwise be replaced
+    only by a higher file version, keeping the old exe for a package of the
+    same version, or one older only in the fourth part: `REINSTALLMODE=amus`
+    makes every file the package's own.
 - **`build-apk.ps1`**: the Release APK with that version. It is signed with the
   key the `REMINDME_*` environment variables name (passwords passed as
   `env:NAME`, so they appear on no command line), or this machine's debug key.

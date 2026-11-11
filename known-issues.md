@@ -134,10 +134,11 @@ Checked on the emulator:
   left the app stopped (it relied on the last page's box), which the next
   version's installer no longer does. The upgrade actions themselves were tried
   with a per-user copy of the package (its own name, upgrade code and data
-  folder, so it installs without elevation): the
-  running copy is stopped and started again in the tray through the shell, not
-  with autostart off, and a failed upgrade restores the old files and starts
-  them. Not seen: the per-machine package doing this under UAC, or started
+  folder, so it installs without elevation): a running copy is stopped and
+  started again in the tray through the shell, one that wasn't running isn't
+  started, a package of the same version installs its own exe, and a failed
+  upgrade restores the old files and starts them. Not seen: the per-machine
+  package doing this under UAC, or started
   from an elevated prompt (each needs a UAC prompt), and the old version's
   registration coming back after a failed upgrade (in the per-user copy
   Windows Installer couldn't restore it without elevation, so it couldn't be

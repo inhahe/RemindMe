@@ -129,10 +129,21 @@ Checked on the emulator:
   release key later (the script's header says how to make one) means users
   uninstall first. Their tasks then come back from the automatic backups in
   `Download/RemindMe backups`, which survive the uninstall.
-- **Not tried: an actual install.** The MSI was built and its payload unpacked
-  (`msiexec /a`), and the exe it contains starts and exits; installing it for
-  real would change this machine (Program Files, firewall rules), so that, and
-  an upgrade over it, are yours to try.
+- **Installs and upgrades: what has and hasn't been seen.** You installed
+  0.1.1.0 and upgraded to 0.1.2.0 on this PC: both installed, but that upgrade
+  left the app stopped (it relied on the last page's box), which the next
+  version's installer no longer does. The upgrade actions themselves were tried
+  with a per-user copy of the package (its own name, upgrade code and data
+  folder, so it installs without elevation): the
+  running copy is stopped and started again in the tray through the shell, not
+  with autostart off, and a failed upgrade restores the old files and starts
+  them. Not seen: the per-machine package doing this under UAC, or started
+  from an elevated prompt (each needs a UAC prompt), and the old version's
+  registration coming back after a failed upgrade (in the per-user copy
+  Windows Installer couldn't restore it without elevation, so it couldn't be
+  judged there). **To verify:** install the next version over 0.1.2.0 with the
+  app running: it should be running again, in the tray, when the installer
+  finishes.
 
 ### F-Droid can't build .NET apps
 Choosing .NET for Android (so one Core serves both apps) rules out F-Droid. The

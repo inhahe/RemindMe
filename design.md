@@ -918,15 +918,31 @@ has an `&`, a command separator to `cmd`.
     public), which replace the first-run prompt.
   - A license page: `LICENSE`, which the script turns into the RTF the page
     needs (`Write-LicenseRtf`), so the text is kept in one place.
-  - "Launch now" on the last page, run as the installing user.
-  - An upgrade first runs the installed exe with `--exit`, which signals the
-    running copy (through a named event per data folder, like the existing
-    "show" one) and waits until it has exited, so the exe can be replaced.
-    After `InstallFinalize` it starts the new one with `--minimized`
-    (`RestartApp`), whatever the last page's box says and with no UI at all, so
-    an upgrade never leaves the app stopped until the next sign-in. It is an
-    immediate action, so it runs as the installing user, never elevated; with
-    the box ticked too, the second launch only brings the window forward.
+  - "Launch now" on the last page.
+  - **Starting the app** (that box, and `RestartApp` below) goes through the
+    shell (`WixUnelevatedShellExec`, from the Util extension), so it runs with
+    the user's own rights even when the install runs elevated (from an elevated
+    prompt): a copy started elevated holds named objects the user's later
+    launches can't open. The shell runs a target without arguments, so the
+    restart's minimized start comes from a shortcut in the install folder,
+    `RemindMe (tray).lnk`. Should a copy run elevated all the same (started
+    "as administrator"), a later launch says so instead of failing
+    (`App.OnStartup`).
+  - **An upgrade** first runs the installed exe with `--exit`, which signals the
+    running copy (through a named event per data folder, like the "show" one)
+    and waits until it has exited, so the exe can be replaced. After
+    `InstallFinalize`, if the user has RemindMe start with Windows (the app's Run
+    entry, `REMINDME_AUTOSTART`), it starts the new one in the tray
+    (`RestartApp`), whatever the last page's box says and with no UI at all: an
+    upgrade doesn't leave the app stopped until the next sign-in. With the box
+    ticked too, the second launch brings the window forward; a launch during
+    the first copy's startup waits for its signals (`App.OpenSignal`).
+  - The new version is installed over the old one, which is then removed, in
+    one transaction (`MajorUpgrade Schedule="afterInstallExecute"`): an upgrade
+    that fails or is cancelled puts the old version back, and
+    `RestartAppOnRollback` starts it again. That schedule needs the component
+    rules kept: a component's resources never change under its GUID, so a new
+    resource gets a new component (the tray shortcut has its own).
 - **`build-apk.ps1`**: the Release APK with that version. It is signed with the
   key the `REMINDME_*` environment variables name (passwords passed as
   `env:NAME`, so they appear on no command line), or this machine's debug key.

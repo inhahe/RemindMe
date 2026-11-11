@@ -19,8 +19,12 @@
     <SummaryInformation Description="RemindMe: reminders and alarms, kept in sync between your devices" />
 
     <!-- The UpgradeCode never changes: Windows uses it with the version to replace an
-         older install. -->
-    <MajorUpgrade AllowSameVersionUpgrades="yes"
+         older install. The new version is installed over the old one, which is then
+         removed, all in one transaction: an upgrade that fails or is cancelled puts the old
+         one back (and RestartAppOnRollback starts it again), rather than leaving neither.
+         This needs the component rules kept: a component's resources never change under
+         its GUID (a new resource goes in a new component). -->
+    <MajorUpgrade AllowSameVersionUpgrades="yes" Schedule="afterInstallExecute"
                   DowngradeErrorMessage="A newer version of RemindMe is already installed. Setup will now exit." />
 
     <MediaTemplate EmbedCab="yes" />
@@ -50,25 +54,44 @@
     <CustomAction Id="StopRunningApp" Directory="INSTALLFOLDER"
                   ExeCommand="&quot;[INSTALLFOLDER]RemindMe.exe&quot; --exit"
                   Execute="immediate" Return="ignore" Impersonate="yes" />
-    <!-- An upgrade starts it again, in the tray as at sign-in, whether or not the last
-         page's box is ticked (or there is no last page: msiexec /passive or /qn): alarms
-         only ring while it runs, and nothing else would start it before the next sign-in.
-         Immediate, so as the installing user and not elevated, even in an elevated install. -->
-    <CustomAction Id="RestartApp" Directory="INSTALLFOLDER"
+    <!-- Whether the installing user has RemindMe start with Windows (the app's own
+         setting, a Run entry it writes): if so, an upgrade starts it again at once rather
+         than leaving it stopped, alarms and all, until the next sign-in. -->
+    <Property Id="REMINDME_AUTOSTART" Secure="yes">
+      <RegistrySearch Id="AutostartEntry" Root="HKCU" Key="Software\Microsoft\Windows\CurrentVersion\Run"
+                      Name="RemindMe" Type="raw" Bitness="always64" />
+    </Property>
+
+    <!-- After an upgrade, with autostart on: started again in the tray, as at sign-in,
+         whether or not the last page's box is ticked, or there is no last page (msiexec
+         /passive or /qn). Through the shell, so with the user's own rights even when the
+         install runs elevated (from an elevated prompt): a copy started elevated couldn't
+         be reached by the user's later launches. The shell runs a target without arguments,
+         hence the shortcut, which carries the minimized start. -->
+    <SetProperty Id="WixUnelevatedShellExecTarget" Value="[INSTALLFOLDER]RemindMe (tray).lnk"
+                 Before="RestartApp" Sequence="execute" />
+    <CustomAction Id="RestartApp" BinaryRef="Wix4UtilCA_$(sys.BUILDARCHSHORT)" DllEntry="WixUnelevatedShellExec"
+                  Execute="immediate" Return="ignore" />
+    <!-- An upgrade that fails or is cancelled after the running copy was stopped puts the
+         old version back (MajorUpgrade, above); this starts it again. First in the script,
+         so last in a rollback, once the old files are back. A rollback action can't use the
+         shell, so it runs with the installing user's token, as StopRunningApp does. -->
+    <CustomAction Id="RestartAppOnRollback" Directory="INSTALLFOLDER"
                   ExeCommand="&quot;[INSTALLFOLDER]RemindMe.exe&quot; --minimized"
-                  Execute="immediate" Return="asyncNoWait" Impersonate="yes" />
+                  Execute="rollback" Return="asyncNoWait" Impersonate="yes" />
     <InstallExecuteSequence>
       <Custom Action="StopRunningApp" Before="InstallValidate" Condition="WIX_UPGRADE_DETECTED" />
-      <Custom Action="RestartApp" After="InstallFinalize" Condition="WIX_UPGRADE_DETECTED AND NOT REMOVE" />
+      <Custom Action="RestartAppOnRollback" After="InstallInitialize"
+              Condition="WIX_UPGRADE_DETECTED AND NOT REMOVE AND REMINDME_AUTOSTART" />
+      <Custom Action="RestartApp" After="InstallFinalize"
+              Condition="WIX_UPGRADE_DETECTED AND NOT REMOVE AND REMINDME_AUTOSTART" />
     </InstallExecuteSequence>
 
-    <!-- "Launch RemindMe now" on the last page: alarms only ring while it runs.
-         As the installing user (its settings and autostart are per-user), and without
-         waiting for it. After an upgrade RestartApp has started it already: this then
-         brings its window forward. -->
-    <CustomAction Id="LaunchApp" Directory="INSTALLFOLDER"
-                  ExeCommand="&quot;[INSTALLFOLDER]RemindMe.exe&quot;"
-                  Execute="immediate" Return="asyncNoWait" Impersonate="yes" />
+    <!-- "Launch RemindMe now" on the last page: alarms only ring while it runs. Through the
+         shell too, as the user and not elevated (its settings and autostart are per-user).
+         When RestartApp has started it already, this brings its window forward. -->
+    <CustomAction Id="LaunchApp" BinaryRef="Wix4UtilCA_$(sys.BUILDARCHSHORT)" DllEntry="WixUnelevatedShellExec"
+                  Execute="immediate" Return="ignore" />
 
     <!-- Welcome, the license, the install folder, then installing. build-msi.ps1 writes
          License.rtf from LICENSE into its work folder, a bind path. -->
@@ -77,6 +100,8 @@
     <Property Id="WIXUI_EXITDIALOGOPTIONALCHECKBOXTEXT" Value="Launch RemindMe now" />
     <Property Id="WIXUI_EXITDIALOGOPTIONALCHECKBOX" Value="1" />
     <UI>
+      <Publish Dialog="ExitDialog" Control="Finish" Property="WixUnelevatedShellExecTarget" Value="[INSTALLFOLDER]RemindMe.exe"
+               Order="9" Condition="WIXUI_EXITDIALOGOPTIONALCHECKBOX = 1 AND NOT Installed" />
       <Publish Dialog="ExitDialog" Control="Finish" Event="DoAction" Value="LaunchApp"
                Order="10" Condition="WIXUI_EXITDIALOGOPTIONALCHECKBOX = 1 AND NOT Installed" />
     </UI>
@@ -95,6 +120,14 @@
           <fw:FirewallException Id="FirewallPrivate" Name="RemindMe (sync)" Scope="any" Profile="private" />
           <fw:FirewallException Id="FirewallDomain" Name="RemindMe (sync, domain)" Scope="any" Profile="domain" />
         </File>
+      </Component>
+
+      <!-- What RestartApp starts: the shell runs a target without arguments. A component of
+           its own, as a resource new since 0.1.2.0 (the component rules, above). -->
+      <Component Id="TrayShortcut" Directory="INSTALLFOLDER" Guid="7E4B2C19-3A85-4F60-B1D7-95C2E8A04F36">
+        <Shortcut Id="TrayShortcut" Name="RemindMe (tray)" Target="[#AppExe]" Arguments="--minimized"
+                  WorkingDirectory="INSTALLFOLDER" Icon="AppIcon" />
+        <RegistryValue Root="HKLM" Key="SOFTWARE\RemindMe" Name="TrayShortcut" Type="integer" Value="1" KeyPath="yes" />
       </Component>
 
       <!-- Its GUID goes with its key path: a different registry key needs a new GUID. -->

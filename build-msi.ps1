@@ -12,7 +12,7 @@
   The version comes from the VERSION file next to this script, the single source
   of truth: bump it for every release, so Windows sees an upgrade.
 
-  Needs the WiX Toolset (installed as a .NET tool if missing) with its UI and
+  Needs the WiX Toolset (installed as a .NET tool if missing) with its UI, Util and
   Firewall extensions (added if missing). WiX 7 asks once for its EULA to be
   accepted ("wix eula accept wix7"): that is for you to decide, so this script
   doesn't.
@@ -97,7 +97,7 @@ try {
         if (-not (Get-Command wix -ErrorAction SilentlyContinue)) { $env:Path = "$tools;$env:Path" }
     }
     $extensions = (wix extension list --global) -join "`n"
-    foreach ($ext in 'WixToolset.UI.wixext', 'WixToolset.Firewall.wixext') {
+    foreach ($ext in 'WixToolset.UI.wixext', 'WixToolset.Firewall.wixext', 'WixToolset.Util.wixext') {
         if ($extensions -notmatch [regex]::Escape($ext)) {
             wix extension add --global $ext
             if ($LASTEXITCODE) { throw "Could not add the WiX extension $ext." }
@@ -109,7 +109,7 @@ try {
     wix build (Join-Path $root 'installer\RemindMe.wxs') -arch x64 `
         -d "Version=$version" -d "PublishDir=$publish" `
         -b $work -b (Join-Path $root 'installer') -b (Join-Path $root 'RemindMe.Desktop') `
-        -ext WixToolset.UI.wixext -ext WixToolset.Firewall.wixext -pdbtype none -o $msi
+        -ext WixToolset.UI.wixext -ext WixToolset.Firewall.wixext -ext WixToolset.Util.wixext -pdbtype none -o $msi
     if ($LASTEXITCODE) { throw 'wix build failed (if it mentions the EULA: wix eula accept wix7).' }
     Copy-Item -LiteralPath (Join-Path $publish 'RemindMe.exe') -Destination $exe
     Copy-Item -LiteralPath (Join-Path $publishFd 'RemindMe.exe') -Destination $exeFd

@@ -401,17 +401,21 @@ separately (see *Simplification opportunities*).
   each dial the next waits `ReconnectDelay` (5 s), doubling up to a minute
   (`NextDelay`, as remote links). Only an address on a network this device is on
   now is dialled (`Protocol.IsOnSubnet`): away from home, the home LAN's can't
-  answer; it is looked at again after the next wait. (`Protocol.LocalSubnets`
-  lists those networks for discovery's broadcasts too.)
+  answer. That leaves the wait alone, so a device back home is dialled within a
+  tick of the networks being listed again: every 10 s at most
+  (`Protocol.LocalSubnets`, which discovery's broadcasts use too).
   - **Which address is remembered** (`AddressToRemember`, `LanAddressOf`): a
-    dialled session's is where the device answered, port and all (a port
-    forward on the way may have a port of its own). An inbound one's is its
-    source with the port its hello gave, and since that source may be a NAT's
-    (a router hairpinning, a guest network), it only fills in an address none
-    is known for, or one that is suspect: a redial to it got no answer, or a
-    wrong one (`_suspect`, kept apart from the dial schedule so that it outlives
-    the device announcing again). Never one outside the LAN: the last LAN one
-    stays.
+    dialled session's, where the device answered, port and all (a port forward
+    on the way may have a port of its own). An inbound session's source may be a
+    NAT's (a router hairpinning, a guest network), so it is proved instead
+    (`DialBack`): when it isn't the address remembered, a probe dials it, with
+    the port the device's hello gave, and the address is remembered if the
+    device answers there and proves the key. A NAT's address leads elsewhere, or
+    nowhere, and is forgotten; a device whose address changed is found where it
+    is now, whatever became of the old one. The probe (`PeerSession.IsProbe`) is
+    never installed and sends no `ready` of its own, so the other device never
+    authenticates it and keeps its session; the same address isn't probed again
+    within a minute. Never an address outside the LAN: the last LAN one stays.
   - **Wrong answers** (`KeepDialledSession`, for any dial made to reach a known
     node, `PeerSession.ExpectedNode`): another device of the group is kept (it
     proves the key like any session); any other device, or this device itself
@@ -421,11 +425,12 @@ separately (see *Simplification opportunities*).
     by this one, or by the device without the group (it has left) marks that
     address stale (`MarkStale`, logged once): not dialled again until the
     device is heard announcing, is in sync again, or the engine restarts.
-  - Settings drop remembered devices nothing can use when loaded (a damaged
-    file: a null, one without a node ID), and the engine reads them through
-    `KnownPeers()`, which does the same. The housekeeping tick survives any
-    exception, logging each distinct one once: nothing else closes idle
-    sessions, ends unanswered pairings or redials.
+  - Settings mend damaged lists when loaded (a null list or entry, a remembered
+    device without a node ID or twice over, of which the latest stays), and the
+    engine reads the remembered devices through `KnownPeers()`, by the same rule
+    (`KnownPeer.IsUsable`). The housekeeping tick survives any exception,
+    logging each distinct one once: nothing else closes idle sessions, ends
+    unanswered pairings or redials.
 - **Hello proves nothing; the first sealed frame does.** That frame is a tiny
   `ready`, and a session is `Authenticated` once its peer's `ready` opens. The
   digest goes out only after that. It can be any size, while frames from a peer

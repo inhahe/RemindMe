@@ -262,12 +262,15 @@ public class PersistenceTests
                 [null,
                  {"name": "no ID", "lastSeenUtc": "2026-11-11T00:00:00+00:00"},
                  {"nodeId": "{{nameless}}", "lastSeenUtc": "2026-11-11T00:00:00+00:00"},
-                 {"nodeId": "{{good}}", "name": "Phone", "lastSeenUtc": "2026-11-11T00:00:00+00:00", "address": "192.168.1.66:37660"}]
+                 {"nodeId": "{{good}}", "name": "Phone", "lastSeenUtc": "2026-11-11T00:00:00+00:00", "address": "192.168.1.66:37660"},
+                 {"nodeId": "{{good}}", "name": "Phone, earlier", "lastSeenUtc": "2026-11-10T00:00:00+00:00"}]
                 """);
+            json["remoteAddresses"] = null;
             File.WriteAllText(path, json.ToJsonString());
             var loaded = AppSettings.Load(path, "PC", []);
-            Assert.Equal([nameless[..8], "Phone"], loaded.KnownPeers.Select(k => k.Name));
+            Assert.Equal([nameless[..8], "Phone"], loaded.KnownPeers.Select(k => k.Name));   // the latest of the two
             Assert.Equal("192.168.1.66:37660", loaded.KnownPeers[1].Address);
+            Assert.Empty(loaded.RemoteAddresses);
             loaded.RememberPeer(good, "Phone", DateTimeOffset.UtcNow);   // nothing left to trip over
             Assert.Equal(2, AppSettings.Load(path, "PC", []).KnownPeers.Count);   // and saved so
         }

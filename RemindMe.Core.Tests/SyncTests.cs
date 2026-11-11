@@ -331,10 +331,12 @@ public sealed class SyncTests : IDisposable
         var bSaw = new List<string?>();
         eb.PeerSeen += (_, _, address) => { lock (bSaw) bSaw.Add(address); };
         eb.Start();
-        await WaitFor(() => { lock (aSaw) lock (bSaw) return aSaw.Count > 0 && bSaw.Count > 0; }, "both in sync");
-        // A was dialled from an ephemeral port; B's hello gave its listener's.
-        lock (aSaw) Assert.Equal(Addr(eb), aSaw[0]);
+        // B dialled A: where A answered. A was dialled from an ephemeral port: it probes B's
+        // address with the port B's hello gave, and remembers it once B proves the key there.
+        await WaitFor(() => { lock (bSaw) return bSaw.Count > 0; }, "B in sync with A");
         lock (bSaw) Assert.Equal(Addr(ea), bSaw[0]);
+        await WaitFor(() => { lock (aSaw) return aSaw.Contains(Addr(eb)); }, "A remembering B's listener");
+        lock (aSaw) Assert.Null(aSaw[0]);   // the inbound session's own: nothing until proved
     }
 
     [Fact]
@@ -424,38 +426,47 @@ public sealed class SyncTests : IDisposable
     }
 
     [Fact]
-    public async Task AnInboundConnectionDoesNotReplaceAKnownAddress()
+    public async Task AnInboundSourceThatLeadsElsewhereIsNotRemembered()
     {
-        // Its source may be a NAT's (a router hairpinning, a guest network); where the device
-        // was dialled and answered is what counts. (The higher ID, A doesn't dial the known
-        // address within the test, so nothing says it is bad.)
-        var (b, a) = OrderedPair();
-        var (ea, _) = Node(a, Remembering(Known(b, "127.0.0.1:1")) with { HigherIdFallback = TimeSpan.FromMinutes(5) });
+        // As behind a NAT: B listens on 127.0.0.2, but its connection to A comes from
+        // 127.0.0.1, where a stranger listens on B's port. A's probe of that source reaches the
+        // stranger, so nothing is remembered for B, and B's session is undisturbed.
+        var a = NewIdentity("A");
+        var b = NewIdentity("B", a.GroupId, a.GroupKeyBase64);
+        var (ea, _) = Node(a);
         var aSaw = new List<string?>();
         ea.PeerSeen += (_, _, address) => { lock (aSaw) aSaw.Add(address); };
-        var (eb, _) = Node(b, Addr(ea));   // B dials A
-        await WaitFor(() => { lock (aSaw) return aSaw.Count > 0; }, "A in sync with B");
-        lock (aSaw) Assert.All(aSaw, Assert.Null);   // null: keep the one remembered
+        var logB = new List<string>();
+        var (eb, _) = Node(b, Options(0, TimeSpan.FromMilliseconds(200), IPAddress.Parse("127.0.0.2"), Addr(ea)), logB);
+        var logC = new List<string>();
+        var (ec, _) = Node(NewIdentity("Stranger"), Options(0, TimeSpan.FromMilliseconds(200), IPAddress.Loopback) with { Port = eb.ListenPort }, logC);
+        await WaitFor(() => Logged(logC, "Connected to A"), "A probing B's source, reaching the stranger");
+        await Task.Delay(500);
+        lock (aSaw) Assert.All(aSaw, Assert.Null);
+        Assert.Equal(1, CountLogged(logB, "In sync with A"));
+        Assert.Equal(0, CountLogged(logB, "Disconnected from A"));
     }
 
     [Fact]
-    public async Task AnInboundConnectionReplacesAnAddressThatDoesNotAnswer()
+    public async Task ADeviceThatComesInFromANewAddressIsRememberedThere()
     {
-        // The device got a new address: the old one refuses the lower's redials, and the
-        // device's own connection, from its new address, is what to dial from now on.
+        // B's remembered address is dead (it moved); B dials A from where it is now. A probes
+        // that address, B proves the key there, and it is remembered, without disturbing the
+        // session B made (the probe never sends a ready of its own).
         var (a, b) = OrderedPair();
-        var logA = new List<string>();
-        var (ea, _) = Node(a, Remembering(Known(b, "127.0.0.1:1")), logA);
+        var (ea, _) = Node(a, Remembering(Known(b, "127.0.0.1:1")));
         var aSaw = new List<string?>();
         ea.PeerSeen += (_, _, address) => { lock (aSaw) aSaw.Add(address); };
-        await WaitFor(() => Logged(logA, "Could not connect to 127.0.0.1:1"), "A's redial refused");
-        var (eb, _) = Node(b, Addr(ea));   // B dials A
-        await WaitFor(() => { lock (aSaw) return aSaw.Count > 0; }, "A in sync with B");
-        lock (aSaw) Assert.Equal(Addr(eb), aSaw[0]);
+        var logB = new List<string>();
+        var (eb, _) = Node(b, Options(0, TimeSpan.FromMilliseconds(200), IPAddress.Loopback, Addr(ea)), logB);
+        await WaitFor(() => { lock (aSaw) return aSaw.Contains(Addr(eb)); }, "A remembering B where it is now");
+        await Task.Delay(500);
+        Assert.Equal(1, CountLogged(logB, "In sync with Lower"));
+        Assert.Equal(0, CountLogged(logB, "Disconnected from Lower"));
     }
 
     [Fact]
-    public async Task AnInboundConnectionReplacesAnAddressThatAnswersAsAnotherDevice()
+    public async Task ADeviceWhoseOldAddressAnswersAsAnotherIsRememberedWhereItIsNow()
     {
         var (a, b) = OrderedPair();
         var logA = new List<string>();
@@ -465,8 +476,7 @@ public sealed class SyncTests : IDisposable
         ea.PeerSeen += (_, _, address) => { lock (aSaw) aSaw.Add(address); };
         await WaitFor(() => Logged(logA, "Higher's last address"), "A finding B's address taken");
         var (eb, _) = Node(b, Addr(ea));   // B dials A, from where it is now
-        await WaitFor(() => { lock (aSaw) return aSaw.Count > 0; }, "A in sync with B");
-        lock (aSaw) Assert.Equal(Addr(eb), aSaw[0]);
+        await WaitFor(() => { lock (aSaw) return aSaw.Contains(Addr(eb)); }, "A remembering B where it is now");
     }
 
     [Fact]
@@ -486,12 +496,12 @@ public sealed class SyncTests : IDisposable
                 try { c = await listener.AcceptTcpClientAsync(); }
                 catch (Exception) { return; }
                 Interlocked.Increment(ref answered);
-                var s = c.GetStream();
-                await Protocol.WriteFrameAsync(s, Protocol.Serialize(new SyncMessage
-                {
-                    Type = MessageTypes.Hello, App = Protocol.App, Proto = Protocol.Version + 1, Node = b.NodeId, Name = "Higher",
-                    Group = b.GroupId, Nonce = Convert.ToBase64String(RandomNumberGenerator.GetBytes(16)), Port = 1,
-                }), default);
+                using (c)
+                    await Protocol.WriteFrameAsync(c.GetStream(), Protocol.Serialize(new SyncMessage
+                    {
+                        Type = MessageTypes.Hello, App = Protocol.App, Proto = Protocol.Version + 1, Node = b.NodeId, Name = "Higher",
+                        Group = b.GroupId, Nonce = Convert.ToBase64String(RandomNumberGenerator.GetBytes(16)), Port = 1,
+                    }), default);
             }
         });
         var logA = new List<string>();

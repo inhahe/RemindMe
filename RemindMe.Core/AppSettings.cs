@@ -6,7 +6,13 @@ namespace RemindMe;
 /// <param name="LastSeenUtc">When a sync session with it was last open.</param>
 /// <param name="Address">Its listener's address on the LAN when last in sync ("ip:port"),
 /// which the sync engine dials to reach it again; null if never seen on the LAN.</param>
-public sealed record KnownPeer(string NodeId, string Name, DateTimeOffset LastSeenUtc, string? Address = null);
+public sealed record KnownPeer(string NodeId, string Name, DateTimeOffset LastSeenUtc, string? Address = null)
+{
+    /// <summary>Whether <paramref name="k"/> names a device at all: a damaged or hand-edited
+    /// settings file may hold a null, or one without a valid node ID.</summary>
+    public static bool IsUsable([System.Diagnostics.CodeAnalysis.NotNullWhen(true)] KnownPeer? k) =>
+        k is not null && Sync.Protocol.IsValidNodeId(k.NodeId);
+}
 
 /// <summary>Per-device settings. Not synced: each device keeps its own defaults, and
 /// its own sync identity.</summary>
@@ -102,12 +108,17 @@ public sealed class AppSettings
             dirty = true;
         }
         if (string.IsNullOrEmpty(s.GroupId) || string.IsNullOrEmpty(s.GroupKey)) { s.NewGroup(); dirty = true; }
-        // A damaged or hand-edited file may hold remembered devices nothing can use (a null,
-        // one without a node ID): dropped here, once, for every reader.
+        // A damaged or hand-edited file may hold lists nothing can use: a null list, a null
+        // entry, a remembered device without a node ID or twice over (only the latest counts:
+        // the pairing commitment hashes how many there are). Mended here, once, for every reader.
         var peers = s.KnownPeers ?? [];
-        var usable = peers.Where(k => k is not null && Sync.Protocol.IsValidNodeId(k.NodeId))
-            .Select(k => k.Name is null ? k with { Name = k.NodeId[..8] } : k).ToList();
+        var usable = peers.Where(KnownPeer.IsUsable)
+            .Select(k => k.Name is null ? k with { Name = k.NodeId[..8] } : k)
+            .GroupBy(k => k.NodeId).Select(g => g.MaxBy(k => k.LastSeenUtc)!).ToList();
         if (s.KnownPeers is null || !usable.SequenceEqual(peers)) { s.KnownPeers = usable; dirty = true; }
+        var remotes = s.RemoteAddresses ?? [];
+        var usableRemotes = remotes.Where(a => !string.IsNullOrWhiteSpace(a)).ToList();
+        if (s.RemoteAddresses is null || usableRemotes.Count != remotes.Count) { s.RemoteAddresses = usableRemotes; dirty = true; }
         if (dirty) s.Save(path, log);
         return s;
     }

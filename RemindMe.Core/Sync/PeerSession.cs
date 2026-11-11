@@ -72,6 +72,10 @@ internal sealed class PeerSession : IDisposable
     /// <summary>Dialled at the address <see cref="ExpectedNode"/> was last in sync from (not one
     /// it announced): a wrong answer means that address is stale.</summary>
     public bool IsRedial { get; init; }
+    /// <summary>Dialled only to prove that <see cref="ExpectedNode"/> answers at this address
+    /// (SyncEngine.DialBack): never installed, and it sends no ready of its own, so the device
+    /// never takes it for a session.</summary>
+    public bool IsProbe { get; init; }
     public DateTimeOffset Opened { get; } = DateTimeOffset.UtcNow;
 
     // Filled in by the peer's hello.

@@ -20,6 +20,74 @@ public abstract class Screen : AppCompatActivity
 
     protected T Find<[System.Diagnostics.CodeAnalysis.DynamicallyAccessedMembers(Ui.ViewCtors)] T>(int id) where T : View =>
         FindViewById<T>(id)!;
+
+    // ---- Linking (D3) -------------------------------------------------------------------
+
+    /// <summary>Whether this screen asks another device's request to link while in front, as
+    /// every screen does but the alarm's: the question mustn't get in the way of answering
+    /// an alarm. Meanwhile, and while no screen is in front, a notification stands for it.</summary>
+    protected virtual bool AsksToLink => true;
+
+    private AlertDialog? _linkDialog;
+    /// <summary>The question <see cref="_linkDialog"/> asks.</summary>
+    private RemindMe.Sync.PairPrompt? _asking;
+
+    protected override void OnResume()
+    {
+        base.OnResume();
+        if (!AsksToLink) return;
+        AppState.PairRequested += AskToLink;
+        AppState.PromptEnded += OnPromptEnded;
+        if (AppState.PendingPrompt is { } p) AskToLink(p);
+    }
+
+    protected override void OnPause()
+    {
+        if (AsksToLink)
+        {
+            AppState.PairRequested -= AskToLink;
+            AppState.PromptEnded -= OnPromptEnded;
+            // The dialog belongs to this window; the question stays until answered, standing
+            // as a notification meanwhile (but not across a rotation, which asks again at once).
+            bool asking = _asking is not null;
+            CloseLinkDialog();
+            if (asking && !IsChangingConfigurations) AppState.PromptHidden();
+        }
+        base.OnPause();
+    }
+
+    private void CloseLinkDialog()
+    {
+        if (_linkDialog is { IsShowing: true } d && !IsDestroyed) d.Dismiss();
+        _linkDialog = null;
+        if (_asking is not null) AppState.PromptOnScreen = false;
+        _asking = null;
+    }
+
+    private void OnPromptEnded(RemindMe.Sync.PairPrompt p)
+    {
+        if (_asking == p) CloseLinkDialog();
+    }
+
+    /// <summary>Asks whether to link; on either device, both users must accept.</summary>
+    private void AskToLink(RemindMe.Sync.PairPrompt p)
+    {
+        if (_asking == p) return;
+        CloseLinkDialog();
+        _asking = p;
+        AppState.PromptOnScreen = true;
+        Notifications.Cancel(this, Notifications.PairId);
+        // Withdrawn (the other device said no or went away): AppState raises PromptEnded.
+        _linkDialog = new AlertDialog.Builder(this)
+            .SetTitle("Link a device?")!
+            .SetMessage($"{PairText.Question(p)}\n\n"
+                + $"Both devices should be showing this code:\n\n{p.Code[..3]} {p.Code[3..]}\n\n"
+                + "Accept only if the codes match.")!
+            .SetPositiveButton("Link", (_, _) => AppState.AnswerPrompt(p, yes: true))!
+            .SetNegativeButton("Don't link", (_, _) => AppState.AnswerPrompt(p, yes: false))!
+            .SetCancelable(false)!
+            .Show()!;
+    }
 }
 
 /// <summary>Small helpers the screens share.</summary>

@@ -793,11 +793,15 @@ it runs on Android 10 (API 29) and up. The root namespace is
   `Provisional`: nothing is read or written, and sync stays off, until
   `LoadOnceUnlocked`, which the unlock broadcast (a receiver registered at run
   time), the boot-completed broadcast and the first screen opened each call.
-- **Pairing questions** (`AppState.PendingPrompt`, a queue): the Devices screen
-  asks the first while it is in front, and a notification stands for it
-  otherwise, including after the screen goes to the background unanswered. An
-  answer or a withdrawal removes the question and its notification, and brings
-  up the next.
+- **Pairing questions** (`AppState.PendingPrompt`, a queue): whichever screen of
+  the app is in front asks the first (`Screen`, their base class, on resuming
+  and as one arrives), and a notification stands for it otherwise, including
+  after the screen goes to the background unanswered. So a request that arrives
+  with the screen off, which then gets only the notification (Samsung shows it
+  as edge lighting, not a pop-up), is asked as soon as the app is back in front.
+  The alarm screen doesn't ask (`AsksToLink`): the question mustn't get in the
+  way of answering an alarm. An answer or a withdrawal removes the question and
+  its notification, and brings up the next.
 - **Startup settling** holds only alarms genuinely missed, those due more than a
   minute before the process started (`AlarmEngine.MissedWhileNotRunning`). On
   Android the alarm usually starts the process itself, a moment after it is due,

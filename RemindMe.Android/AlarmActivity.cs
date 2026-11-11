@@ -102,6 +102,9 @@ public sealed class AlarmActivity : Screen
         Refresh();
     }
 
+    /// <summary>A request to link waits in its notification: it mustn't get in the way here.</summary>
+    protected override bool AsksToLink => false;
+
     protected override void OnResume()
     {
         base.OnResume();

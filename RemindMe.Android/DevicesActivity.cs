@@ -4,7 +4,6 @@ using Android.Views;
 using Android.Widget;
 using AndroidX.AppCompat.App;
 using RemindMe.Sync;
-using AlertDialog = AndroidX.AppCompat.App.AlertDialog;
 
 namespace RemindMe.Droid;
 
@@ -37,9 +36,6 @@ public sealed class DevicesActivity : Screen
         base.OnResume();
         AppState.SyncChanged += Refresh;
         AppState.PairProgressed += OnPairProgress;
-        AppState.PairRequested += Ask;
-        AppState.PromptEnded += OnPromptEnded;
-        if (AppState.PendingPrompt is { } p) Ask(p);
         Tick();
     }
 
@@ -47,32 +43,8 @@ public sealed class DevicesActivity : Screen
     {
         AppState.SyncChanged -= Refresh;
         AppState.PairProgressed -= OnPairProgress;
-        AppState.PairRequested -= Ask;
-        AppState.PromptEnded -= OnPromptEnded;
         _handler.RemoveCallbacksAndMessages(null);
-        // The dialog belongs to this window; the question stays until answered, standing as
-        // a notification meanwhile (but not across a rotation, which asks again at once).
-        bool asking = _asking is not null;
-        CloseDialog();
-        if (asking && !IsChangingConfigurations) AppState.PromptHidden();
         base.OnPause();
-    }
-
-    private AlertDialog? _dialog;
-    /// <summary>The question <see cref="_dialog"/> asks.</summary>
-    private PairPrompt? _asking;
-
-    private void CloseDialog()
-    {
-        if (_dialog is { IsShowing: true } d && !IsDestroyed) d.Dismiss();
-        _dialog = null;
-        if (_asking is not null) AppState.PromptOnScreen = false;
-        _asking = null;
-    }
-
-    private void OnPromptEnded(PairPrompt p)
-    {
-        if (_asking == p) CloseDialog();
     }
 
     private void Tick()
@@ -118,26 +90,6 @@ public sealed class DevicesActivity : Screen
     }
 
     private void OnPairProgress(PairProgress p) => Find<TextView>(Resource.Id.pair_text).Text = PairText.Progress(p);
-
-    /// <summary>Asks whether to link (D3); on either device, both users must accept.</summary>
-    private void Ask(PairPrompt p)
-    {
-        if (_asking == p) return;
-        CloseDialog();
-        _asking = p;
-        AppState.PromptOnScreen = true;
-        Notifications.Cancel(this, Notifications.PairId);
-        // Withdrawn (the other device said no or went away): AppState raises PromptEnded.
-        _dialog = new AlertDialog.Builder(this)
-            .SetTitle("Link a device?")!
-            .SetMessage($"{PairText.Question(p)}\n\n"
-                + $"Both devices should be showing this code:\n\n{p.Code[..3]} {p.Code[3..]}\n\n"
-                + "Accept only if the codes match.")!
-            .SetPositiveButton("Link", (_, _) => AppState.AnswerPrompt(p, yes: true))!
-            .SetNegativeButton("Don't link", (_, _) => AppState.AnswerPrompt(p, yes: false))!
-            .SetCancelable(false)!
-            .Show()!;
-    }
 
     private void Apply()
     {

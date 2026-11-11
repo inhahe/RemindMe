@@ -163,8 +163,8 @@ public static class Notifications
         return b.Build()!;
     }
 
-    /// <summary>A pairing request while no screen is open to ask: tapping it opens the
-    /// Devices screen, which asks.</summary>
+    /// <summary>A pairing request while no screen of the app is in front to ask (or only the
+    /// alarm's): tapping it opens the Devices screen, which asks.</summary>
     public static void ShowPairRequest(Context context, PairPrompt p)
     {
         var open = PendingIntent.GetActivity(context, PairId, new Intent(context, typeof(DevicesActivity)),

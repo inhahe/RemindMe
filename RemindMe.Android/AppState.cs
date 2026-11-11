@@ -267,15 +267,16 @@ public static class AppState
 
     private static readonly List<PairPrompt> Prompts = [];
 
-    /// <summary>The pairing question to answer next, if any. The Devices screen asks it while
-    /// in front; otherwise a notification stands for it until it is answered or withdrawn.</summary>
+    /// <summary>The pairing question to answer next, if any. The app's screen in front asks it
+    /// (any but the alarm's: <see cref="Screen.AsksToLink"/>); otherwise a notification stands
+    /// for it until it is answered or withdrawn.</summary>
     public static PairPrompt? PendingPrompt => Prompts.Count > 0 ? Prompts[0] : null;
 
-    /// <summary>Set by the Devices screen while its dialog asks <see cref="PendingPrompt"/>:
-    /// then no notification is needed.</summary>
+    /// <summary>Set by a screen while its dialog asks <see cref="PendingPrompt"/>: then no
+    /// notification is needed.</summary>
     public static bool PromptOnScreen { get; set; }
 
-    /// <summary>A question has become <see cref="PendingPrompt"/>: a Devices screen in front asks it.</summary>
+    /// <summary>A question has become <see cref="PendingPrompt"/>: the screen in front asks it.</summary>
     public static event Action<PairPrompt>? PairRequested;
     /// <summary>A question was answered or withdrawn: a screen asking it closes its dialog.</summary>
     public static event Action<PairPrompt>? PromptEnded;
@@ -305,15 +306,15 @@ public static class AppState
         if (PendingPrompt is { } next) ShowPrompt(next);
     }
 
-    /// <summary>The user answered <paramref name="p"/>, on the Devices screen.</summary>
+    /// <summary>The user answered <paramref name="p"/>, on a screen's dialog.</summary>
     public static void AnswerPrompt(PairPrompt p, bool yes)
     {
         EndPrompt(p);
         _ = yes ? p.AcceptAsync() : p.RejectAsync();
     }
 
-    /// <summary>The Devices screen stopped asking the question unanswered (it went to the
-    /// background): the notification stands for it again.</summary>
+    /// <summary>A screen stopped asking the question unanswered (it went to the background):
+    /// the notification stands for it again.</summary>
     public static void PromptHidden()
     {
         PromptOnScreen = false;

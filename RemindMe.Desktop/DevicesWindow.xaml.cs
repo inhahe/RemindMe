@@ -77,7 +77,7 @@ public partial class DevicesWindow : Window
         var live = AppHost.Sync?.Peers() ?? [];
         var shown = live.Select(p => (p.NodeId, p.Name, Status: RemindMe.PairText.DeviceStatus(p), Address: p.Address ?? "", CanLink: !p.Linked)).ToList();
         foreach (var k in AppHost.Settings.KnownPeers.Where(k => shown.All(r => r.NodeId != k.NodeId)))
-            shown.Add((k.NodeId, k.Name, RemindMe.PairText.LastInSync(k, now, AppHost.Clock.Zone), "", false));
+            shown.Add((k.NodeId, k.Name, RemindMe.PairText.LastInSync(k, now, AppHost.Clock.Zone), k.Address ?? "", false));
 
         Rows.Update(DeviceList, _rows, shown, d => d.NodeId, r => r.NodeId, d => new DeviceRow(d.NodeId),
             (row, d) => row.Show(d.Name, d.Status, d.Address, d.CanLink));

@@ -72,7 +72,7 @@ public sealed class DevicesActivity : Screen
         foreach (var p in live)
             AddRow(list, p.Name, PairText.DeviceStatus(p), p.Linked ? null : p.NodeId);
         foreach (var k in AppState.Settings.KnownPeers.Where(k => live.All(p => p.NodeId != k.NodeId)))
-            AddRow(list, k.Name, PairText.LastInSync(k, now, AppState.Clock.Zone), null);
+            AddRow(list, k.Name, PairText.LastInSync(k, now, AppState.Clock.Zone) + (k.Address is { } at ? $" · {at}" : ""), null);
         if (list.ChildCount == 0)
             list.AddView(new TextView(this) { Text = AppState.Sync is null ? "Sync is off." : "No other devices found yet." });
     }

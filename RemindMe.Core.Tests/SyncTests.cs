@@ -43,8 +43,15 @@ public sealed class SyncTests : IDisposable
         EnableDiscovery = false,
         RemoteAddresses = remotes,
         ReconnectDelay = reconnectDelay,
-        LinkedDeviceCount = () => linkedDevices,
+        KnownPeers = LinkedTo(linkedDevices),
     };
+
+    /// <summary><paramref name="n"/> made-up linked devices, with no address (none is redialled).</summary>
+    private static Func<IReadOnlyList<KnownPeer>> LinkedTo(int n)
+    {
+        var peers = Enumerable.Range(0, n).Select(i => new KnownPeer(Guid.NewGuid().ToString("N"), $"Linked {i}", DateTimeOffset.UtcNow)).ToList();
+        return () => peers;
+    }
 
     private static string Addr(SyncEngine e) => $"127.0.0.1:{e.ListenPort}";
 
@@ -351,18 +358,38 @@ public sealed class SyncTests : IDisposable
         await WaitFor(() => sh.Get(t.Id) is not null, "the higher dialling the lower after the fallback, and syncing");
     }
 
+    private static bool Logged(List<string> log, string start) { lock (log) return log.Any(l => l.StartsWith(start)); }
+    private static int CountLogged(List<string> log, string start) { lock (log) return log.Count(l => l.StartsWith(start)); }
+
     [Fact]
-    public async Task ARedialAnsweredByAnotherDeviceHangsUpAndIsNotRepeated()
+    public async Task ARedialAnsweredByAStrangerHangsUpAndIsNotRepeated()
     {
-        // The remembered device's address now belongs to another device, of the same group even.
+        // The remembered device's address now belongs to a device of another group.
+        var (lower, higher) = OrderedPair();
+        var logC = new List<string>();
+        var logL = new List<string>();
+        var (ec, _) = Node(NewIdentity("Stranger"), Options(0, TimeSpan.FromMilliseconds(200), IPAddress.Loopback), logC);
+        var (el, _) = Node(lower, Remembering(Known(higher, Addr(ec))), logL);
+        await WaitFor(() => Logged(logC, "Connected to Lower"), "the lower dialling the stranger");
+        await Task.Delay(1500);   // several of the 200 ms backoff's dials, were it still dialling
+        Assert.Equal(1, CountLogged(logC, "Connected to Lower"));
+        Assert.DoesNotContain(el.Peers(), p => p.NodeId == ec.Identity.NodeId);
+        Assert.Equal(1, CountLogged(logL, "Higher's last address, 127.0.0.1:"));   // and why, once
+    }
+
+    [Fact]
+    public async Task ARedialAnsweredByAnotherDeviceOfTheGroupKeepsThatConnection()
+    {
+        // The remembered device's address now belongs to another device of the same group: a
+        // connection worth keeping (it may have no other way to be made), but not redialled.
         var (lower, higher) = OrderedPair();
         var logC = new List<string>();
         var (ec, _) = Node(NewIdentity("Other", lower.GroupId, lower.GroupKeyBase64), Options(0, TimeSpan.FromMilliseconds(200), IPAddress.Loopback), logC);
         var (el, _) = Node(lower, Remembering(Known(higher, Addr(ec))));
-        await WaitFor(() => { lock (logC) return logC.Any(l => l.StartsWith("Disconnected from Lower")); }, "the lower hanging up on the other device");
+        await WaitFor(() => el.Peers().Any(p => p.NodeId == ec.Identity.NodeId && p.Connected && p.Linked), "the lower in sync with the other device");
         await Task.Delay(1500);   // several of the 200 ms backoff's dials, were it still dialling
-        lock (logC) Assert.Single(logC, l => l.StartsWith("Disconnected from Lower"));
-        Assert.DoesNotContain(el.Peers(), p => p.NodeId == ec.Identity.NodeId);
+        Assert.Equal(1, CountLogged(logC, "In sync with Lower"));
+        Assert.Equal(0, CountLogged(logC, "Disconnected from Lower"));
     }
 
     [Fact]
@@ -370,13 +397,94 @@ public sealed class SyncTests : IDisposable
     {
         var (lower, higher) = OrderedPair();
         var logH = new List<string>();
+        var logL = new List<string>();
         var left = higher with { GroupId = Guid.NewGuid().ToString("N"), GroupKeyBase64 = Convert.ToBase64String(RandomNumberGenerator.GetBytes(32)) };
         var (eh, _) = Node(left, Options(0, TimeSpan.FromMilliseconds(200), IPAddress.Loopback), logH);
-        var (el, _) = Node(lower, Remembering(Known(higher, Addr(eh))));
-        await WaitFor(() => { lock (logH) return logH.Any(l => l.StartsWith("Connected to Lower")); }, "the lower dialling the device that left");
+        var (el, _) = Node(lower, Remembering(Known(higher, Addr(eh))), logL);
+        await WaitFor(() => Logged(logH, "Connected to Lower"), "the lower dialling the device that left");
         await Task.Delay(1500);   // several of the 200 ms backoff's dials, were it still dialling
-        lock (logH) Assert.Single(logH, l => l.StartsWith("Connected to Lower"));
+        Assert.Equal(1, CountLogged(logH, "Connected to Lower"));
         Assert.DoesNotContain(el.Peers(), p => p.NodeId == higher.NodeId && p.Connected);
+        Assert.Equal(1, CountLogged(logL, "Higher answered at"));
+    }
+
+    [Fact]
+    public async Task ARedialThatReachesThisDeviceItselfIsNotRepeated()
+    {
+        // The remembered device's address is now this device's own (a DHCP lease moved).
+        var (lower, higher) = OrderedPair();
+        var logL = new List<string>();
+        IReadOnlyList<KnownPeer> known = [];
+        var (el, _) = Node(lower, Remembering() with { KnownPeers = () => known }, logL);
+        known = [Known(higher, Addr(el))];
+        await WaitFor(() => Logged(logL, "Higher's last address"), "the lower giving up on its own address");
+        await Task.Delay(1500);
+        Assert.Equal(1, CountLogged(logL, "Higher's last address"));
+        Assert.Contains("now answers as this device", logL.First(l => l.StartsWith("Higher's last address")));
+    }
+
+    [Fact]
+    public async Task AnInboundConnectionDoesNotReplaceAKnownAddress()
+    {
+        // Its source may be a NAT's (a router hairpinning, a guest network); where the device
+        // was dialled and answered is what counts.
+        var a = NewIdentity("A");
+        var b = NewIdentity("B", a.GroupId, a.GroupKeyBase64);
+        var (ea, _) = Node(a, Remembering(Known(b, "127.0.0.1:1")));
+        var aSaw = new List<string?>();
+        ea.PeerSeen += (_, _, address) => { lock (aSaw) aSaw.Add(address); };
+        var (eb, _) = Node(b, Addr(ea));   // B dials A
+        await WaitFor(() => { lock (aSaw) return aSaw.Count > 0; }, "A in sync with B");
+        lock (aSaw) Assert.All(aSaw, Assert.Null);   // null: keep the one remembered
+    }
+
+    [Fact]
+    public async Task MalformedRememberedDevicesDoNotStopRedialling()
+    {
+        // A damaged settings file: a null entry, and one without a node ID, before a good one.
+        var (lower, higher) = OrderedPair();
+        var (eh, sh) = Node(higher, Remembering());
+        var (_, sl) = Node(lower, Remembering(null!, new KnownPeer(null!, "x", DateTimeOffset.UtcNow, "127.0.0.1:1"), Known(higher, Addr(eh))));
+        var t = Add(sh, "from the higher");
+        await WaitFor(() => sl.Get(t.Id) is not null, "the lower dialling the higher anyway");
+    }
+
+    [Fact]
+    public async Task HousekeepingGoesOnAfterAnError()
+    {
+        var (lower, higher) = OrderedPair();
+        var (eh, sh) = Node(higher, Remembering());
+        int calls = 0;
+        var logL = new List<string>();
+        var good = Known(higher, Addr(eh));
+        var (_, sl) = Node(lower, Remembering() with
+        {
+            KnownPeers = () => Interlocked.Increment(ref calls) == 1 ? throw new InvalidOperationException("boom") : [good],
+        }, logL);
+        var t = Add(sh, "from the higher");
+        await WaitFor(() => sl.Get(t.Id) is not null, "the lower dialling the higher after the failed tick");
+        Assert.Equal(1, CountLogged(logL, "Housekeeping failed"));
+    }
+
+    [Theory]
+    [InlineData("192.168.1.66", "192.168.1.184", 24, true)]
+    [InlineData("192.168.2.5", "192.168.1.184", 24, false)]
+    [InlineData("10.0.2.2", "10.0.2.15", 24, true)]        // the Android emulator's view of its host
+    [InlineData("172.17.5.4", "172.16.0.1", 12, true)]
+    [InlineData("172.17.5.4", "172.16.0.1", 16, false)]
+    [InlineData("::ffff:192.168.1.66", "192.168.1.184", 24, true)]
+    [InlineData("fe80::1", "fe80::abcd", 64, true)]
+    [InlineData("fd00::1", "fe80::abcd", 64, false)]
+    [InlineData("192.168.1.66", "192.168.1.184", 0, false)]  // a prefix of 0 is no network
+    [InlineData("127.0.0.1", "192.168.1.184", 24, true)]     // this machine
+    public void OnlyAddressesOnALocalNetworkAreDialled(string ip, string mine, int prefix, bool on) =>
+        Assert.Equal(on, Protocol.IsOnSubnet(IPAddress.Parse(ip), [(IPAddress.Parse(mine), prefix)]));
+
+    [Fact]
+    public void NoNetworkReachesNothingButThisMachine()
+    {
+        Assert.False(Protocol.IsOnSubnet(IPAddress.Parse("192.168.1.66"), []));
+        Assert.True(Protocol.IsOnSubnet(IPAddress.Loopback, []));
     }
 
     [Fact]
@@ -479,7 +587,7 @@ public sealed class SyncTests : IDisposable
         var ea = new SyncEngine(store, a, new SyncOptions
         {
             Port = 0, BindAddress = IPAddress.Loopback, EnableDiscovery = false,
-            IsLinkedPeer = node => node == b.NodeId,
+            KnownPeers = () => [new KnownPeer(b.NodeId, "B", DateTimeOffset.UtcNow)],
         });
         ea.Start();
         _engines.Add(ea);

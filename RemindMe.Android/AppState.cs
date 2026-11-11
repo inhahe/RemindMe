@@ -231,8 +231,6 @@ public static class AppState
             AcceptExternalConnections = s.AcceptExternalConnections,
             RemoteAddresses = s.RemoteAddresses.ToList(),
             AcquireMulticastLock = AcquireMulticastLock,
-            LinkedDeviceCount = () => Settings.KnownPeers.Count,
-            IsLinkedPeer = node => Settings.IsKnownPeer(node),
             KnownPeers = () => Settings.KnownPeers,
         }, Log);
         // Missed alarms wait for the first exchange; ring them as soon as it is done.

@@ -55,8 +55,6 @@ public static class AppHost
             Port = s.Port,
             AcceptExternalConnections = s.AcceptExternalConnections,
             RemoteAddresses = s.RemoteAddresses.ToList(),
-            LinkedDeviceCount = () => Settings.KnownPeers.Count,
-            IsLinkedPeer = node => Settings.IsKnownPeer(node),
             KnownPeers = () => Settings.KnownPeers,
         }, Log);
         engine.IdentityChanged += id => OnUi(() =>

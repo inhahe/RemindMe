@@ -1,5 +1,6 @@
 using System.Buffers.Binary;
 using System.Net;
+using System.Net.NetworkInformation;
 using System.Net.Sockets;
 using System.Security.Cryptography;
 using System.Text;
@@ -163,6 +164,60 @@ public static class Protocol
         var b = ip.GetAddressBytes();
         return b[0] == 10 || (b[0] == 172 && b[1] >= 16 && b[1] <= 31) || (b[0] == 192 && b[1] == 168)
             || (b[0] == 169 && b[1] == 254) || b[0] == 127;
+    }
+
+    /// <summary>The networks this machine is on now: each address of an interface that is up,
+    /// with its prefix length. Empty if they can't be read.</summary>
+    public static List<(IPAddress Address, int PrefixLength)> LocalSubnets()
+    {
+        var result = new List<(IPAddress, int)>();
+        try
+        {
+            foreach (var iface in NetworkInterface.GetAllNetworkInterfaces())
+            {
+                if (iface.OperationalStatus != OperationalStatus.Up) continue;
+                foreach (var uni in iface.GetIPProperties().UnicastAddresses)
+                {
+                    int prefix;
+                    try
+                    {
+                        // The IPv4 mask is what discovery already relies on, on every platform.
+                        prefix = uni.Address.AddressFamily == AddressFamily.InterNetwork
+                            ? uni.IPv4Mask.GetAddressBytes().Sum(b => System.Numerics.BitOperations.PopCount(b))
+                            : uni.PrefixLength;
+                    }
+                    catch (Exception e) when (e is PlatformNotSupportedException or NotImplementedException)
+                    {
+                        prefix = uni.Address.AddressFamily == AddressFamily.InterNetwork ? 24 : 64;
+                    }
+                    result.Add((uni.Address, prefix));
+                }
+            }
+        }
+        catch (NetworkInformationException) { }
+        return result;
+    }
+
+    /// <summary>
+    /// Whether <paramref name="ip"/> can be reached directly from here: it is this machine
+    /// (loopback), or it is on one of <paramref name="subnets"/> (<see cref="LocalSubnets"/>).
+    /// </summary>
+    public static bool IsOnSubnet(IPAddress ip, IEnumerable<(IPAddress Address, int PrefixLength)> subnets)
+    {
+        if (ip.IsIPv4MappedToIPv6) ip = ip.MapToIPv4();
+        if (IPAddress.IsLoopback(ip)) return true;
+        var target = ip.GetAddressBytes();
+        foreach (var (net, prefix) in subnets)
+        {
+            var mine = (net.IsIPv4MappedToIPv6 ? net.MapToIPv4() : net).GetAddressBytes();
+            // A prefix of 0 would take in every address: not a network one is on.
+            if (mine.Length != target.Length || prefix <= 0 || prefix > mine.Length * 8) continue;
+            int whole = prefix / 8, rest = prefix % 8;
+            bool same = mine.AsSpan(0, whole).SequenceEqual(target.AsSpan(0, whole))
+                && (rest == 0 || (mine[whole] >> (8 - rest)) == (target[whole] >> (8 - rest)));
+            if (same) return true;
+        }
+        return false;
     }
 
     /// <summary>Splits "host" or "host:port" (or "[v6]:port").</summary>

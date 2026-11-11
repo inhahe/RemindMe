@@ -395,15 +395,28 @@ separately (see *Simplification opportunities*).
   power saving, some routers), and a dropped connection would otherwise wait for
   an announcement that may never come. Each remembered peer (`KnownPeer.Address`:
   the LAN address it was last in sync from, with the listener port its hello
-  gave; never an address outside the LAN, which keeps the last LAN one) that is
-  neither connected nor heard announcing is dialled there, by the lower ID, and
-  by the higher too once it has been missing for 10 s (the lower one's address
-  for it may be stale); after each dial the next waits `ReconnectDelay` (5 s),
-  doubling up to a minute. A dial made for a known node (`PeerSession.ExpectedNode`,
-  for discovery's dials too) is hung up on if another node answers; and a redial
-  answered by another node, or by the device without the group (it has left),
-  stops redialling that device until it is heard announcing, is in sync again, or
-  the engine restarts.
+  gave) that is neither connected nor heard announcing is dialled there, by the
+  lower ID, and by the higher too once it has been missing for 10 s (the lower
+  one's address for it may be stale: `MayDial`, which discovery uses too); after
+  each dial the next waits `ReconnectDelay` (5 s), doubling up to a minute
+  (`NextDelay`, as remote links). Only an address on a network this device is on
+  now is dialled (`Protocol.IsOnSubnet`): away from home, the home LAN's can't
+  answer.
+  - **Which address is remembered** (`AddressToRemember`): a dialled session's,
+    where the device answered; an inbound one's only when none is known, or the
+    known one went stale, since its source may be a NAT's (a router hairpinning,
+    a guest network). Never one outside the LAN: the last LAN one stays.
+  - **Wrong answers** (`KeepDialledSession`, for any dial made to reach a known
+    node, `PeerSession.ExpectedNode`): another device of the group is kept (it
+    proves the key like any session); any other device, or this device itself
+    (its own old address), is hung up on. A redial answered by another device, by
+    this one, or by the device without the group (it has left) marks that address
+    stale, logged once: it isn't dialled again until the device is heard
+    announcing, is in sync again, or the engine restarts.
+  - The remembered peers are read through `KnownPeers()`, which drops malformed
+    entries (a damaged settings file), and the housekeeping tick survives any
+    exception, logging each distinct one once: nothing else closes idle
+    sessions, ends unanswered pairings or redials.
 - **Hello proves nothing; the first sealed frame does.** That frame is a tiny
   `ready`, and a session is `Authenticated` once its peer's `ready` opens. The
   digest goes out only after that. It can be any size, while frames from a peer
@@ -413,7 +426,7 @@ separately (see *Simplification opportunities*).
   but only one that is unsealed, unauthenticated and not pairing. A session
   claiming the group takes over only when it authenticates, and one that hasn't
   authenticated within 15 s is closed. An inbound session whose hello gives the
-  node ID of a remembered linked device without the group (`IsLinkedPeer`) is
+  node ID of a remembered linked device without the group (`SyncOptions.KnownPeers`) is
   kept apart: it never speaks for that device (it isn't installed, so the device
   isn't shown "not linked"), but it may ask to pair, so a device that left the
   group can link again through the usual codes. Otherwise anyone on the LAN could
@@ -525,10 +538,11 @@ separately (see *Simplification opportunities*).
   (`AppHost` on desktop, `AppState` on Android), on the settings as they are at
   save time. A window that saved the copy it took on opening would silently
   undo a pairing made while it was open. Remembered linked devices
-  (`KnownPeers`, which drive the Devices list, `members`, `IsLinkedPeer`,
-  startup settling and redialling) are updated from `PeerSeen`, with each one's
-  LAN address, and `PeerSeen` fires only for sessions of the current group. So leaving a group, which closes its sessions, doesn't
-  bring its devices straight back.
+  (`KnownPeers`, which drive the Devices list, the engine's count of linked
+  devices for `members`, its check of a hello claiming one, startup settling
+  and redialling) are updated from `PeerSeen`, with each one's LAN address, and
+  `PeerSeen` fires only for sessions of the current group. So leaving a group,
+  which closes its sessions, doesn't bring its devices straight back.
 - **Merge across revisions**: `DoneThroughUtc` takes the maximum only between
   states of the same schedule revision. A newer revision replaces it outright,
   which is the one way a `DoneThrough` left in the future by a wrong clock

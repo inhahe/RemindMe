@@ -50,13 +50,22 @@
     <CustomAction Id="StopRunningApp" Directory="INSTALLFOLDER"
                   ExeCommand="&quot;[INSTALLFOLDER]RemindMe.exe&quot; --exit"
                   Execute="immediate" Return="ignore" Impersonate="yes" />
+    <!-- An upgrade starts it again, in the tray as at sign-in, whether or not the last
+         page's box is ticked (or there is no last page: msiexec /passive or /qn): alarms
+         only ring while it runs, and nothing else would start it before the next sign-in.
+         Immediate, so as the installing user and not elevated, even in an elevated install. -->
+    <CustomAction Id="RestartApp" Directory="INSTALLFOLDER"
+                  ExeCommand="&quot;[INSTALLFOLDER]RemindMe.exe&quot; --minimized"
+                  Execute="immediate" Return="asyncNoWait" Impersonate="yes" />
     <InstallExecuteSequence>
       <Custom Action="StopRunningApp" Before="InstallValidate" Condition="WIX_UPGRADE_DETECTED" />
+      <Custom Action="RestartApp" After="InstallFinalize" Condition="WIX_UPGRADE_DETECTED AND NOT REMOVE" />
     </InstallExecuteSequence>
 
     <!-- "Launch RemindMe now" on the last page: alarms only ring while it runs.
          As the installing user (its settings and autostart are per-user), and without
-         waiting for it. -->
+         waiting for it. After an upgrade RestartApp has started it already: this then
+         brings its window forward. -->
     <CustomAction Id="LaunchApp" Directory="INSTALLFOLDER"
                   ExeCommand="&quot;[INSTALLFOLDER]RemindMe.exe&quot;"
                   Execute="immediate" Return="asyncNoWait" Impersonate="yes" />

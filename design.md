@@ -908,6 +908,11 @@ has an `&`, a command separator to `cmd`.
   - An upgrade first runs the installed exe with `--exit`, which signals the
     running copy (through a named event per data folder, like the existing
     "show" one) and waits until it has exited, so the exe can be replaced.
+    After `InstallFinalize` it starts the new one with `--minimized`
+    (`RestartApp`), whatever the last page's box says and with no UI at all, so
+    an upgrade never leaves the app stopped until the next sign-in. It is an
+    immediate action, so it runs as the installing user, never elevated; with
+    the box ticked too, the second launch only brings the window forward.
 - **`build-apk.ps1`**: the Release APK with that version. It is signed with the
   key the `REMINDME_*` environment variables name (passwords passed as
   `env:NAME`, so they appear on no command line), or this machine's debug key.

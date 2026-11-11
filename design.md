@@ -869,9 +869,11 @@ it runs on Android 10 (API 29) and up. The root namespace is
   have `ShowBadge` off; since a channel's badge setting can't change once it
   exists, they got new IDs (`sync_status`, `ringing_status`), and the old
   channels are deleted at start (`Notifications.StatusChannel`). Unless the user
-  turned an old one off: that one stays in use, so it stays off (Android raises
-  a foreground service's channel that the app makes off, but not one the user
-  did), and off, it shows nothing to badge.
+  changed how an old one shows (off, silent, minimized, or up): that one stays
+  in use, as they set it. The app can't carry such a choice over to a new
+  channel, since Android raises a foreground service's channel that the app
+  makes off or minimized (though not one the user did); and off, the old one
+  shows nothing to badge.
 - `SoundChooser`: Android's ringtone picker (alarms, ringtones, notifications),
   or the document picker for a file, taking a persistable read grant so the file
   still plays after a reboot. Its callback is fixed when it is created, so a

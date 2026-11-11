@@ -241,15 +241,13 @@ is fine for installing by hand.
 ### Releases
 
 The version is in `VERSION` (four numbers, e.g. `0.1.0.0`; the first at most
-255, the others at most 99); raise it for every release. While the first number
-is 0, a release is published as a pre-release. Each script puts its output in
-`release/<version>/`:
+255, the others at most 99); raise it for every release. Each script puts its
+output in `release/<version>/`:
 
 | Script | Builds |
 |---|---|
 | `build-msi.ps1` | `RemindMe-<version>.msi`, the Windows installer; `RemindMe.exe`, the program on its own with .NET included (self-contained); and `RemindMeFD.exe`, the same without .NET (framework-dependent, under 1 MB, needs the .NET 10 Desktop Runtime). Needs the WiX Toolset (`dotnet tool install --global wix`, done for you) with its EULA accepted once (`wix eula accept wix7`). |
 | `build-apk.ps1` | `RemindMe-<version>.apk`. Sign it with your own key by setting `REMINDME_KEYSTORE`, `REMINDME_KEY_ALIAS`, `REMINDME_STORE_PASS` and `REMINDME_KEY_PASS` (the script's header says how to make one); otherwise it uses this machine's debug key, and an APK built elsewhere won't install over it. |
-| `release.bat` (which runs `release.ps1`) | The tests, both of the above, then the GitHub release `v<version>` on [inhahe/RemindMe](https://github.com/inhahe/RemindMe) with all four files attached, using the GitHub CLI (`gh`). It publishes nothing unless this is `main` as GitHub has it (committed and pushed) and `VERSION` is new and above the last release. The notes say which file to take and how to install it, and list the commits since the last release. `release.bat --dry-run` does everything but publish, and shows the notes. |
 
 The installer puts the program in `Program Files\RemindMe`, adds it to the
 Start menu, and lets it through Windows Firewall on private and domain networks,

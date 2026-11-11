@@ -844,9 +844,8 @@ it runs on Android 10 (API 29) and up. The root namespace is
 
 ## Releases (S9)
 
-As in LanLink and the user's other projects, `release.bat` publishes. The work
-is in PowerShell rather than batch: the project folder's name has an `&`, a
-command separator to `cmd`.
+The build scripts are PowerShell rather than batch: the project folder's name
+has an `&`, a command separator to `cmd`.
 
 - **`VERSION`** (two to four numbers) is the single source of the version.
   It becomes the desktop assembly's version, Android's `versionName`, and its
@@ -893,27 +892,6 @@ command separator to `cmd`.
 - **`build-apk.ps1`**: the Release APK with that version. It is signed with the
   key the `REMINDME_*` environment variables name (passwords passed as
   `env:NAME`, so they appear on no command line), or this machine's debug key.
-- **`release.bat`** runs **`release.ps1`**, which publishes to
-  `inhahe/RemindMe`, modelled on the user's Pitchstone `release.bat`.
-  - What is released is `main` as GitHub has it. It refuses another branch,
-    uncommitted changes, an untracked file where the build reads, and a commit
-    GitHub's `main` doesn't have.
-  - It refuses a version already released, or tagged without a release, or not
-    above the highest version among the `v*` tags (whatever order they were
-    made in; a tag that isn't a version is skipped).
-  - Then the tests, `build-msi.ps1` and `build-apk.ps1`. All four files in
-    `release/<version>/` are required.
-  - Then `gh release create --target <commit>`. The notes give what it is, the
-    alpha warning, which Windows file to take (with the exes' measured sizes),
-    how to install, and the commits since the last release. A 0.x version is a
-    pre-release.
-  - `--dry-run` does everything but publish, and shows the notes. The checks
-    a real run stops at are only warnings in it, so a release can be tried
-    before anything is pushed.
-  - `release.bat` runs it in Windows PowerShell 5.1. Under
-    `$ErrorActionPreference = 'Stop'`, that ends the script at the first native
-    command whose redirected stderr has a line, so the git and gh checks that
-    may fail go through `Invoke-Probe`.
 
 ## Simplification opportunities
 

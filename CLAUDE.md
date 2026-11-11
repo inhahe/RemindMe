@@ -12,7 +12,3 @@
 - Build: `dotnet build RemindMe.slnx`. Test: `dotnet test RemindMe.Core.Tests`.
 - The repository is public, `github.com/inhahe/RemindMe`. `todo.txt` stays out
   of it (it is in `.gitignore`), as in the user's other projects.
-- Release with `release.bat` (see `README.md`): it publishes only `main` as
-  GitHub has it, and only a `VERSION` above the last release, so raise
-  `VERSION`, commit and push first. Pushing to `main` is the user's call, as the
-  global rules say; publishing a release was asked for when it was set up.

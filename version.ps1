@@ -1,6 +1,6 @@
 <#
-  Reads the release version from the VERSION file, for build-msi.ps1, build-apk.ps1
-  and release.ps1, which dot-source this file.
+  Reads the release version from the VERSION file, for the scripts that dot-source this
+  file (build-msi.ps1, build-apk.ps1).
 
   A version is two to four numbers, a.b.c.d. Both platforms put limits on the parts:
   Windows Installer allows at most 255.255.65535 (and ignores a fourth part), and the

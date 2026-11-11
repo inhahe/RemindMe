@@ -4,17 +4,12 @@ Open items only; remove an entry when it is fixed.
 
 ## Not yet verified
 
-### LAN discovery between two real machines
-Discovery is LanLink's design, adapted, and the sessions behind it are tested
-(in-process engines over loopback, and two desktop instances plus the Android
-emulator linked by address). But no two machines on one LAN have discovered each
-other yet. That needs the app to listen on the network, which raises a Windows
-Firewall prompt for the debug build (`REMINDME_BIND=127.0.0.1` avoids that in
-tests). **To verify:** run the app on two PCs on one LAN, or a PC and the phone;
-each should list the other in Devices within a few seconds. While there, look at
-the Devices list's rows, which no test has shown since the restyle: they should
-look like the task list's, and a screen reader should name each by its device,
-then its status and address.
+### The Devices list's rows, with a screen reader
+LAN discovery itself is verified between real machines (a PC and a Galaxy S22,
+2026-11-11: each heard the other's announcements and dialled it), and so is
+linking from the list. What no test has shown since the restyle is how a screen
+reader names the rows. **To verify:** with Narrator on, move through the Devices
+list: each row should be named by its device, then its status and address.
 
 ### Waking the computer from sleep (S3)
 Checked only as far as setting the timer: app.log says "Wake timer set for …",

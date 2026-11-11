@@ -13,16 +13,13 @@ public static class Notifications
     /// <summary>Alarms posted when the ringing service couldn't start: this channel carries
     /// the phone's alarm sound itself.</summary>
     public const string FallbackChannel = "alarms_fallback";
-    /// <summary>The ringing service's own notification. It must not alert: Android groups an
-    /// app's alerting notifications, and a grouped alarm's full-screen intent doesn't open
-    /// the alarm screen.</summary>
-    public const string ServiceChannel = "ringing_status";
-    public const string SyncChannel = "sync_status";
+    /// <summary>The ringing service's own notification's channel (see <see cref="CreateChannels"/>).
+    /// It must not alert: Android groups an app's alerting notifications, and a grouped
+    /// alarm's full-screen intent doesn't open the alarm screen.</summary>
+    public static string ServiceChannel { get; private set; } = "ringing_status";
+    /// <summary>The sync service's notification's channel (see <see cref="CreateChannels"/>).</summary>
+    public static string SyncChannel { get; private set; } = "sync_status";
     public const string PairChannel = "pairing";
-    /// <summary>Channels of earlier versions, deleted at start. They put a badge on the app's
-    /// icon for status notifications, which ask nothing of the user; a channel's badge can't
-    /// be turned off once it exists, so their successors have new IDs.</summary>
-    private static readonly string[] OldChannels = ["ringing_service", "sync"];
     public const int SyncId = 2;
     public const int PairId = 3;
 
@@ -48,30 +45,37 @@ public static class Notifications
             new Android.Media.AudioAttributes.Builder().SetUsage(Android.Media.AudioUsageKind.Alarm)!.Build());
         fallback.EnableVibration(true);
         nm.CreateNotificationChannel(fallback);
-        // Status, not news: no badge on the app's icon (the alarms and link requests have one).
-        var service = new NotificationChannel(ServiceChannel, "Alarm in progress", NotificationImportance.Low)
-        {
-            Description = "Shown while an alarm rings, so Android lets the sound keep playing",
-        };
-        service.SetShowBadge(false);
-        nm.CreateNotificationChannel(service);
-        var sync = new NotificationChannel(SyncChannel, "Sync", NotificationImportance.Low)
-        {
-            Description = "Shown while the app keeps your devices in sync",
-        };
-        sync.SetShowBadge(false);
-        nm.CreateNotificationChannel(sync);
-        foreach (var old in OldChannels)
-        {
-            // Android refuses to delete a channel a foreground service's notification is on;
-            // none is at start, when this runs, but a refusal mustn't stop the app.
-            try { nm.DeleteNotificationChannel(old); }
-            catch (Java.Lang.SecurityException e) { AppState.Log($"Could not delete the old notification channel {old}: {e.Message}"); }
-        }
+        ServiceChannel = StatusChannel(nm, "ringing_status", "ringing_service", "Alarm in progress",
+            "Shown while an alarm rings, so Android lets the sound keep playing");
+        SyncChannel = StatusChannel(nm, "sync_status", "sync", "Sync", "Shown while the app keeps your devices in sync");
         nm.CreateNotificationChannel(new NotificationChannel(PairChannel, "Linking devices", NotificationImportance.High)
         {
             Description = "Another device asks to link with this one",
         });
+    }
+
+    /// <summary>
+    /// A status channel: news of nothing, so no badge on the app's icon (the alarms and link
+    /// requests have one). A channel's badge can't be turned off once it exists, so these
+    /// replace earlier versions' channels, which are deleted; unless the user turned the old
+    /// one off. That one stays in use, so it stays off: Android raises a foreground service's
+    /// channel that the app makes off, but not one the user did. Off, it shows nothing to badge.
+    /// </summary>
+    /// <param name="id">The channel's ID.</param>
+    /// <param name="oldId">Its predecessor's, from an earlier version.</param>
+    /// <returns>The ID to post on: <paramref name="id"/>, or <paramref name="oldId"/> while the
+    /// user has that one off.</returns>
+    private static string StatusChannel(NotificationManager nm, string id, string oldId, string name, string description)
+    {
+        if (nm.GetNotificationChannel(oldId) is { Importance: NotificationImportance.None }) return oldId;
+        var channel = new NotificationChannel(id, name, NotificationImportance.Low) { Description = description };
+        channel.SetShowBadge(false);
+        nm.CreateNotificationChannel(channel);
+        // Android refuses to delete a channel a foreground service's notification is on;
+        // none is at start, when this runs, but a refusal mustn't stop the app.
+        try { nm.DeleteNotificationChannel(oldId); }
+        catch (Java.Lang.SecurityException e) { AppState.Log($"Could not delete the old notification channel {oldId}: {e.Message}"); }
+        return id;
     }
 
     /// <summary>A stable notification ID for a task's alarm.</summary>

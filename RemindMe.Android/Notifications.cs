@@ -16,9 +16,13 @@ public static class Notifications
     /// <summary>The ringing service's own notification. It must not alert: Android groups an
     /// app's alerting notifications, and a grouped alarm's full-screen intent doesn't open
     /// the alarm screen.</summary>
-    public const string ServiceChannel = "ringing_service";
-    public const string SyncChannel = "sync";
+    public const string ServiceChannel = "ringing_status";
+    public const string SyncChannel = "sync_status";
     public const string PairChannel = "pairing";
+    /// <summary>Channels of earlier versions, deleted at start. They put a badge on the app's
+    /// icon for status notifications, which ask nothing of the user; a channel's badge can't
+    /// be turned off once it exists, so their successors have new IDs.</summary>
+    private static readonly string[] OldChannels = ["ringing_service", "sync"];
     public const int SyncId = 2;
     public const int PairId = 3;
 
@@ -44,14 +48,26 @@ public static class Notifications
             new Android.Media.AudioAttributes.Builder().SetUsage(Android.Media.AudioUsageKind.Alarm)!.Build());
         fallback.EnableVibration(true);
         nm.CreateNotificationChannel(fallback);
-        nm.CreateNotificationChannel(new NotificationChannel(ServiceChannel, "Alarm in progress", NotificationImportance.Low)
+        // Status, not news: no badge on the app's icon (the alarms and link requests have one).
+        var service = new NotificationChannel(ServiceChannel, "Alarm in progress", NotificationImportance.Low)
         {
             Description = "Shown while an alarm rings, so Android lets the sound keep playing",
-        });
-        nm.CreateNotificationChannel(new NotificationChannel(SyncChannel, "Sync", NotificationImportance.Low)
+        };
+        service.SetShowBadge(false);
+        nm.CreateNotificationChannel(service);
+        var sync = new NotificationChannel(SyncChannel, "Sync", NotificationImportance.Low)
         {
             Description = "Shown while the app keeps your devices in sync",
-        });
+        };
+        sync.SetShowBadge(false);
+        nm.CreateNotificationChannel(sync);
+        foreach (var old in OldChannels)
+        {
+            // Android refuses to delete a channel a foreground service's notification is on;
+            // none is at start, when this runs, but a refusal mustn't stop the app.
+            try { nm.DeleteNotificationChannel(old); }
+            catch (Java.Lang.SecurityException e) { AppState.Log($"Could not delete the old notification channel {old}: {e.Message}"); }
+        }
         nm.CreateNotificationChannel(new NotificationChannel(PairChannel, "Linking devices", NotificationImportance.High)
         {
             Description = "Another device asks to link with this one",

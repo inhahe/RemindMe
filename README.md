@@ -222,7 +222,8 @@ laid out for a phone:
   with battery optimization off for the app.
 - **Sync**: while sync is on, a quiet "Keeping your devices in sync" notification
   stays up; that is what lets your other devices reach the phone in the
-  background. Link the phone in **Devices and sync** as on Windows.
+  background. It puts no badge on the app's icon: a badge means an alarm or a
+  link request is waiting. Link the phone in **Devices and sync** as on Windows.
 
 Needs Android 10 or later. The APK is installed by hand (it isn't in an app store).
 

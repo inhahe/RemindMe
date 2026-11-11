@@ -841,6 +841,11 @@ it runs on Android 10 (API 29) and up. The root namespace is
   refuses it the foreground (Android 12 and later, in the background), it stops,
   and sync waits for the app to be opened. A start refused for any reason (the
   background, an app op, a permission) is logged, never a crash.
+- **Badges on the app's icon are for what asks something of the user**: alarms
+  and link requests. The two status channels (sync, and the ringing service's)
+  have `ShowBadge` off; since a channel's badge setting can't change once it
+  exists, they got new IDs (`sync_status`, `ringing_status`), and the old
+  channels are deleted at start (`Notifications.OldChannels`).
 - `SoundChooser`: Android's ringtone picker (alarms, ringtones, notifications),
   or the document picker for a file, taking a persistable read grant so the file
   still plays after a reboot. Its callback is fixed when it is created, so a

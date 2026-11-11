@@ -1,5 +1,4 @@
 using System.Net;
-using System.Net.NetworkInformation;
 using System.Net.Sockets;
 
 namespace RemindMe.Sync;
@@ -82,27 +81,30 @@ internal sealed class Discovery : IDisposable
         catch (Exception e) { _log?.Invoke($"Discovery announce failed: {e.Message}"); }
     }
 
+    /// <summary>The subnet broadcast address of each IPv4 network this machine is on (not
+    /// loopback), then the limited broadcast.</summary>
     private List<IPEndPoint> BroadcastEndpoints()
     {
         var result = new List<IPEndPoint>();
-        try
+        foreach (var (address, prefix) in Protocol.LocalSubnets())
         {
-            foreach (var iface in NetworkInterface.GetAllNetworkInterfaces())
-            {
-                if (iface.OperationalStatus != OperationalStatus.Up || iface.NetworkInterfaceType == NetworkInterfaceType.Loopback)
-                    continue;
-                foreach (var uni in iface.GetIPProperties().UnicastAddresses)
-                {
-                    if (uni.Address.AddressFamily != AddressFamily.InterNetwork) continue;
-                    byte[] ip = uni.Address.GetAddressBytes(), mask = uni.IPv4Mask.GetAddressBytes(), b = new byte[4];
-                    for (int i = 0; i < 4; i++) b[i] = (byte)(ip[i] | ~mask[i]);
-                    result.Add(new IPEndPoint(new IPAddress(b), _port));
-                }
-            }
+            if (address.AddressFamily == AddressFamily.InterNetwork && !IPAddress.IsLoopback(address))
+                result.Add(new IPEndPoint(BroadcastOf(address, prefix), _port));
         }
-        catch (NetworkInformationException) { }
         result.Add(new IPEndPoint(IPAddress.Broadcast, _port));
         return result;
+    }
+
+    /// <summary>The broadcast address of the IPv4 network of <paramref name="address"/> with
+    /// that prefix length: its host bits all set.</summary>
+    internal static IPAddress BroadcastOf(IPAddress address, int prefix)
+    {
+        // A shift by 32 is a shift by 0 in C#, hence the first case.
+        uint host = prefix >= 32 ? 0 : uint.MaxValue >> Math.Max(prefix, 0);
+        var b = new byte[4];
+        System.Buffers.Binary.BinaryPrimitives.WriteUInt32BigEndian(b,
+            System.Buffers.Binary.BinaryPrimitives.ReadUInt32BigEndian(address.GetAddressBytes()) | host);
+        return new IPAddress(b);
     }
 
     private async Task ListenLoopAsync(CancellationToken ct)

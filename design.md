@@ -401,20 +401,29 @@ separately (see *Simplification opportunities*).
   each dial the next waits `ReconnectDelay` (5 s), doubling up to a minute
   (`NextDelay`, as remote links). Only an address on a network this device is on
   now is dialled (`Protocol.IsOnSubnet`): away from home, the home LAN's can't
-  answer.
-  - **Which address is remembered** (`AddressToRemember`): a dialled session's,
-    where the device answered; an inbound one's only when none is known, or the
-    known one went stale, since its source may be a NAT's (a router hairpinning,
-    a guest network). Never one outside the LAN: the last LAN one stays.
+  answer; it is looked at again after the next wait. (`Protocol.LocalSubnets`
+  lists those networks for discovery's broadcasts too.)
+  - **Which address is remembered** (`AddressToRemember`, `LanAddressOf`): a
+    dialled session's is where the device answered, port and all (a port
+    forward on the way may have a port of its own). An inbound one's is its
+    source with the port its hello gave, and since that source may be a NAT's
+    (a router hairpinning, a guest network), it only fills in an address none
+    is known for, or one that is suspect: a redial to it got no answer, or a
+    wrong one (`_suspect`, kept apart from the dial schedule so that it outlives
+    the device announcing again). Never one outside the LAN: the last LAN one
+    stays.
   - **Wrong answers** (`KeepDialledSession`, for any dial made to reach a known
     node, `PeerSession.ExpectedNode`): another device of the group is kept (it
     proves the key like any session); any other device, or this device itself
-    (its own old address), is hung up on. A redial answered by another device, by
-    this one, or by the device without the group (it has left) marks that address
-    stale, logged once: it isn't dialled again until the device is heard
-    announcing, is in sync again, or the engine restarts.
-  - The remembered peers are read through `KnownPeers()`, which drops malformed
-    entries (a damaged settings file), and the housekeeping tick survives any
+    (its own old address), is hung up on. A refused hello from the right device
+    (another protocol version) says nothing about the address. A redial
+    (`PeerSession.IsRedial`, not discovery's dials) answered by another device,
+    by this one, or by the device without the group (it has left) marks that
+    address stale (`MarkStale`, logged once): not dialled again until the
+    device is heard announcing, is in sync again, or the engine restarts.
+  - Settings drop remembered devices nothing can use when loaded (a damaged
+    file: a null, one without a node ID), and the engine reads them through
+    `KnownPeers()`, which does the same. The housekeeping tick survives any
     exception, logging each distinct one once: nothing else closes idle
     sessions, ends unanswered pairings or redials.
 - **Hello proves nothing; the first sealed frame does.** That frame is a tiny

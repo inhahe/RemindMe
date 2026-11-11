@@ -248,6 +248,33 @@ public class PersistenceTests
     }
 
     [Fact]
+    public void RememberedDevicesNothingCanUseAreDroppedOnLoad()
+    {
+        // A damaged or hand-edited settings file.
+        var dir = Directory.CreateTempSubdirectory();
+        try
+        {
+            var path = Path.Combine(dir.FullName, "settings.json");
+            AppSettings.Load(path, "PC", []);
+            string good = Guid.NewGuid().ToString("N"), nameless = Guid.NewGuid().ToString("N");
+            var json = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(path))!;
+            json["knownPeers"] = System.Text.Json.Nodes.JsonNode.Parse($$"""
+                [null,
+                 {"name": "no ID", "lastSeenUtc": "2026-11-11T00:00:00+00:00"},
+                 {"nodeId": "{{nameless}}", "lastSeenUtc": "2026-11-11T00:00:00+00:00"},
+                 {"nodeId": "{{good}}", "name": "Phone", "lastSeenUtc": "2026-11-11T00:00:00+00:00", "address": "192.168.1.66:37660"}]
+                """);
+            File.WriteAllText(path, json.ToJsonString());
+            var loaded = AppSettings.Load(path, "PC", []);
+            Assert.Equal([nameless[..8], "Phone"], loaded.KnownPeers.Select(k => k.Name));
+            Assert.Equal("192.168.1.66:37660", loaded.KnownPeers[1].Address);
+            loaded.RememberPeer(good, "Phone", DateTimeOffset.UtcNow);   // nothing left to trip over
+            Assert.Equal(2, AppSettings.Load(path, "PC", []).KnownPeers.Count);   // and saved so
+        }
+        finally { dir.Delete(true); }
+    }
+
+    [Fact]
     public void ALinkedDevicesLastLanAddressIsKeptAndSaved()
     {
         var dir = Directory.CreateTempSubdirectory();

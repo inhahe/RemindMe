@@ -126,8 +126,13 @@ public sealed class SyncEngine : IDisposable
     private readonly ConcurrentDictionary<string, byte> _dialing = new();
     private readonly ConcurrentDictionary<string, byte> _dialFailLogged = new();
     private readonly ConcurrentDictionary<string, string> _remoteErrors = new();
-    /// <summary>Linked devices being redialled at their last address, by node ID.</summary>
+    /// <summary>Linked devices being redialled at their last address, by node ID: the dial
+    /// schedule, dropped when the device is connected or heard announcing.</summary>
     private readonly ConcurrentDictionary<string, Redial> _redial = new();
+    /// <summary>Linked devices whose remembered address didn't answer a redial, or answered as
+    /// another device: an inbound session from them may replace it (<see cref="AddressToRemember"/>).
+    /// Outlives <see cref="_redial"/>'s entry, until an address for the device is remembered.</summary>
+    private readonly ConcurrentDictionary<string, byte> _suspect = new();
     /// <summary>The last announcement accepted from each member (only proven members get
     /// here, so a flood can't grow it).</summary>
     private readonly ConcurrentDictionary<string, LastAnnouncement> _memberLast = new();
@@ -140,7 +145,9 @@ public sealed class SyncEngine : IDisposable
     /// <param name="MissingSince">When the device was first found not connected.</param>
     /// <param name="Next">When it may be dialled next.</param>
     /// <param name="Delay">The wait after that dial, doubling up to a minute.</param>
-    private sealed record Redial(DateTimeOffset MissingSince, DateTimeOffset Next, TimeSpan Delay);
+    /// <param name="Stale">The address answered as another device, or as the device without the
+    /// group: not dialled again until the device is back.</param>
+    private sealed record Redial(DateTimeOffset MissingSince, DateTimeOffset Next, TimeSpan Delay, bool Stale = false);
     private SyncIdentity _id;
     private TcpListener? _listener;
     private Discovery? _discovery;
@@ -353,10 +360,11 @@ public sealed class SyncEngine : IDisposable
 
     /// <summary>Connects to <paramref name="host"/>:<paramref name="port"/>.</summary>
     /// <param name="remoteAddress">The configured remote address dialled, if any.</param>
-    /// <param name="expectedNode">The node meant to answer, if known: another is hung up on.</param>
+    /// <param name="expectedNode">The node meant to answer, if known (<see cref="KeepDialledSession"/>).</param>
+    /// <param name="redial">Dialled at the address <paramref name="expectedNode"/> was last in sync from.</param>
     /// <returns>The session, its hello sent; null when the connection failed.</returns>
     private async Task<PeerSession?> DialAsync(string host, int port, string? remoteAddress, CancellationToken ct,
-        string? expectedNode = null)
+        string? expectedNode = null, bool redial = false)
     {
         var client = new TcpClient();
         try
@@ -372,7 +380,7 @@ public sealed class SyncEngine : IDisposable
                 _remoteErrors[remoteAddress] = e is SocketException se ? $"can't connect: {se.Message}" : "can't connect: no answer";
             return null;
         }
-        var session = new PeerSession(client, isOutgoing: true) { RemoteAddress = remoteAddress, ExpectedNode = expectedNode };
+        var session = new PeerSession(client, isOutgoing: true) { RemoteAddress = remoteAddress, ExpectedNode = expectedNode, IsRedial = redial };
         await BeginSessionAsync(session).ConfigureAwait(false);
         return session;
     }
@@ -416,13 +424,16 @@ public sealed class SyncEngine : IDisposable
         RaisePeersChanged();
     }
 
-    /// <summary>The peer's listener on the LAN ("ip:port": its address, with the port its
-    /// hello gave), or null when it is outside the LAN or gave no port.</summary>
+    /// <summary>The peer's listener on the LAN ("ip:port"), or null when it is outside the LAN
+    /// or gave no port. A dialled session's is just where it was dialled (a port forward on
+    /// the way may have a port of its own); an inbound one's is its source address with the
+    /// port its hello gave.</summary>
     private static string? LanAddressOf(PeerSession s)
     {
-        if (s.RemoteEndPoint is not { } ep || s.PeerPort is not { } port) return null;
+        if (s.RemoteEndPoint is not { } ep) return null;
+        int? port = s.IsOutgoing ? ep.Port : s.PeerPort;
         var address = Plain(ep.Address);
-        return Protocol.IsPrivateOrLan(address) ? new IPEndPoint(address, port).ToString() : null;
+        return port is { } p && Protocol.IsPrivateOrLan(address) ? new IPEndPoint(address, p).ToString() : null;
     }
 
     /// <summary>
@@ -430,15 +441,14 @@ public sealed class SyncEngine : IDisposable
     /// or null to keep the one remembered. A dialled session's is where the device answered.
     /// An inbound one's source may be a NAT's (a router hairpinning a connection to its public
     /// address, a guest network), so it only fills in an address none was known for, or one
-    /// that now answers as another device.
+    /// that is <see cref="_suspect"/>.
     /// </summary>
     private string? AddressToRemember(PeerSession s)
     {
         var address = LanAddressOf(s);
         if (address is null || s.IsOutgoing) return address;
         bool known = KnownPeers().Any(k => k.NodeId == s.PeerNode && k.Address is not null);
-        bool stale = _redial.TryGetValue(s.PeerNode!, out var r) && r.Next == DateTimeOffset.MaxValue;
-        return known && !stale ? null : address;
+        return known && !_suspect.ContainsKey(s.PeerNode!) ? null : address;
     }
 
     internal void OnAnnounced(SyncMessage msg, IPAddress from)
@@ -523,12 +533,17 @@ public sealed class SyncEngine : IDisposable
         return true;
     }
 
-    private async Task DialNodeAsync(string node, IPEndPoint ep)
+    /// <summary>Dials <paramref name="node"/> at <paramref name="ep"/>, unless a dial to it is
+    /// already under way.</summary>
+    /// <param name="redial">At the address it was last in sync from (<see cref="DialKnownPeers"/>):
+    /// one that doesn't answer is <see cref="_suspect"/>.</param>
+    private async Task DialNodeAsync(string node, IPEndPoint ep, bool redial = false)
     {
         if (!_dialing.TryAdd(node, 0)) return;
         try
         {
-            var s = await DialAsync(ep.Address.ToString(), ep.Port, null, _cts.Token, expectedNode: node).ConfigureAwait(false);
+            var s = await DialAsync(ep.Address.ToString(), ep.Port, null, _cts.Token, expectedNode: node, redial).ConfigureAwait(false);
+            if (s is null && redial) _suspect[node] = 0;
             if (s is null && _dialFailLogged.TryAdd(node, 0)) _log?.Invoke($"Could not connect to {ep}; will keep trying.");
         }
         finally { _dialing.TryRemove(node, out _); }
@@ -658,7 +673,8 @@ public sealed class SyncEngine : IDisposable
     /// <see cref="SyncOptions.HigherIdFallback"/> (<see cref="MayDial"/>). After each dial it
     /// waits <see cref="SyncOptions.ReconnectDelay"/>, doubling up to a minute. Only addresses
     /// on a network this device is on now are dialled: away from home (on mobile data, say),
-    /// the home LAN's can't answer.
+    /// the home LAN's can't answer. One that isn't is looked at again after the same wait,
+    /// so the networks aren't listed on every tick.
     /// </summary>
     private void DialKnownPeers(DateTimeOffset now)
     {
@@ -673,14 +689,14 @@ public sealed class SyncEngine : IDisposable
             bool announcing = _nearby.TryGetValue(k.NodeId, out var n) && now - n.Seen <= PeerExpiry && IsMember(n, id.GroupId);
             if (connected || announcing) { _redial.TryRemove(k.NodeId, out _); continue; }
             var r = _redial.GetOrAdd(k.NodeId, _ => new Redial(now, now, _options.ReconnectDelay));
-            if (!MayDial(k.NodeId, r.MissingSince, now) || now < r.Next) continue;
-            subnets ??= Protocol.LocalSubnets();
-            if (!Protocol.IsOnSubnet(ip, subnets)) continue;
+            if (r.Stale || !MayDial(k.NodeId, r.MissingSince, now) || now < r.Next) continue;
             // Only if nothing else changed the entry meanwhile (a hello marking the address
             // stale, or a session proving the key and removing it).
             if (!_redial.TryUpdate(k.NodeId, r with { Next = now + r.Delay, Delay = NextDelay(r.Delay, _options.ReconnectDelay) }, r))
                 continue;
-            _ = DialNodeAsync(k.NodeId, new IPEndPoint(ip, port));
+            subnets ??= Protocol.LocalSubnets();
+            if (!Protocol.IsOnSubnet(ip, subnets)) continue;
+            _ = DialNodeAsync(k.NodeId, new IPEndPoint(ip, port), redial: true);
         }
     }
 
@@ -737,35 +753,47 @@ public sealed class SyncEngine : IDisposable
     }
 
     /// <summary>
-    /// Checks who answered a dial made to reach <paramref name="expected"/>. When it was a
-    /// redial at the device's last address, and another device answered (the address is
-    /// someone else's now, maybe this device's own) or the device did without the group (it
-    /// has left), that address isn't dialled again until the device is back (heard announcing,
-    /// or in sync) or the engine restarts; this is logged once.
+    /// Checks who answered a dial made to reach <paramref name="expected"/>: another device of
+    /// this group goes on (it proves the key like any session); any other device, or this one
+    /// itself, is hung up on. When the dial was a redial at the device's last address
+    /// (<see cref="PeerSession.IsRedial"/>), another device answering (the address is someone
+    /// else's now, maybe this device's own) or the device without the group (it has left)
+    /// makes that address stale (<see cref="MarkStale"/>).
     /// </summary>
-    /// <param name="accepted">Whether the hello was accepted at all.</param>
-    /// <param name="self">The hello gave this device's own node ID.</param>
-    /// <returns>Whether the session goes on; false when it was closed. Another device of this
-    /// group goes on (it proves the key like any other); any other wrong answer doesn't.</returns>
-    private bool KeepDialledSession(PeerSession s, string expected, bool accepted, bool self)
+    /// <param name="accepted">Whether the hello was accepted. A refused one from the expected
+    /// device (another protocol version, say) says nothing about the address: the caller
+    /// closes it like any refused hello.</param>
+    /// <param name="helloNode">The node ID the hello gave, valid or not.</param>
+    /// <returns>Whether the session goes on; false when it was closed.</returns>
+    private bool KeepDialledSession(PeerSession s, string expected, bool accepted, string? helloNode)
     {
-        bool someoneElse = !accepted || s.PeerNode != expected;
-        bool redialled = _redial.TryGetValue(expected, out var r);
-        bool leftGroup = !someoneElse && !s.Sealed && redialled;
-        if (!someoneElse && !leftGroup) return true;
-        if (redialled && r!.Next != DateTimeOffset.MaxValue
-            && _redial.TryUpdate(expected, r with { Next = DateTimeOffset.MaxValue }, r))
-        {
-            var name = KnownPeers().FirstOrDefault(k => k.NodeId == expected)?.Name ?? expected[..8];
-            var who = self ? "this device" : s.PeerName ?? "a device that didn't say hello properly";
-            var at = s.RemoteEndPoint is { } ep ? new IPEndPoint(Plain(ep.Address), ep.Port).ToString() : "?";
-            _log?.Invoke(leftGroup
-                ? $"{name} answered at {at} without this sync group (it has left it); not dialling it again until it is back."
-                : $"{name}'s last address, {at}, now answers as {who}; not dialling it there again until it is back.");
-        }
+        bool someoneElse = helloNode != expected;
+        bool leftGroup = !someoneElse && accepted && !s.Sealed;
+        if (!someoneElse && !(leftGroup && s.IsRedial)) return true;
+        if (s.IsRedial)
+            MarkStale(s, expected, leftGroup ? null
+                : helloNode == Identity.NodeId ? "this device" : s.PeerName ?? "a device that didn't say hello properly");
         if (accepted && someoneElse && s.Sealed) return true;
         s.Close();
         return false;
+    }
+
+    /// <summary>
+    /// Marks <paramref name="node"/>'s remembered address stale: not dialled again until the
+    /// device is back (heard announcing, or in sync) or the engine restarts, and replaceable by
+    /// an inbound session's (<see cref="_suspect"/>). Logged once.
+    /// </summary>
+    /// <param name="s">The session that found it so.</param>
+    /// <param name="who">Who answered there instead; null for the device itself, without the group.</param>
+    private void MarkStale(PeerSession s, string node, string? who)
+    {
+        _suspect[node] = 0;
+        if (!_redial.TryGetValue(node, out var r) || r.Stale || !_redial.TryUpdate(node, r with { Stale = true }, r)) return;
+        var name = KnownPeers().FirstOrDefault(k => k.NodeId == node)?.Name ?? node[..8];
+        var at = s.RemoteEndPoint is { } ep ? new IPEndPoint(Plain(ep.Address), ep.Port).ToString() : "?";
+        _log?.Invoke(who is null
+            ? $"{name} answered at {at} without this sync group (it has left it); not dialling it again until it is back."
+            : $"{name}'s last address, {at}, now answers as {who}; not dialling it there again until it is back.");
     }
 
     private void OnHello(PeerSession s, SyncMessage hello)
@@ -774,7 +802,7 @@ public sealed class SyncEngine : IDisposable
         if (hello.Proto != Protocol.Version)
             _log?.Invoke($"A device speaking sync protocol {hello.Proto} connected from {s.RemoteEndPoint}; this one speaks {Protocol.Version}. Update both to the same version.");
         bool accepted = s.AcceptHello(hello, id.NodeId, id.GroupId, id.GroupKey);
-        if (s.ExpectedNode is { } expected && !KeepDialledSession(s, expected, accepted, hello.Node == id.NodeId)) return;
+        if (s.ExpectedNode is { } expected && !KeepDialledSession(s, expected, accepted, hello.Node)) return;
         if (!accepted) { s.Close(); return; }
         // Claims a remembered linked device's ID without the group: an impostor angling to have
         // that device shown "not linked" (and re-linked), or a device that has left the group.
@@ -826,7 +854,8 @@ public sealed class SyncEngine : IDisposable
         _remoteErrors.TryRemove(s.RemoteAddress ?? "", out _);
         _log?.Invoke($"In sync with {s.Describe()}.");
         _ = s.SendAsync(new SyncMessage { Type = MessageTypes.Digest, Digest = _store.Digest().ToList() });
-        var address = AddressToRemember(s);   // before the redial entry goes, which says if the known one is stale
+        var address = AddressToRemember(s);
+        if (address is not null) _suspect.TryRemove(s.PeerNode!, out _);   // a good one is remembered now
         _redial.TryRemove(s.PeerNode!, out _);
         if (s.PeerGroup == Identity.GroupId) PeerSeen?.Invoke(s.PeerNode!, s.PeerName!, address);
         RaisePeersChanged();

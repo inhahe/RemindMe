@@ -102,6 +102,12 @@ public sealed class AppSettings
             dirty = true;
         }
         if (string.IsNullOrEmpty(s.GroupId) || string.IsNullOrEmpty(s.GroupKey)) { s.NewGroup(); dirty = true; }
+        // A damaged or hand-edited file may hold remembered devices nothing can use (a null,
+        // one without a node ID): dropped here, once, for every reader.
+        var peers = s.KnownPeers ?? [];
+        var usable = peers.Where(k => k is not null && Sync.Protocol.IsValidNodeId(k.NodeId))
+            .Select(k => k.Name is null ? k with { Name = k.NodeId[..8] } : k).ToList();
+        if (s.KnownPeers is null || !usable.SequenceEqual(peers)) { s.KnownPeers = usable; dirty = true; }
         if (dirty) s.Save(path, log);
         return s;
     }

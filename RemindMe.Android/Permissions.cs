@@ -53,18 +53,21 @@ public static class Permissions
     }
 
     /// <summary>Asks, with Android's own one-tap prompt, to let the app run without battery
-    /// optimization (Samsung's "Unrestricted"); where a phone has no such prompt, opens the
-    /// list of apps' battery settings instead.</summary>
+    /// optimization (Samsung's "Unrestricted"). Where a phone has no such prompt, opens the
+    /// list of apps' battery settings instead, and where it has neither, says where to look.</summary>
     public static void AskNoBatteryOptimization(Activity a)
     {
-        try
+        var tries = new[]
         {
-            a.StartActivity(new Intent(Settings.ActionRequestIgnoreBatteryOptimizations,
-                Android.Net.Uri.Parse($"package:{a.PackageName}")));
-        }
-        catch (ActivityNotFoundException)
+            new Intent(Settings.ActionRequestIgnoreBatteryOptimizations, Android.Net.Uri.Parse($"package:{a.PackageName}")),
+            new Intent(Settings.ActionIgnoreBatteryOptimizationSettings),
+        };
+        foreach (var intent in tries)
         {
-            a.StartActivity(new Intent(Settings.ActionIgnoreBatteryOptimizationSettings));
+            try { a.StartActivity(intent); return; }
+            catch (ActivityNotFoundException) { }
         }
+        Android.Widget.Toast.MakeText(a, "In the phone's Settings, open Apps → RemindMe → Battery, and choose Unrestricted.",
+            Android.Widget.ToastLength.Long)!.Show();
     }
 }

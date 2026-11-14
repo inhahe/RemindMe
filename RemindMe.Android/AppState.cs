@@ -238,8 +238,10 @@ public static class AppState
         engine.PeerSeen += (node, name, address) => OnMain(() =>
         {
             if (Sync != engine) return;
+            bool first = Settings.KnownPeers.Count == 0;
             Settings.RememberPeer(node, name, Clock.UtcNow, address);
             SaveSettings();
+            if (first) SyncWatchdog.Arm(Context);   // linked now: sync is worth keeping up
         });
         engine.IdentityChanged += id => OnMain(() =>
         {
@@ -248,6 +250,7 @@ public static class AppState
             Settings.GroupKey = id.GroupKeyBase64;
             Settings.KnownPeers = [];
             SaveSettings();
+            SyncWatchdog.Arm(Context);   // nothing linked any more: no more checks
         });
         engine.PairRequested += p => OnMain(() => AddPrompt(p));
         engine.PairProgressed += p => OnMain(() => PairProgressed?.Invoke(p));

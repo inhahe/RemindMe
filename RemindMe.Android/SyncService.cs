@@ -16,22 +16,35 @@ namespace RemindMe.Droid;
 public sealed class SyncService : Service
 {
     private static SyncService? _instance;
+    /// <summary>The start intent's extra: started by the watchdog's alarm (<see cref="Refused"/>).</summary>
+    private const string FromWatchdog = "remindme.fromWatchdog";
 
     /// <summary>Whether the service runs in this process now.</summary>
     public static bool IsRunning => _instance is not null;
 
-    public static void Start(Context context)
+    /// <param name="fromWatchdog">Started by the watchdog's alarm.</param>
+    public static void Start(Context context, bool fromWatchdog = false)
     {
-        try { context.StartForegroundService(new Intent(context, typeof(SyncService))); }
+        try { context.StartForegroundService(new Intent(context, typeof(SyncService)).PutExtra(FromWatchdog, fromWatchdog)); }
         // Refused in the background (Android 12+), or by an app op or a missing permission.
         catch (Exception e) when (e is Java.Lang.IllegalStateException or ForegroundServiceStartNotAllowedException
             or Java.Lang.SecurityException)
         {
             AppState.Log($"Couldn't start sync now: {e.Message}");
-            // From an exact alarm, the start is allowed: try again from one shortly (not from
-            // the watchdog's own start, which would then repeat every few seconds).
-            if (e is ForegroundServiceStartNotAllowedException && !SyncWatchdog.Firing) SyncWatchdog.Schedule(context, SyncWatchdog.Soon);
+            Refused(context, e, fromWatchdog);
         }
+    }
+
+    /// <summary>
+    /// After a start, or a restart, was refused: from the background (Android 12 and later), the
+    /// watchdog tries again shortly from an exact alarm, where it is allowed. Any other refusal
+    /// (an app op, a permission), or one of the watchdog's own starts, waits for its next check
+    /// instead: retried every few seconds, it would only repeat.
+    /// </summary>
+    private static void Refused(Context context, Exception e, bool fromWatchdog)
+    {
+        if (!SyncWatchdog.Wanted) return;
+        SyncWatchdog.Schedule(context, e is ForegroundServiceStartNotAllowedException && !fromWatchdog ? SyncWatchdog.Soon : null);
     }
 
     public static void Stop(Context context)
@@ -64,9 +77,9 @@ public sealed class SyncService : Service
             or Java.Lang.SecurityException)
         {
             // Restarted in the background (sticky), where Android 12 and later may refuse a
-            // foreground service: the watchdog starts it again from an exact alarm shortly.
+            // foreground service, say.
             AppState.Log($"Sync couldn't run in the background now: {e.Message}");
-            if (AppState.Settings.SyncEnabled) SyncWatchdog.Schedule(this, SyncWatchdog.Soon);
+            Refused(this, e, intent?.GetBooleanExtra(FromWatchdog, false) == true);
             StopSelf();
             return StartCommandResult.NotSticky;
         }
@@ -76,7 +89,7 @@ public sealed class SyncService : Service
             return StartCommandResult.NotSticky;
         }
         AppState.EnsureSync();
-        SyncWatchdog.Schedule(this);
+        SyncWatchdog.Arm(this);
         // Sticky: if Android kills the process, it restarts the service, and sync with it.
         return StartCommandResult.Sticky;
     }
@@ -93,10 +106,11 @@ public sealed class SyncService : Service
 /// Keeps sync running where the process is ended and the service isn't brought back: a phone
 /// maker's battery manager may close the app without Android restarting it, and Android 12
 /// and later may refuse a service restarted in the background the foreground. While sync is
-/// on, an exact alarm every <see cref="Interval"/> starts it again if it isn't running.
-/// Starting a foreground service from an exact alarm is allowed in the background
-/// (<see cref="AlarmScheduler"/>). The alarm outlives the process; a reboot or an update
-/// clears it, and the boot receiver starts sync, which sets it again.
+/// on and the phone is linked with another device (<see cref="Wanted"/>), an exact alarm every
+/// <see cref="Interval"/> starts it again if it isn't running. Starting a foreground service
+/// from an exact alarm is allowed in the background (<see cref="AlarmScheduler"/>). The alarm
+/// outlives the process; a reboot or an update clears it, and the boot receiver's start sets
+/// it again.
 /// </summary>
 public static class SyncWatchdog
 {
@@ -105,9 +119,17 @@ public static class SyncWatchdog
     /// <summary>The wait before trying again after a start was refused in the background.</summary>
     public static readonly TimeSpan Soon = TimeSpan.FromSeconds(5);
 
-    /// <summary>True while the watchdog's alarm is being handled: a start refused then isn't
-    /// retried <see cref="Soon"/>, which would repeat every few seconds.</summary>
-    [ThreadStatic] public static bool Firing;
+    /// <summary>Whether there is sync worth keeping up: on, with a device to sync with. Not
+    /// otherwise: the checks would wake the phone for nothing.</summary>
+    public static bool Wanted => AppState.Settings is { SyncEnabled: true, KnownPeers.Count: > 0 };
+
+    /// <summary>Sets the next check <see cref="Interval"/> from now, or cancels it when
+    /// <see cref="Wanted"/> isn't.</summary>
+    public static void Arm(Context context)
+    {
+        if (Wanted) Schedule(context);
+        else Cancel(context);
+    }
 
     /// <summary>Sets the next check, <paramref name="after"/> from now (<see cref="Interval"/>
     /// by default), replacing any set before.</summary>
@@ -132,20 +154,19 @@ public static class SyncWatchdog
             PendingIntentFlags.Immutable | PendingIntentFlags.UpdateCurrent)!;
 }
 
-/// <summary>The watchdog's alarm: sync started again if it should run and doesn't, and the
-/// next check set.</summary>
+/// <summary>The watchdog's alarm: sync started again if it should run and doesn't (no
+/// service, or a service whose engine couldn't start: its port taken, say), and the next
+/// check set.</summary>
 [BroadcastReceiver(Enabled = true, Exported = false)]
 public sealed class SyncWatchdogReceiver : BroadcastReceiver
 {
     public override void OnReceive(Context? context, Intent? intent)
     {
-        if (context is null || !AppState.Settings.SyncEnabled) return;   // stopped meanwhile: no more checks
-        if (!SyncService.IsRunning)
+        if (context is null || !SyncWatchdog.Wanted) return;   // no more checks
+        if (!SyncService.IsRunning || AppState.Sync is null)
         {
             AppState.Log("Sync wasn't running; starting it again.");
-            SyncWatchdog.Firing = true;
-            try { SyncService.Start(context); }
-            finally { SyncWatchdog.Firing = false; }
+            SyncService.Start(context, fromWatchdog: true);
         }
         SyncWatchdog.Schedule(context);
     }

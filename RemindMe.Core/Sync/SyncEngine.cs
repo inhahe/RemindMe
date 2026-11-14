@@ -240,6 +240,15 @@ public sealed class SyncEngine : IDisposable
 
     // ---- What the UI shows -----------------------------------------------------------
 
+    /// <summary>How many linked devices are in sync now (their sessions proved the key): the
+    /// <see cref="Peers"/> that are linked and connected, counted without building the list,
+    /// for a status line refreshed every second.</summary>
+    public int InSyncCount()
+    {
+        var group = Identity.GroupId;
+        lock (_lock) return _sessions.Values.Count(s => s.Authenticated && s.PeerGroup == group);
+    }
+
     public IReadOnlyList<PeerInfo> Peers()
     {
         var result = new Dictionary<string, PeerInfo>();

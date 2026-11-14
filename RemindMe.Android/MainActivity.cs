@@ -38,9 +38,8 @@ public sealed class MainActivity : Screen
     {
         base.OnResume();
         AppState.TasksChanged += Refresh;
+        AskForPermissionsOnce();   // first: the battery question (Tick) waits for its answer
         Tick();
-        AskForPermissionsOnce();
-        AskAboutBatteryOnce();
         // The app is in the foreground, so the ringing service may start from here.
         if (AlarmScheduler.RingingNow(AppState.Clock.UtcNow, out _).Count > 0 && !RingingService.IsRunning) RingingService.TryStart(this);
         if (AppState.Settings.SyncEnabled && AppState.Sync is null) SyncService.Start(this);
@@ -56,6 +55,7 @@ public sealed class MainActivity : Screen
     private void Tick()
     {
         Refresh();
+        AskAboutBatteryOnce();
         _handler.PostDelayed(Tick, 1000);
     }
 
@@ -73,7 +73,8 @@ public sealed class MainActivity : Screen
         int ringing = statuses.Count(s => s.ShouldAlert), waiting = statuses.Count(s => s.Snoozed);
         _status.Text = $"{statuses.Count} task{(statuses.Count == 1 ? "" : "s")}"
             + (ringing > 0 ? $" · {ringing} ringing" : "") + (waiting > 0 ? $" · {waiting} waiting to be marked done" : "")
-            + TextFormat.SyncSummary(AppState.Settings.SyncEnabled, AppState.Sync?.Peers().Count(p => p.Linked && p.Connected) ?? 0);
+            + TextFormat.SyncSummary(AppState.Settings.SyncEnabled, AppState.Sync is not null,
+                AppState.Settings.KnownPeers.Count, AppState.Sync?.InSyncCount() ?? 0);
     }
 
     private void ShowActions(TaskStatus st, View anchor)
@@ -101,11 +102,7 @@ public sealed class MainActivity : Screen
                     if (st.Paused) AppState.Store.Resume(id);
                     else AppState.Store.Pause(id);
                     break;
-                case 5:
-                    var name = TextFormat.Snippet(st.Task.Def.Description, 40);
-                    Ui.Confirm(this, "Delete", $"Delete \"{(name.Length > 0 ? name : "this task")}\"?", "Delete",
-                        () => AppState.Store.Delete(id));
-                    break;
+                case 5: Ui.ConfirmDelete(this, id); break;
             }
         };
         menu.Show();
@@ -133,38 +130,50 @@ public sealed class MainActivity : Screen
         _permissionsAsked = true;
         if (OperatingSystem.IsAndroidVersionAtLeast(33)
             && CheckSelfPermission(Android.Manifest.Permission.PostNotifications) != Permission.Granted)
+        {
+            _permissionAsking = true;
             RequestPermissions([Android.Manifest.Permission.PostNotifications], 1);
+        }
         else AskForSpecialAccess();
     }
 
     public override void OnRequestPermissionsResult(int requestCode, string[] permissions, Permission[] grantResults)
     {
         base.OnRequestPermissionsResult(requestCode, permissions, grantResults);
-        if (requestCode == 1) AskForSpecialAccess();
+        if (requestCode != 1) return;
+        _permissionAsking = false;
+        AskForSpecialAccess();
     }
 
     private void AskForSpecialAccess()
     {
         var missing = Permissions.Missing(this).FirstOrDefault();
         if (missing is null) return;
-        new AlertDialog.Builder(this).SetTitle(missing.Title)!.SetMessage(missing.Why)!
+        _permissionAsking = true;
+        var dialog = new AlertDialog.Builder(this).SetTitle(missing.Title)!.SetMessage(missing.Why)!
             .SetPositiveButton("Open settings", (_, _) => missing.Fix(this))!
-            .SetNegativeButton("Not now", (_, _) => { })!.Show();
+            .SetNegativeButton("Not now", (_, _) => { })!.Create()!;
+        dialog.DismissEvent += (_, _) => _permissionAsking = false;
+        dialog.Show();
     }
+
+    /// <summary>A permission's question is up: the battery one waits until it is answered.</summary>
+    private bool _permissionAsking;
 
     private bool _batteryAsking;
 
     /// <summary>
     /// Once linked with another device, asks once (ever) to let the app run without battery
     /// optimization: with it, a phone's battery manager may end the app in the background and
-    /// keep sync off for days, until the app is opened. Not while a permission is still
-    /// missing (that is asked first); Settings offers it any time.
+    /// keep sync off for days, until the app is opened. Looked at on every tick, so it comes
+    /// right after a link made from this list's own dialog; never over a permission's
+    /// question. Settings offers it any time.
     /// </summary>
     private void AskAboutBatteryOnce()
     {
         var s = AppState.Settings;
-        if (_batteryAsking || s.BatteryOptimizationAsked || !s.SyncEnabled || s.KnownPeers.Count == 0
-            || !Permissions.BatteryOptimized(this) || Permissions.Missing(this).Any()) return;
+        if (_batteryAsking || _permissionAsking || s.BatteryOptimizationAsked || !s.SyncEnabled || s.KnownPeers.Count == 0
+            || !Permissions.BatteryOptimized(this)) return;
         _batteryAsking = true;
         void Answered() { _batteryAsking = false; AppState.UpdateSettings(x => x.BatteryOptimizationAsked = true); }
         new AlertDialog.Builder(this).SetTitle("Keep syncing in the background?")!

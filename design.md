@@ -880,18 +880,29 @@ it runs on Android 10 (API 29) and up. The root namespace is
   Galaxy S22 killed it with signal 9 while the service ran in the foreground,
   and its sync stayed off for three days, until the app was opened), and
   Android 12 and later may refuse a background restart the foreground. While
-  sync is on, an exact alarm (`SetExactAndAllowWhileIdle`, elapsed time) every
-  15 minutes starts the service again if it isn't running: a foreground service
-  may be started from an exact alarm. A start refused in the background sets
-  that alarm 5 s ahead instead (not when the refusal came from the watchdog's
-  own start, which would repeat). The alarm outlives the process; a reboot or an
-  update clears it, and the boot receiver's start sets it again; turning sync
-  off cancels it.
+  sync is on and the phone is linked with another device (`SyncWatchdog.Wanted`:
+  otherwise the checks would wake it for nothing), an exact alarm
+  (`SetExactAndAllowWhileIdle`, elapsed time) every 15 minutes starts the
+  service again if it isn't running, or if its engine isn't (it couldn't start:
+  its port taken, say): a foreground service may be started from an exact
+  alarm. A start refused in the background sets that alarm 5 s ahead instead;
+  any other refusal (an app op, a permission), and any refusal of the
+  watchdog's own start (the intent says so), waits for the next check, so
+  nothing repeats every few seconds. The alarm outlives the process; a reboot
+  or an update clears it, and the boot receiver's start sets it again; the
+  first linked device arms it, and turning sync off, or leaving the group,
+  cancels it.
 - **Battery optimization**: once linked with another device, the list asks once
   (`BatteryOptimizationAsked`) to let the app run without it, through Android's
   one-tap prompt (`REQUEST_IGNORE_BATTERY_OPTIMIZATIONS`; Samsung's
-  "Unrestricted"), since with it a battery manager may end the app; Settings
-  offers the same prompt whenever it is on.
+  "Unrestricted"), since with it a battery manager may end the app. It looks on
+  every tick, so the question comes right after a link made from the list's own
+  dialog, never over a permission's question (which comes first). Settings
+  offers the same prompt whenever it is on; a phone with neither screen gets
+  told where the setting is.
+- **The task list's status line** says whether sync is keeping up
+  (`TextFormat.SyncSummary`, on Windows too): in sync with how many devices, no
+  device connected, or sync not running; nothing while nothing is linked.
 - **Badges on the app's icon are for what asks something of the user**: alarms
   and link requests. The two status channels (sync, and the ringing service's)
   have `ShowBadge` off; since a channel's badge setting can't change once it

@@ -122,15 +122,7 @@ public sealed class TaskEditActivity : Screen
         if (_id is { } taskId)
         {
             delete.Visibility = ViewStates.Visible;
-            delete.Click += (_, _) =>
-            {
-                var name = TextFormat.Snippet(AppState.Store.Get(taskId)?.Def.Description ?? "", 40);
-                Ui.Confirm(this, "Delete", $"Delete \"{(name.Length > 0 ? name : "this task")}\"?", "Delete", () =>
-                {
-                    AppState.Store.Delete(taskId);
-                    Finish();
-                });
-            };
+            delete.Click += (_, _) => Ui.ConfirmDelete(this, taskId, Finish);
         }
         foreach (var id in new[] { Resource.Id.scheduled, Resource.Id.countdown, Resource.Id.interval, Resource.Id.weekly, Resource.Id.once })
             Find<RadioButton>(id).CheckedChange += (_, _) => UpdatePanes();

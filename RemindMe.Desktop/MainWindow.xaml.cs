@@ -108,7 +108,8 @@ public partial class MainWindow : Window
         int ringing = statuses.Count(s => s.ShouldAlert), waiting = statuses.Count(s => s.Snoozed);
         StatusText.Text = TextFormat.Tasks(statuses.Count)
             + (ringing > 0 ? $" · {ringing} ringing" : "") + (waiting > 0 ? $" · {waiting} waiting to be marked done" : "")
-            + TextFormat.SyncSummary(AppHost.Settings.SyncEnabled, AppHost.Sync?.Peers().Count(p => p.Linked && p.Connected) ?? 0);
+            + TextFormat.SyncSummary(AppHost.Settings.SyncEnabled, AppHost.Sync is not null,
+                AppHost.Settings.KnownPeers.Count, AppHost.Sync?.InSyncCount() ?? 0);
         EmptyHint.Visibility = statuses.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
         var tip = "RemindMe" + (ringing > 0 ? $" — {ringing} ringing" : waiting > 0 ? $" — {waiting} waiting" : "");
         _tray.Text = tip.Length > 63 ? tip[..63] : tip;

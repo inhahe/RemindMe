@@ -624,6 +624,18 @@ public sealed class SyncTests : IDisposable
         Assert.Equal(1, CountLogged(logL, "Housekeeping failed"));
     }
 
+    [Fact]
+    public async Task InSyncCountCountsLinkedDevicesInSyncOnly()
+    {
+        var a = NewIdentity("A");
+        var (ea, _) = Node(a);
+        Node(NewIdentity("B", a.GroupId, a.GroupKeyBase64), Addr(ea));
+        Node(NewIdentity("Stranger"), Addr(ea));   // connected, not linked
+        await WaitFor(() => ea.Peers().Count(p => p.Connected) == 2, "A connected to both");
+        await WaitFor(() => ea.InSyncCount() == 1, "A counting B alone");
+        Assert.Equal(ea.Peers().Count(p => p.Linked && p.Connected), ea.InSyncCount());
+    }
+
     [Theory]
     [InlineData("192.168.1.66", "192.168.1.184", 24, true)]
     [InlineData("192.168.2.5", "192.168.1.184", 24, false)]

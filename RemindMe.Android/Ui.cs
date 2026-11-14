@@ -153,6 +153,18 @@ public static class Ui
         new AlertDialog.Builder(c).SetTitle(title)!.SetMessage(message)!
             .SetPositiveButton(ok, (_, _) => onOk())!.SetNegativeButton("Cancel", (_, _) => { })!.Show();
 
+    /// <summary>Asks whether to delete the task <paramref name="id"/>, named by its
+    /// description, and deletes it if so; <paramref name="then"/> runs after that.</summary>
+    public static void ConfirmDelete(Context c, Guid id, Action? then = null)
+    {
+        var name = TextFormat.Snippet(AppState.Store.Get(id)?.Def.Description ?? "", 40);
+        Confirm(c, "Delete", $"Delete \"{(name.Length > 0 ? name : "this task")}\"?", "Delete", () =>
+        {
+            AppState.Store.Delete(id);
+            then?.Invoke();
+        });
+    }
+
     public static ArrayAdapter<string> SpinnerAdapter(Context c, IList<string> items)
     {
         var a = new ArrayAdapter<string>(c, Android.Resource.Layout.SimpleSpinnerItem, items);

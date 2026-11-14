@@ -107,10 +107,16 @@ public static class TextFormat
 
     /// <summary>The task list's status line's word on sync: " · in sync with 2 devices",
     /// " · no device connected" (say for days, while a linked device is unreachable: worth
-    /// seeing), or nothing while sync is off.</summary>
-    /// <param name="connected">How many linked devices are in sync now.</param>
-    public static string SyncSummary(bool syncOn, int connected) =>
-        !syncOn ? "" : connected == 0 ? " · no device connected" : $" · in sync with {connected} device{(connected == 1 ? "" : "s")}";
+    /// seeing), " · sync isn't running" (it couldn't start: its port taken, say), or nothing
+    /// while sync is off or nothing is linked yet.</summary>
+    /// <param name="running">Whether the sync engine runs.</param>
+    /// <param name="linked">How many devices this one is linked with.</param>
+    /// <param name="inSync">How many of them are in sync now.</param>
+    public static string SyncSummary(bool syncOn, bool running, int linked, int inSync) =>
+        !syncOn || linked == 0 ? ""
+        : !running ? " · sync isn't running"
+        : inSync == 0 ? " · no device connected"
+        : $" · in sync with {inSync} device{(inSync == 1 ? "" : "s")}";
 
     /// <summary>"Exported 3 tasks." or "Exported 3 tasks to C:\…\file.json.": what an export did.</summary>
     /// <param name="count">How many tasks the file holds.</param>

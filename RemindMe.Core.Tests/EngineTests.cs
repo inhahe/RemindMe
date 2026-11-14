@@ -444,9 +444,11 @@ public class TextFormatTests
     [Fact]
     public void TheStatusLineSaysWhetherAnyDeviceIsInSync()
     {
-        Assert.Equal("", TextFormat.SyncSummary(syncOn: false, 0));
-        Assert.Equal(" · no device connected", TextFormat.SyncSummary(syncOn: true, 0));
-        Assert.Equal(" · in sync with 1 device", TextFormat.SyncSummary(syncOn: true, 1));
-        Assert.Equal(" · in sync with 2 devices", TextFormat.SyncSummary(syncOn: true, 2));
+        Assert.Equal("", TextFormat.SyncSummary(syncOn: false, running: false, linked: 1, inSync: 0));
+        Assert.Equal("", TextFormat.SyncSummary(syncOn: true, running: true, linked: 0, inSync: 0));   // nothing to sync with
+        Assert.Equal(" · sync isn't running", TextFormat.SyncSummary(syncOn: true, running: false, linked: 1, inSync: 0));
+        Assert.Equal(" · no device connected", TextFormat.SyncSummary(syncOn: true, running: true, linked: 1, inSync: 0));
+        Assert.Equal(" · in sync with 1 device", TextFormat.SyncSummary(syncOn: true, running: true, linked: 2, inSync: 1));
+        Assert.Equal(" · in sync with 2 devices", TextFormat.SyncSummary(syncOn: true, running: true, linked: 2, inSync: 2));
     }
 }

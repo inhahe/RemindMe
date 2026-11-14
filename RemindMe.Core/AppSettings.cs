@@ -51,6 +51,9 @@ public sealed class AppSettings
     /// <summary>Set once the first-run autostart choice has been applied, so a later
     /// manual change sticks.</summary>
     public bool AutostartInitialized { get; set; }
+    /// <summary>Android: asked once, after linking, to let the app run without battery
+    /// optimization, which can stop sync in the background (Settings offers it any time).</summary>
+    public bool BatteryOptimizationAsked { get; set; }
     public double? WindowLeft { get; set; }
     public double? WindowTop { get; set; }
     public double? WindowWidth { get; set; }

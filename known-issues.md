@@ -75,10 +75,25 @@ made anew at each opening. Not seen: Windows' own switch reaching the app.
 ### Android on a real phone
 Checked only on the emulator (API 36). Worth checking on the phone, a Samsung
 running One UI: that the alarm screen opens over the lock screen (One UI can
-restrict full-screen intents), that background sync survives with the screen off
-(battery optimization), and that the ringtone picker's choices play. Samsung's
-"Deep sleeping apps" list can stop an app altogether; the app should be on
-"Never sleeping apps".
+restrict full-screen intents), and that the ringtone picker's choices play.
+Samsung's "Deep sleeping apps" list can stop an app altogether; the app should
+be on "Never sleeping apps".
+
+**Background sync on the Galaxy S22 stopped for three days** (11-11 16:35 to
+11-14 13:18), until the app was opened: alarms still rang, but a task deleted
+on the PC meanwhile rang on the phone. Android's record (`adb shell dumpsys
+activity exit-info com.inhahe.remindme`): at 16:35:35 the process was killed by
+signal 9 while its sync service ran in the foreground (importance 125), not by
+the low-memory killer; Android didn't restart the service. The process came back
+three times later (for alarms) without sync, and was killed for memory as an
+empty one. The app was under battery optimization. On the emulator a killed
+process's sync service comes back within a second, so this was the phone's own
+battery management. Since then, a watchdog alarm starts sync again within 15
+minutes (alarms did reach the app throughout), and the app asks once, after
+linking, to run without battery optimization. **To verify:** after a day or two
+in the background, the PC's Devices list should show the phone in sync; the exit
+record above shows any kill, and the phone's log "Sync wasn't running; starting
+it again." where the watchdog stepped in.
 
 ### Paths the emulator couldn't reach
 - **An alarm firing from deep Doze.** Android refuses to enter deep Doze while

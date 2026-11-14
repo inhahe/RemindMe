@@ -220,7 +220,10 @@ laid out for a phone:
   a sound file.
 - **Settings** also shows whether notifications, exact alarms and full-screen
   alarms are allowed, with a button to fix each. Background sync is most reliable
-  with battery optimization off for the app.
+  with battery optimization off for the app: once the phone is linked with
+  another device, the app asks once to turn it off, and Settings offers it too.
+  If the phone closes the app anyway, sync starts again by itself within 15
+  minutes.
 - **Sync**: while sync is on, a quiet "Keeping your devices in sync" notification
   stays up; that is what lets your other devices reach the phone in the
   background. It puts no badge on the app's icon: a badge means an alarm or a

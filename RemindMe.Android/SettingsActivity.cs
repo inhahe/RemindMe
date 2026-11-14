@@ -111,8 +111,8 @@ public sealed class SettingsActivity : Screen
                 Text = "Battery optimization is on for this app. Alarms still ring, but syncing in the background may pause; "
                     + "for reliable sync, set the app to \"Unrestricted\" (or \"Not optimized\").",
             });
-            var b = new Button(this) { Text = "Battery settings" };
-            b.Click += (_, _) => Permissions.OpenBatterySettings(this);
+            var b = new Button(this) { Text = "Turn it off" };
+            b.Click += (_, _) => Permissions.AskNoBatteryOptimization(this);
             box.AddView(b);
         }
     }

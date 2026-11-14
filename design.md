@@ -871,10 +871,27 @@ it runs on Android 10 (API 29) and up. The root namespace is
   and with it the engine in `AppState`, alive in the background. It is
   `connectedDevice` rather than `dataSync` because Android 15 caps `dataSync` at
   6 hours a day; `CHANGE_WIFI_MULTICAST_STATE` qualifies it. It is sticky, so
-  Android restarts it, and sync, after killing the process; if Android then
-  refuses it the foreground (Android 12 and later, in the background), it stops,
-  and sync waits for the app to be opened. A start refused for any reason (the
-  background, an app op, a permission) is logged, never a crash.
+  Android restarts it, and sync, after killing the process (measured on the
+  emulator, API 36: a killed process's service is back in the foreground within
+  a second). A start refused for any reason (the background, an app op, a
+  permission) is logged, never a crash.
+- **`SyncWatchdog`: sync doesn't wait for the app to be opened.** A phone maker's
+  battery manager may end the process without Android restarting the service (a
+  Galaxy S22 killed it with signal 9 while the service ran in the foreground,
+  and its sync stayed off for three days, until the app was opened), and
+  Android 12 and later may refuse a background restart the foreground. While
+  sync is on, an exact alarm (`SetExactAndAllowWhileIdle`, elapsed time) every
+  15 minutes starts the service again if it isn't running: a foreground service
+  may be started from an exact alarm. A start refused in the background sets
+  that alarm 5 s ahead instead (not when the refusal came from the watchdog's
+  own start, which would repeat). The alarm outlives the process; a reboot or an
+  update clears it, and the boot receiver's start sets it again; turning sync
+  off cancels it.
+- **Battery optimization**: once linked with another device, the list asks once
+  (`BatteryOptimizationAsked`) to let the app run without it, through Android's
+  one-tap prompt (`REQUEST_IGNORE_BATTERY_OPTIMIZATIONS`; Samsung's
+  "Unrestricted"), since with it a battery manager may end the app; Settings
+  offers the same prompt whenever it is on.
 - **Badges on the app's icon are for what asks something of the user**: alarms
   and link requests. The two status channels (sync, and the ringing service's)
   have `ShowBadge` off; since a channel's badge setting can't change once it

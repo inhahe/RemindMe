@@ -40,6 +40,7 @@ public sealed class MainActivity : Screen
         AppState.TasksChanged += Refresh;
         Tick();
         AskForPermissionsOnce();
+        AskAboutBatteryOnce();
         // The app is in the foreground, so the ringing service may start from here.
         if (AlarmScheduler.RingingNow(AppState.Clock.UtcNow, out _).Count > 0 && !RingingService.IsRunning) RingingService.TryStart(this);
         if (AppState.Settings.SyncEnabled && AppState.Sync is null) SyncService.Start(this);
@@ -150,6 +151,31 @@ public sealed class MainActivity : Screen
 
     private void AskForSpecialAccess()
     {
+
+    private bool _batteryAsking;
+
+    /// <summary>
+    /// Once linked with another device, asks once (ever) to let the app run without battery
+    /// optimization: with it, a phone's battery manager may end the app in the background and
+    /// keep sync off for days, until the app is opened. Not while a permission is still
+    /// missing (that is asked first); Settings offers it any time.
+    /// </summary>
+    private void AskAboutBatteryOnce()
+    {
+        var s = AppState.Settings;
+        if (_batteryAsking || s.BatteryOptimizationAsked || !s.SyncEnabled || s.KnownPeers.Count == 0
+            || !Permissions.BatteryOptimized(this) || Permissions.Missing(this).Any()) return;
+        _batteryAsking = true;
+        void Answered() { _batteryAsking = false; AppState.UpdateSettings(x => x.BatteryOptimizationAsked = true); }
+        new AlertDialog.Builder(this).SetTitle("Keep syncing in the background?")!
+            .SetMessage("Android's battery optimization can close RemindMe in the background, and then this phone "
+                + "stops syncing with your other devices until you open the app. Alarms ring either way.\n\n"
+                + "Allow RemindMe to run without battery restrictions? (Settings has this too.)")!
+            .SetPositiveButton("Allow", (_, _) => { Answered(); Permissions.AskNoBatteryOptimization(this); })!
+            .SetNegativeButton("Not now", (_, _) => Answered())!
+            .SetCancelable(false)!
+            .Show();
+    }
         var missing = Permissions.Missing(this).FirstOrDefault();
         if (missing is null) return;
         new AlertDialog.Builder(this).SetTitle(missing.Title)!.SetMessage(missing.Why)!

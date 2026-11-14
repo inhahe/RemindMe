@@ -52,6 +52,19 @@ public static class Permissions
         return !pm.IsIgnoringBatteryOptimizations(c.PackageName);
     }
 
-    public static void OpenBatterySettings(Activity a) =>
-        a.StartActivity(new Intent(Settings.ActionIgnoreBatteryOptimizationSettings));
+    /// <summary>Asks, with Android's own one-tap prompt, to let the app run without battery
+    /// optimization (Samsung's "Unrestricted"); where a phone has no such prompt, opens the
+    /// list of apps' battery settings instead.</summary>
+    public static void AskNoBatteryOptimization(Activity a)
+    {
+        try
+        {
+            a.StartActivity(new Intent(Settings.ActionRequestIgnoreBatteryOptimizations,
+                Android.Net.Uri.Parse($"package:{a.PackageName}")));
+        }
+        catch (ActivityNotFoundException)
+        {
+            a.StartActivity(new Intent(Settings.ActionIgnoreBatteryOptimizationSettings));
+        }
+    }
 }

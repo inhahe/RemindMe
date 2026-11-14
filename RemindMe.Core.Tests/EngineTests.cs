@@ -440,4 +440,13 @@ public class TextFormatTests
         Assert.Equal("Buy milk …", TextFormat.Snippet("Buy milk\nand eggs"));
         Assert.Equal("abc…", TextFormat.Snippet("abcdefgh", 4));
     }
+
+    [Fact]
+    public void TheStatusLineSaysWhetherAnyDeviceIsInSync()
+    {
+        Assert.Equal("", TextFormat.SyncSummary(syncOn: false, 0));
+        Assert.Equal(" · no device connected", TextFormat.SyncSummary(syncOn: true, 0));
+        Assert.Equal(" · in sync with 1 device", TextFormat.SyncSummary(syncOn: true, 1));
+        Assert.Equal(" · in sync with 2 devices", TextFormat.SyncSummary(syncOn: true, 2));
+    }
 }

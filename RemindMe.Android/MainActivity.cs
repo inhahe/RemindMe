@@ -73,13 +73,7 @@ public sealed class MainActivity : Screen
         int ringing = statuses.Count(s => s.ShouldAlert), waiting = statuses.Count(s => s.Snoozed);
         _status.Text = $"{statuses.Count} task{(statuses.Count == 1 ? "" : "s")}"
             + (ringing > 0 ? $" · {ringing} ringing" : "") + (waiting > 0 ? $" · {waiting} waiting to be marked done" : "")
-            + (AppState.Settings.SyncEnabled ? $" · {SyncSummary()}" : "");
-    }
-
-    private static string SyncSummary()
-    {
-        var n = AppState.Sync?.Peers().Count(p => p.Linked && p.Connected) ?? 0;
-        return n == 0 ? "no device connected" : $"in sync with {n} device{(n == 1 ? "" : "s")}";
+            + TextFormat.SyncSummary(AppState.Settings.SyncEnabled, AppState.Sync?.Peers().Count(p => p.Linked && p.Connected) ?? 0);
     }
 
     private void ShowActions(TaskStatus st, View anchor)
@@ -151,6 +145,12 @@ public sealed class MainActivity : Screen
 
     private void AskForSpecialAccess()
     {
+        var missing = Permissions.Missing(this).FirstOrDefault();
+        if (missing is null) return;
+        new AlertDialog.Builder(this).SetTitle(missing.Title)!.SetMessage(missing.Why)!
+            .SetPositiveButton("Open settings", (_, _) => missing.Fix(this))!
+            .SetNegativeButton("Not now", (_, _) => { })!.Show();
+    }
 
     private bool _batteryAsking;
 
@@ -175,12 +175,6 @@ public sealed class MainActivity : Screen
             .SetNegativeButton("Not now", (_, _) => Answered())!
             .SetCancelable(false)!
             .Show();
-    }
-        var missing = Permissions.Missing(this).FirstOrDefault();
-        if (missing is null) return;
-        new AlertDialog.Builder(this).SetTitle(missing.Title)!.SetMessage(missing.Why)!
-            .SetPositiveButton("Open settings", (_, _) => missing.Fix(this))!
-            .SetNegativeButton("Not now", (_, _) => { })!.Show();
     }
 }
 

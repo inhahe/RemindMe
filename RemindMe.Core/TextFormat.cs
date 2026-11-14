@@ -105,6 +105,13 @@ public static class TextFormat
     /// <summary>"1 task", "3 tasks": a count of tasks.</summary>
     public static string Tasks(int n) => $"{n} task{(n == 1 ? "" : "s")}";
 
+    /// <summary>The task list's status line's word on sync: " · in sync with 2 devices",
+    /// " · no device connected" (say for days, while a linked device is unreachable: worth
+    /// seeing), or nothing while sync is off.</summary>
+    /// <param name="connected">How many linked devices are in sync now.</param>
+    public static string SyncSummary(bool syncOn, int connected) =>
+        !syncOn ? "" : connected == 0 ? " · no device connected" : $" · in sync with {connected} device{(connected == 1 ? "" : "s")}";
+
     /// <summary>"Exported 3 tasks." or "Exported 3 tasks to C:\…\file.json.": what an export did.</summary>
     /// <param name="count">How many tasks the file holds.</param>
     /// <param name="destination">Where it went, when worth saying.</param>

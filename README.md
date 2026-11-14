@@ -205,7 +205,8 @@ laid out for a phone:
 - **The list**: tap a task to edit it, long-press for Mark done, Show alarm,
   Restart countdown, Pause or Resume, and Delete, and tap **+** for a new task. The ⋮ menu has
   **Calendar**, **Devices and sync** and **Settings**.
-- **The editor**: as on Windows. **Back** or **Cancel** leaves without saving.
+- **The editor**: as on Windows. **Back** or **Cancel** leaves without saving;
+  **Delete** (for a task that exists) deletes it, after asking.
 - **When a task comes up**: with the phone locked, the alarm screen opens over
   the lock screen; otherwise it appears as a notification with **Mark done** and
   **Remind me later** (tap it for the full alarm screen). Back on the alarm screen

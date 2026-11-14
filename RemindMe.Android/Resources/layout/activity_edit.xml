@@ -142,7 +142,12 @@
     </ScrollView>
 
     <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
-        android:gravity="end" android:padding="8dp">
+        android:gravity="center_vertical" android:padding="8dp">
+        <!-- Shown for a task that exists (TaskEditActivity), apart from Save and Cancel. -->
+        <Button android:id="@+id/delete" style="@style/Widget.Material3.Button.TextButton"
+            android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Delete"
+            android:textColor="@color/error" android:visibility="gone" />
+        <Space android:layout_width="0dp" android:layout_height="0dp" android:layout_weight="1" />
         <Button android:id="@+id/cancel" style="@style/Widget.Material3.Button.TextButton"
             android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Cancel" />
         <Button android:id="@+id/save" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Save" />

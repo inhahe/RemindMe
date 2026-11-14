@@ -117,6 +117,21 @@ public sealed class TaskEditActivity : Screen
         Find<Button>(Resource.Id.sound).Click += (_, _) => _chooser.Show(_sound, allowDefault: true);
         Find<Button>(Resource.Id.save).Click += (_, _) => Save();
         Find<Button>(Resource.Id.cancel).Click += (_, _) => Finish();
+        // Deleting is also on a long-press in the list, but here is where people look for it.
+        var delete = Find<Button>(Resource.Id.delete);
+        if (_id is { } taskId)
+        {
+            delete.Visibility = ViewStates.Visible;
+            delete.Click += (_, _) =>
+            {
+                var name = TextFormat.Snippet(AppState.Store.Get(taskId)?.Def.Description ?? "", 40);
+                Ui.Confirm(this, "Delete", $"Delete \"{(name.Length > 0 ? name : "this task")}\"?", "Delete", () =>
+                {
+                    AppState.Store.Delete(taskId);
+                    Finish();
+                });
+            };
+        }
         foreach (var id in new[] { Resource.Id.scheduled, Resource.Id.countdown, Resource.Id.interval, Resource.Id.weekly, Resource.Id.once })
             Find<RadioButton>(id).CheckedChange += (_, _) => UpdatePanes();
 

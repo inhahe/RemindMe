@@ -310,11 +310,10 @@ public sealed class TaskEditActivity : Screen
             FadeInSeconds = Find<Spinner>(Resource.Id.fade_in).SelectedItemPosition is > 0 and var fi ? SoundLevels.FadeIns[fi - 1] : null,
         }).WithSound(Platforms.Android, _sound);
 
-        if (errors.Count > 0)
-        {
-            Find<TextView>(Resource.Id.error).Text = string.Join("\n", errors);
-            return;
-        }
+        var errorLine = Find<TextView>(Resource.Id.error);
+        errorLine.Text = string.Join("\n", errors);
+        errorLine.Visibility = errors.Count > 0 ? ViewStates.Visible : ViewStates.Gone;   // no blank line while empty
+        if (errors.Count > 0) return;
         var restart = Find<CheckBox>(Resource.Id.cd_restart);
         if (_id is not { } id || _deleted) AppState.Store.Add(d);
         else if (AppState.Store.Save(id, d, restart.Visibility == ViewStates.Visible && restart.Checked) is null)

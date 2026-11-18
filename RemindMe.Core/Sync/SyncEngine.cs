@@ -294,9 +294,9 @@ public sealed class SyncEngine : IDisposable
         return _otherProtocol.TryGetValue(node, out var o) && Ticks - o.At <= (long)OtherProtocolShown.TotalMilliseconds ? o.Proto : null;
     }
 
-    /// <summary>How many of the devices <paramref name="linked"/> speak another sync protocol
-    /// (<see cref="OtherProtocolOf"/>): the status line's count.</summary>
-    public int OtherProtocolCount(IEnumerable<KnownPeer> linked) => linked.Count(k => OtherProtocolOf(k.NodeId) is not null);
+    /// <summary>How many linked devices speak another sync protocol (<see cref="OtherProtocolOf"/>):
+    /// the status line's count, beside <see cref="InSyncCount"/>.</summary>
+    public int OtherProtocolCount() => KnownPeers().Count(k => OtherProtocolOf(k.NodeId) is not null);
 
     /// <summary>The state of each configured remote address, for the Devices screen.</summary>
     public IReadOnlyList<(string Address, string State)> RemoteStates()
@@ -546,8 +546,9 @@ public sealed class SyncEngine : IDisposable
         _nearby[node] = new Nearby(msg, ep, now, old?.FirstSeen ?? now, member);
         if (!known) RaisePeersChanged();
 
-        // Only group members are dialled; others wait for a pairing.
-        if (!member) return;
+        // Only group members are dialled; others wait for a pairing. Nor is a member that
+        // announces another sync protocol: its hello would be refused, every few seconds.
+        if (!member || msg.Proto != Protocol.Version) return;
         lock (_lock) if (_sessions.ContainsKey(node)) { _nearby[node] = _nearby[node] with { FirstSeen = now }; return; }
         if (MayDial(node, now - (old?.FirstSeen ?? now))) _ = DialNodeAsync(node, ep);
     }
@@ -945,12 +946,15 @@ public sealed class SyncEngine : IDisposable
 
     /// <summary>A hello in another sync protocol, which <see cref="PeerSession.AcceptHello"/>
     /// refuses. A linked device's is recorded for <see cref="OtherProtocolOf"/>, and logged
-    /// when it first says so (it says so at every dial); anyone else's is logged.</summary>
+    /// when it first says so (it says so at every dial); anyone else's is logged. One that
+    /// claims the ID of a linked device in sync now isn't that device: it is anyone's.</summary>
     private void NoteOtherProtocol(PeerSession s, SyncMessage hello)
     {
         int proto = hello.Proto ?? 0;
         var node = hello.Node;
         var linked = node is null ? null : KnownPeers().FirstOrDefault(k => k.NodeId == node);
+        if (linked is not null)
+            lock (_lock) if (_sessions.TryGetValue(linked.NodeId, out var live) && live.Authenticated) linked = null;
         if (linked is not null)
         {
             bool news = !_otherProtocol.TryGetValue(linked.NodeId, out var old) || old.Proto != proto;

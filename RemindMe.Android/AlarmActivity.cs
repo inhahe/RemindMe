@@ -117,6 +117,14 @@ public sealed class AlarmActivity : Screen
         base.OnPause();
     }
 
+    protected override void OnStop()
+    {
+        // The phone locked (or the screen left) while the question was up: back over the lock
+        // screen, it would let anyone delete. Asked again, it unlocks first.
+        DismissDeleteQuestion();
+        base.OnStop();
+    }
+
     protected override void OnDestroy()
     {
         AppState.TasksChanged -= Refresh;
@@ -131,13 +139,14 @@ public sealed class AlarmActivity : Screen
         Find<Button>(Resource.Id.silence).Enabled = false;
     }
 
-    /// <summary>Asks whether to delete the task shown, silencing it meanwhile. Over the lock
-    /// screen the phone is unlocked first: anyone can answer an alarm there, but deleting a
-    /// task, on every linked device, is the owner's call. Deleted, the task leaves this
-    /// screen by itself (<see cref="Refresh"/>).</summary>
+    /// <summary>Asks whether to delete the task shown, silencing it meanwhile if it rings (a
+    /// screen opened by "Show alarm" for a snoozed task doesn't: silenced now, its reminder
+    /// would ring with Silence greyed out). Over the lock screen the phone is unlocked first:
+    /// anyone can answer an alarm there, but deleting a task, on every linked device, is the
+    /// owner's call. Deleted, the task leaves this screen by itself (<see cref="Refresh"/>).</summary>
     private void AskToDelete()
     {
-        Silence();
+        if (AppState.Store.Status(_id)?.ShouldAlert == true) Silence();
         var id = _id;
         void Ask()
         {

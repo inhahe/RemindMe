@@ -75,6 +75,7 @@ with its own version (a hybrid logical clock, `Hlc`):
 | Field | Meaning |
 |---|---|
 | `Revision` | The `ScheduleRevision` this state was written against |
+| `Incarnation` | The definition's `Incarnation` this state was written for: a restored task's state outranks every state of the task before its deletion (*Sync merge*) |
 | `Anchor` | Wall-clock time that replaces `Start` after a `FromDone` mark-done |
 | `CountdownEndsUtc` | When a running countdown ends. An instant, so it survives reboots (R12). |
 | `DoneThroughUtc` | Every occurrence at or before this has been dealt with. It only ever goes up. |
@@ -237,17 +238,17 @@ from sync.
   paused task keeps its own, since resuming passes over the past anyway. One
   consequence: once linked, the raise reaches the device the file came from too,
   passing over an occurrence still waiting there, as marking it done here would.
-- A task this device deleted comes back as a new incarnation, with a fresh
-  `DefVersion`, outranking the tombstone (and any edit of the deleted
-  incarnation made elsewhere), and its state merges as above. It gets a new
-  revision, with a fresh `StateVersion` and `DoneThrough` = now, only if the tombstone is of a
-  newer revision than the file, in its state or in its definition (the task was
-  rescheduled after the export, then deleted). The definition counts because it
-  syncs apart from the state: a schedule's definition can arrive before its
-  state, which would otherwise outrank the restored one when it comes.
+- A task this device deleted comes back as a new incarnation, of its definition
+  and its state, with fresh versions. That outranks the tombstone, and anything
+  written for the deleted incarnation elsewhere. The state is the file's, merged
+  with the tombstone's when the two are of the same schedule, with the past
+  passed over. A file that holds a later incarnation than the tombstone's (the
+  task was restored elsewhere and backed up since) isn't restored again. It
+  merges like any record, so it can't outrank edits made since the backup.
 - Records that aren't well formed (`MergeRules.IsWellFormed`: no ID,
-  definition or state, a null description or sound name) are skipped, as sync
-  skips them. JSON can leave a member null whatever its declared type: an
+  definition or state, a null description or sound name, an incarnation
+  outside 0 to `MaxIncarnation`, which a restore's +1 mustn't overflow) are
+  skipped, as sync skips them. JSON can leave a member null whatever its declared type: an
   explicit `null`, or a record's missing constructor parameter.
 - The change is raised as a local one, so it reaches linked devices like an
   edit.
@@ -339,8 +340,14 @@ Each part of a task merges on its own:
 - **Definition**: the higher `DefRank` wins: `(Incarnation, Deleted,
   DefVersion)`, compared in that order. Within one incarnation, then, a deletion
   outranks every edit, and otherwise the last writer wins.
-- **State**: last writer wins by `(Revision, StateVersion)`, except that
+- **State**: the higher `StateRank` wins: `(Incarnation, Revision,
+  StateVersion)`. Within one incarnation and revision (one schedule),
   `DoneThroughUtc` is always the **maximum** of the two sides, whichever wins.
+  The state's incarnation means a restored definition always comes back with
+  its own state. Otherwise a later schedule's state, written elsewhere for the
+  task before its deletion, would outrank it by revision. That state can be
+  another kind's (a one-time task's, with no countdown end), and with it the
+  restored task would never ring.
 
 A deletion has to outrank later edits because the alternative brings deleted
 tasks back. Suppose the PC deletes a task while the phone, out of touch, still
@@ -499,7 +506,12 @@ separately (see *Simplification opportunities*).
   it was refused for: shown for 10 minutes, renewed at each dial, dropped once
   the device is in sync, and logged once rather than at every dial. A hello is
   unauthenticated, so this is a hint shown, never acted on. Only linked
-  devices' hellos are kept, so a flood of made-up IDs can't grow the table.
+  devices' hellos are kept, so a flood of made-up IDs can't grow the table. A
+  hello claiming the ID of a device in sync now isn't kept either, and
+  `OtherProtocolOf` says nothing while a device is in sync. A member announcing
+  another protocol isn't dialled: its hello would only be refused, every few
+  seconds. And a nearby device on another protocol can't be linked: neither
+  Devices list offers Link for it.
 - **Bounded noise.** At most 256 devices are remembered from announcements. When
   the table is full, a proven member still gets in, in place of the stalest
   stranger, and a stranger's announcement can't take over a fresh member's
@@ -884,12 +896,14 @@ it runs on Android 10 (API 29) and up. The root namespace is
   again for the task it shows, it keeps what the user has typed. Opened from
   "Show alarm", it stays up while its task is merely waiting. Back counts as
   Close, remind me later, and only reminder and restart fields the user changed
-  are written back. "Delete this task" silences the alarm, and asks first.
-  Over the lock screen, the phone is unlocked before it asks
-  (`RequestDismissKeyguard`): anyone can answer an alarm there, but deleting the
-  task on every linked device is for the owner. The question belongs to the
-  task it asks about. It goes when the screen moves on to another task or
-  closes.
+  are written back. "Delete this task" silences the alarm if it rings, and asks
+  first. It doesn't silence a screen opened by "Show alarm": its reminder would
+  then ring with Silence greyed out. Over the lock screen, the phone is unlocked
+  before it asks (`RequestDismissKeyguard`): anyone can answer an alarm there,
+  but deleting the task on every linked device is for the owner. The question
+  belongs to the task it asks about. It goes when the screen moves on to
+  another task, closes, or stops (the phone locked again), so it is never left
+  open over the lock screen.
 - `TaskEditActivity`: once its task is deleted (from its alarm screen, or on a
   linked device), it says so, in the toolbar and on a line below the scrolling
   form (where the validation errors are too), and "Save as new task" adds the

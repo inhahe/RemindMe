@@ -837,11 +837,11 @@ public sealed class SyncTests : IDisposable
     /// announce at <paramref name="at"/>, as announcement <paramref name="seq"/> of its process
     /// <paramref name="boot"/>.</summary>
     private static SyncMessage MemberAnnouncement(SyncIdentity group, string node, int port, DateTimeOffset at,
-        string boot = "0123456789abcdef0123456789abcdef", long seq = 1)
+        string boot = "0123456789abcdef0123456789abcdef", long seq = 1, int proto = Protocol.Version)
     {
         var m = new SyncMessage
         {
-            Type = MessageTypes.Announce, App = Protocol.App, Proto = Protocol.Version, Node = node, Name = "B",
+            Type = MessageTypes.Announce, App = Protocol.App, Proto = proto, Node = node, Name = "B",
             Group = group.GroupId, Port = port, At = at.ToUnixTimeSeconds(), Boot = boot, Seq = seq,
         };
         m.Mac = SyncCrypto.AnnouncementMac(Convert.FromBase64String(group.GroupKeyBase64), m);
@@ -1027,7 +1027,7 @@ public sealed class SyncTests : IDisposable
             Assert.Null(ea.OtherProtocolOf(stranger.Node));
         }
 
-        Node(b, Addr(ea));
+        var (eb, _) = Node(b, Addr(ea));
         await WaitFor(() => ea.Peers().Any(p => p.NodeId == b.NodeId && p.Connected), "A and B in sync");
         Assert.Null(ea.OtherProtocolOf(b.NodeId));
 
@@ -1039,7 +1039,32 @@ public sealed class SyncTests : IDisposable
             Assert.Null(await impostor.ReceiveAsync());
         }
         Assert.Null(ea.OtherProtocolOf(b.NodeId));
-        Assert.Equal(0, ea.OtherProtocolCount(known));
+        Assert.Equal(0, ea.OtherProtocolCount());
+        // Nor once B has gone: the impostor's claim was never kept.
+        eb.Dispose();
+        await WaitFor(() => !ea.Peers().Any(p => p.NodeId == b.NodeId && p.Connected), "B gone");
+        Assert.Null(ea.OtherProtocolOf(b.NodeId));
+    }
+
+    [Fact]
+    public async Task AMemberAnnouncingAnotherProtocolIsShownSoAndNotDialled()
+    {
+        // Its hello would be refused: dialling it at each announcement would only churn.
+        var a = NewIdentity("A");
+        var (ea, _) = Node(a);
+        using var listener = new TcpListener(IPAddress.Loopback, 0);
+        listener.Start();
+        int port = ((IPEndPoint)listener.LocalEndpoint).Port;
+        var b = new string('f', 32);   // above A's ID, so A is the one to dial
+        ea.OnAnnounced(MemberAnnouncement(a, b, port, DateTimeOffset.UtcNow, proto: Protocol.Version - 1), IPAddress.Loopback);
+        Assert.Equal(Protocol.Version - 1, ea.Peers().Single(p => p.NodeId == b).OtherProtocol);
+        var dialled = listener.AcceptTcpClientAsync();
+        Assert.NotSame(dialled, await Task.WhenAny(dialled, Task.Delay(1500)));
+        // Updated, it is dialled at its next announcement.
+        ea.OnAnnounced(MemberAnnouncement(a, b, port, DateTimeOffset.UtcNow, seq: 2), IPAddress.Loopback);
+        Assert.Null(ea.Peers().Single(p => p.NodeId == b).OtherProtocol);
+        Assert.Same(dialled, await Task.WhenAny(dialled, Task.Delay(5000)));
+        (await dialled).Dispose();
     }
 
     [Fact]

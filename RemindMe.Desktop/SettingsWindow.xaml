@@ -49,7 +49,7 @@
                         <RadioButton x:Name="RestartFromDone" GroupName="Restart" Margin="12,3,0,0"
                                      Content="N after it's marked _done" />
                         <RadioButton x:Name="RestartOnSchedule" GroupName="Restart" Margin="12,2,0,0"
-                                     Content="on the _original schedule" />
+                                     Content="on the original sc_hedule" />
                     </StackPanel>
                 </Border>
 

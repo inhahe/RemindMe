@@ -140,7 +140,7 @@ public partial class TaskEditorWindow : Window
         _deleted = deleted;
         Title = deleted ? "Edit task (deleted)" : "Edit task";
         DeletedNotice.Text = deleted ? TextFormat.DeletedWhileEditing : "";
-        SaveButton.Content = deleted ? "Save as _new task" : "_Save";
+        SaveButton.Content = deleted ? "_Save as new task" : "_Save";
     }
 
     private void BuildDayBoxes()

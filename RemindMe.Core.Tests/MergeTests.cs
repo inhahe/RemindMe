@@ -237,6 +237,71 @@ public class MergeTests
     }
 
     [Fact]
+    public void ARestoredTaskKeepsItsOwnStateAgainstALaterScheduleOfTheDeletedOne()
+    {
+        // The PC deletes a countdown. The phone, not yet told, makes it a one-time task (a
+        // later schedule revision). Then the PC restores the countdown from a backup. The
+        // countdown's own state must come back with it: paired with the one-time task's
+        // state, a countdown has no end, and never rings.
+        var (a, b, ca, cb) = TwoDevices();
+        var t = a.Add(new TaskDefinition { Description = "tea", Kind = ScheduleKind.Countdown, Duration = TimeSpan.FromMinutes(30) });
+        Sync(a, b);
+        var backup = a.Export();
+        ca.Advance(TimeSpan.FromMinutes(1));
+        a.Delete(t.Id);
+        cb.Advance(TimeSpan.FromMinutes(2));
+        Assert.Equal(2, b.Save(t.Id, t.Def with { Kind = ScheduleKind.Once, At = Wall(cb.UtcNow).AddHours(1) })!.State.Revision);
+        ca.Advance(TimeSpan.FromMinutes(3));
+        Assert.Equal(new ImportResult(1, 0, 0), a.Import(backup));
+        Sync(a, b);
+        foreach (var s in new[] { a, b })
+        {
+            var x = s.Get(t.Id)!;
+            Assert.Equal(ScheduleKind.Countdown, x.Def.Kind);
+            Assert.NotNull(x.State.CountdownEndsUtc);
+        }
+        Assert.Equal(a.Get(t.Id), b.Get(t.Id));
+    }
+
+    [Fact]
+    public void ImportingAFileOfALaterIncarnationMergesItAsItIs()
+    {
+        // Both devices deleted the task; A restored it, backed it up, and edited it since. C
+        // imports A's backup before hearing of any of it. The file's copy already outranks C's
+        // tombstone, so it merges as any record would, and A's later edit still wins.
+        var (a, c, ca, cc) = TwoDevices();
+        var t = a.Add(Hourly(ca));
+        var early = a.Export();
+        Sync(a, c);
+        ca.Advance(TimeSpan.FromMinutes(1));
+        a.Delete(t.Id);
+        Sync(a, c);
+        ca.Advance(TimeSpan.FromMinutes(1));
+        a.Import(early);
+        var restored = a.Export();
+        ca.Advance(TimeSpan.FromMinutes(1));
+        a.Save(t.Id, a.Get(t.Id)!.Def with { Description = "edited after" });
+        cc.Advance(TimeSpan.FromMinutes(5));
+        Assert.Equal(new ImportResult(1, 0, 0), c.Import(restored));
+        Assert.Equal(1, c.Get(t.Id)!.Def.Incarnation);
+        Sync(a, c);
+        Assert.Equal("edited after", c.Get(t.Id)!.Def.Description);
+        Assert.Equal(a.Get(t.Id), c.Get(t.Id));
+    }
+
+    [Fact]
+    public void AnIncarnationOutOfRangeIsMalformed()
+    {
+        // A restore adds one: a record claiming the most there can be would overflow.
+        var (a, _, ca, _) = TwoDevices();
+        var t = a.Add(Hourly(ca));
+        Assert.True(MergeRules.IsWellFormed(t));
+        Assert.False(MergeRules.IsWellFormed(t with { Def = t.Def with { Incarnation = int.MaxValue } }));
+        Assert.False(MergeRules.IsWellFormed(t with { Def = t.Def with { Incarnation = -1 } }));
+        Assert.False(MergeRules.IsWellFormed(t with { State = t.State with { Incarnation = MergeRules.MaxIncarnation + 1 } }));
+    }
+
+    [Fact]
     public void MergeIsOrderIndependent()
     {
         var (a, b, ca, cb) = TwoDevices();
@@ -518,9 +583,11 @@ public class ExportImportTests
         // The schedule wasn't changed after the export, so the revision needn't be either.
         Assert.Equal(t.State.Revision, back.State.Revision);
 
-        // The restored task outranks the tombstone wherever they meet.
-        var tombstone = t with { Def = t.Def with { Deleted = true }, DefVersion = new Hlc(back.DefVersion.Ms - 1, 0, "node-z") };
+        // The restored task outranks the tombstone wherever they meet, even one written later
+        // elsewhere (by a device that hadn't heard of the restore): it is the old incarnation's.
+        var tombstone = t with { Def = t.Def with { Deleted = true }, DefVersion = new Hlc(back.DefVersion.Ms + 60_000, 0, "node-z") };
         Assert.False(MergeRules.Merge(back, tombstone).Def.Deleted);
+        Assert.False(MergeRules.Merge(tombstone, back).Def.Deleted);
     }
 
     [Fact]
@@ -534,13 +601,15 @@ public class ExportImportTests
         });
         var backup = a.Export();
         _clock.Advance(TimeSpan.FromMinutes(1));
-        a.Save(t.Id, t.Def with { Start = new DateTime(2026, 6, 1, 20, 0, 0) });   // revision 2
+        var evening = a.Save(t.Id, t.Def with { Start = new DateTime(2026, 6, 1, 20, 0, 0) })!;   // revision 2
         a.Delete(t.Id);
         _clock.UtcNow = NY(2026, 6, 5, 10);
         Assert.Equal(new ImportResult(1, 0, 0), a.Import(backup));
         var back = a.Get(t.Id)!;
         Assert.Equal(new DateTime(2026, 6, 1, 8, 0, 0), back.Def.Start);
-        Assert.Equal(3, back.State.Revision);   // outranks the state written for 20:00 everywhere
+        Assert.Equal((1, 1), (back.Def.Incarnation, back.State.Incarnation));
+        // It outranks the state written for 20:00 wherever they meet (a device still holding it).
+        Assert.Equal(back, MergeRules.Merge(evening, back));
         Assert.False(a.Status(t.Id)!.Triggered);
         Assert.Equal(NY(2026, 6, 6, 8), a.Status(t.Id)!.NextOccurrence);
     }
@@ -568,11 +637,11 @@ public class ExportImportTests
         _clock.UtcNow = NY(2026, 6, 5, 10);
 
         a.Import(file);
-        Assert.Equal(3, a.Get(t.Id)!.State.Revision);
+        Assert.Equal(1, a.Get(t.Id)!.State.Incarnation);
         a.Merge(b.All());   // b's revision-2 state arrives
         var back = a.Get(t.Id)!;
         Assert.Equal(new DateTime(2026, 6, 1, 8, 0, 0), back.Def.Start);
-        Assert.Equal(3, back.State.Revision);   // the state still belongs to the schedule shown
+        Assert.Equal((1, 1), (back.State.Incarnation, back.State.Revision));   // the state still belongs to the schedule shown
         Assert.Equal(NY(2026, 6, 6, 8), a.Status(t.Id)!.NextOccurrence);
     }
 

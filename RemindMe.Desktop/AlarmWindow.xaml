@@ -30,7 +30,7 @@
                 <StackPanel x:Name="RestartPanel" Margin="0,12,0,0">
                     <TextBlock Text="The next time comes up:" />
                     <RadioButton x:Name="FromDoneRadio" Margin="12,4,0,0"
-                                 Content="_counted from when I mark this done (the timer restarts then)" />
+                                 Content="counted from when I mark this done (the _timer restarts then)" />
                     <RadioButton x:Name="OnScheduleRadio" Margin="12,2,0,0"
                                  Content="on the _original schedule, whenever I mark this done" />
                 </StackPanel>

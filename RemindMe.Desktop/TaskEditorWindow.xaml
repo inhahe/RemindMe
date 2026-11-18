@@ -20,7 +20,7 @@
 
                 <!-- R3: Scheduled vs Countdown, each with its own rounded pane. -->
                 <RadioButton x:Name="ScheduledRadio" GroupName="Top" Style="{StaticResource PaneRadio}"
-                             Content="_Scheduled" Margin="0,12,0,3" />
+                             Content="Sc_heduled" Margin="0,12,0,3" />
                 <Border Style="{StaticResource Pane}">
                     <StackPanel Style="{StaticResource PaneBody}"
                                 IsEnabled="{Binding IsChecked, ElementName=ScheduledRadio}">
@@ -46,7 +46,7 @@
                                 </WrapPanel>
                                 <TextBlock Text="When it's marked done, the next time comes up:" Margin="0,8,0,2" />
                                 <RadioButton x:Name="FromDoneRadio" GroupName="Restart" Margin="12,2,0,0"
-                                             Content="N after it's marked _done (the timer restarts then)" />
+                                             Content="N after it's marked done (the _timer restarts then)" />
                                 <RadioButton x:Name="OnScheduleRadio" GroupName="Restart" Margin="12,2,0,0"
                                              Content="on the _original schedule, as soon as the time comes up" />
                             </StackPanel>

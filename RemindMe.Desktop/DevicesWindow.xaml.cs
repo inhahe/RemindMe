@@ -75,7 +75,8 @@ public partial class DevicesWindow : Window
         StatusText.Text = AppHost.SyncStatus + string.Concat(remotes.Select(r => $"\n{r.Address}: {r.State}"));
         var now = AppHost.Clock.UtcNow;
         var live = AppHost.Sync?.Peers() ?? [];
-        var shown = live.Select(p => (p.NodeId, p.Name, Status: RemindMe.PairText.DeviceStatus(p), Address: p.Address ?? "", CanLink: !p.Linked)).ToList();
+        var shown = live.Select(p => (p.NodeId, p.Name, Status: RemindMe.PairText.DeviceStatus(p), Address: p.Address ?? "",
+            CanLink: !p.Linked && p.OtherProtocol is null)).ToList();   // another version can't link until updated
         foreach (var k in AppHost.Settings.KnownPeers.Where(k => shown.All(r => r.NodeId != k.NodeId)))
             shown.Add((k.NodeId, k.Name, RemindMe.PairText.LastInSync(k, AppHost.Sync?.OtherProtocolOf(k.NodeId), now, AppHost.Clock.Zone), k.Address ?? "", false));
 

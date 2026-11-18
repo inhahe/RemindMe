@@ -30,7 +30,8 @@ internal sealed class ExportFile
 public sealed record ImportResult(int Added, int Updated, int Unchanged);
 
 /// <summary>One line of a sync digest: enough to tell which side holds the newer record.</summary>
-public sealed record DigestEntry(Guid Id, int Incarnation, bool Deleted, Hlc DefVersion, int Revision, Hlc StateVersion, DateTimeOffset DoneThroughUtc);
+public sealed record DigestEntry(Guid Id, int Incarnation, bool Deleted, Hlc DefVersion,
+    int StateIncarnation, int Revision, Hlc StateVersion, DateTimeOffset DoneThroughUtc);
 
 /// <summary>
 /// What decides which of two copies of a task's definition wins: the later
@@ -51,45 +52,72 @@ public readonly record struct DefRank(int Incarnation, bool Deleted, Hlc Version
         : Version.CompareTo(other.Version);
 }
 
+/// <summary>
+/// What decides which of two copies of a task's state wins: the later
+/// <see cref="TaskState.Incarnation"/> (as for the definition, so a restored task's state is
+/// never one written for the task before its deletion), then the later schedule revision,
+/// then the newer version.
+/// </summary>
+public readonly record struct StateRank(int Incarnation, int Revision, Hlc Version) : IComparable<StateRank>
+{
+    public static StateRank Of(AlarmTask t) => new(t.State.Incarnation, t.State.Revision, t.StateVersion);
+
+    public static StateRank Of(DigestEntry e) => new(e.StateIncarnation, e.Revision, e.StateVersion);
+
+    /// <summary>Written for the same schedule as <paramref name="other"/>: then "done" merges
+    /// by maximum, whichever wins.</summary>
+    public bool SameSchedule(StateRank other) => Incarnation == other.Incarnation && Revision == other.Revision;
+
+    public int CompareTo(StateRank other) =>
+        Incarnation != other.Incarnation ? Incarnation.CompareTo(other.Incarnation)
+        : Revision != other.Revision ? Revision.CompareTo(other.Revision)
+        : Version.CompareTo(other.Version);
+}
+
 /// <summary>The merge rules of design.md → <i>Sync merge</i>.</summary>
 public static class MergeRules
 {
+    /// <summary>The most times a task is taken to have been brought back. A record claiming
+    /// more (or fewer than none) is malformed: a restore adds one, which mustn't overflow.</summary>
+    public const int MaxIncarnation = 1_000_000;
+
     /// <summary>The record both sides converge on, whichever order they see the two in.</summary>
     public static AlarmTask Merge(AlarmTask local, AlarmTask remote)
     {
         var (def, defVersion) = DefRank.Of(remote).CompareTo(DefRank.Of(local)) > 0
             ? (remote.Def, remote.DefVersion) : (local.Def, local.DefVersion);
-        var winner = StateOrder(remote.State.Revision, remote.StateVersion, local.State.Revision, local.StateVersion) > 0
-            ? remote : local;
-        // Within one schedule revision, "done" only ever moves forward, whichever write wins.
-        // A newer revision (a schedule edit) replaces it outright, which is also how a
+        StateRank localRank = StateRank.Of(local), remoteRank = StateRank.Of(remote);
+        var winner = remoteRank.CompareTo(localRank) > 0 ? remote : local;
+        // Within one schedule, "done" only ever moves forward, whichever write wins. A newer
+        // schedule (a schedule edit, or a restore) replaces it outright, which is also how a
         // DoneThrough left in the future by a wrong clock gets cleared.
-        var state = local.State.Revision == remote.State.Revision
+        var state = localRank.SameSchedule(remoteRank)
             ? winner.State with { DoneThroughUtc = TimeMath.Max(local.State.DoneThroughUtc, remote.State.DoneThroughUtc) }
             : winner.State;
         return local with { Def = def, DefVersion = defVersion, State = state, StateVersion = winner.StateVersion };
     }
 
-    /// <summary>Positive when (rA, vA) orders after (rB, vB).</summary>
-    public static int StateOrder(int rA, Hlc vA, int rB, Hlc vB) =>
-        rA != rB ? rA.CompareTo(rB) : vA.CompareTo(vB);
-
     /// <summary>True when <paramref name="local"/> holds something <paramref name="peer"/>'s
     /// copy lacks, so it should be sent.</summary>
-    public static bool IsNewerThan(AlarmTask local, DigestEntry peer) =>
-        DefRank.Of(local).CompareTo(DefRank.Of(peer)) > 0
-        || StateOrder(local.State.Revision, local.StateVersion, peer.Revision, peer.StateVersion) > 0
-        || (local.State.Revision == peer.Revision && local.State.DoneThroughUtc > peer.DoneThroughUtc);
+    public static bool IsNewerThan(AlarmTask local, DigestEntry peer)
+    {
+        StateRank mine = StateRank.Of(local), theirs = StateRank.Of(peer);
+        return DefRank.Of(local).CompareTo(DefRank.Of(peer)) > 0
+            || mine.CompareTo(theirs) > 0
+            || (mine.SameSchedule(theirs) && local.State.DoneThroughUtc > peer.DoneThroughUtc);
+    }
 
     public static DigestEntry DigestOf(AlarmTask t) =>
-        new(t.Id, t.Def.Incarnation, t.Def.Deleted, t.DefVersion, t.State.Revision, t.StateVersion, t.State.DoneThroughUtc);
+        new(t.Id, t.Def.Incarnation, t.Def.Deleted, t.DefVersion, t.State.Incarnation, t.State.Revision, t.StateVersion, t.State.DoneThroughUtc);
 
     /// <summary>True when <paramref name="r"/>, a record from another device or a file, has
     /// everything the app relies on. JSON can leave a member null whatever its declared type
     /// says (an explicit null, or a missing constructor parameter such as a sound's name),
-    /// and a record stored with one would break every screen that shows it.</summary>
+    /// and a record stored with one would break every screen that shows it. Incarnations
+    /// must lie in 0 to <see cref="MaxIncarnation"/>.</summary>
     public static bool IsWellFormed(AlarmTask? r) =>
         r is { Def: { Description: not null } d, State: not null } && r.Id != Guid.Empty
+        && d.Incarnation is >= 0 and <= MaxIncarnation && r.State.Incarnation is >= 0 and <= MaxIncarnation
         && IsWellFormed(d.WindowsSound) && IsWellFormed(d.AndroidSound);
 
     private static bool IsWellFormed(SoundRef? s) => s is null || (s.Value is not null && s.Name is not null);
@@ -303,7 +331,8 @@ public sealed class TaskStore
     /// task, when it is resumed), so importing doesn't ring for the past: where the file's
     /// state replaces this device's, its DoneThrough is raised to now, which the sync rules
     /// carry as "done" moving forward. A task deleted here comes back as a new incarnation
-    /// (<see cref="TaskDefinition.Incarnation"/>), to outrank the deletion.
+    /// (<see cref="TaskDefinition.Incarnation"/>), to outrank the deletion, unless the file
+    /// holds a later incarnation than the deletion's already: that merges as it is.
     /// The changes reach linked devices like any edit made here.
     /// </summary>
     /// <exception cref="InvalidDataException">The text isn't an export file of this app.</exception>
@@ -334,20 +363,24 @@ public sealed class TaskStore
                     result = PassOverPast(r, now);
                     added++;
                 }
-                else if (local.Def.Deleted)
+                else if (local.Def.Deleted && DefRank.Of(local).CompareTo(DefRank.Of(r)) > 0)
                 {
                     result = Restore(local, r, now);
                     added++;
                 }
                 else
                 {
-                    result = MergeRules.Merge(local, r.State.Revision > local.State.Revision ? PassOverPast(r, now) : r);
+                    // A deleted task whose copy here the file's outranks (a later incarnation:
+                    // it was restored elsewhere) merges like any other, and comes back as it is.
+                    bool laterSchedule = (r.State.Incarnation, r.State.Revision).CompareTo((local.State.Incarnation, local.State.Revision)) > 0;
+                    result = MergeRules.Merge(local, laterSchedule ? PassOverPast(r, now) : r);
                     if (!MergeRules.Changed(local, result))
                     {
                         unchanged++;
                         continue;
                     }
-                    updated++;
+                    if (local.Def.Deleted && !result.Def.Deleted) added++;
+                    else updated++;
                 }
                 _tasks[r.Id] = result;
                 changed.Add(result);
@@ -366,33 +399,23 @@ public sealed class TaskStore
         r.State.PausedAtUtc is not null ? r
             : r with { State = r.State with { DoneThroughUtc = TimeMath.Max(r.State.DoneThroughUtc, now) } };
 
-    /// <summary>The file's copy <paramref name="r"/> of a task this device deleted. The
-    /// definition starts a new incarnation, outranking the deletion, and every edit of the
-    /// old incarnation, wherever they meet; it gets a new version too. The state keeps the file's
-    /// revision unless this device's copy has a newer one, in its state or in its definition
-    /// (which syncs apart from the state, and can be ahead of it): a later schedule's state
-    /// exists, here or elsewhere, and only a new revision outranks it.</summary>
+    /// <summary>The file's copy <paramref name="r"/> of a task this device deleted, which the
+    /// tombstone outranks: brought back as a new incarnation, of its definition and its state.
+    /// That outranks the deletion, and everything written for the old incarnation, wherever
+    /// they meet (a later schedule's state elsewhere included). Both parts get new versions.
+    /// The state is the file's, merged with the tombstone's when that is of the same schedule
+    /// (newer news of it: a later mark done, say), with the past passed over.</summary>
     private AlarmTask Restore(AlarmTask tombstone, AlarmTask r, DateTimeOffset now)
     {
-        var def = r.Def with { Deleted = false, Incarnation = Math.Max(r.Def.Incarnation, tombstone.Def.Incarnation) + 1 };
-        if (r.State.Revision >=Math.Max(tombstone.State.Revision, tombstone.Def.ScheduleRevision))
+        int incarnation = Math.Max(r.Def.Incarnation, tombstone.Def.Incarnation) + 1;
+        var state = StateRank.Of(r).SameSchedule(StateRank.Of(tombstone)) ? MergeRules.Merge(tombstone, r).State : r.State;
+        return PassOverPast(r with
         {
-            var merged = PassOverPast(MergeRules.Merge(tombstone, r), now);
-            return merged with { Def = def, DefVersion = Versions.Tick() };
-        }
-        int revision = Math.Max(Math.Max(r.Def.ScheduleRevision, r.State.Revision),
-            Math.Max(tombstone.Def.ScheduleRevision, tombstone.State.Revision)) + 1;
-        // A new revision replaces DoneThrough outright: now, or for a paused task its own,
-        // as above (but not past now, as a fresh schedule's isn't).
-        var s = r.State;
-        var doneThrough = s.PausedAtUtc is null ? now : s.DoneThroughUtc < now ? s.DoneThroughUtc : now;
-        return r with
-        {
-            Def = def with { ScheduleRevision = revision },
+            Def = r.Def with { Deleted = false, Incarnation = incarnation },
             DefVersion = Versions.Tick(),
-            State = s with { Revision = revision, DoneThroughUtc = doneThrough, SnoozeUntilUtc = null, SnoozeOccurrenceUtc = null },
+            State = state with { Incarnation = incarnation },
             StateVersion = Versions.Tick(),
-        };
+        }, now);
     }
 
     // ---- Sync ----------------------------------------------------------------------

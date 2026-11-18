@@ -179,12 +179,18 @@ public sealed record TaskDefinition
 }
 
 /// <summary>What has happened to a task over time. Synced last-writer-wins by
-/// (<see cref="Revision"/>, <see cref="AlarmTask.StateVersion"/>), except
-/// <see cref="DoneThroughUtc"/>, which merges by maximum.</summary>
+/// <see cref="StateRank"/>, (<see cref="Incarnation"/>, <see cref="Revision"/>,
+/// <see cref="AlarmTask.StateVersion"/>), except <see cref="DoneThroughUtc"/>, which merges
+/// by maximum within one incarnation and revision.</summary>
 public sealed record TaskState
 {
     /// <summary>The <see cref="TaskDefinition.ScheduleRevision"/> this state was written against.</summary>
     public int Revision { get; init; }
+
+    /// <summary>The <see cref="TaskDefinition.Incarnation"/> this state was written for. A
+    /// later one outranks any state of an earlier one, whatever its revision: a restored
+    /// task's state is never one written for the task as it was before its deletion.</summary>
+    public int Incarnation { get; init; }
 
     /// <summary>Wall-clock time replacing <see cref="TaskDefinition.Start"/> after a
     /// FromDone task is marked done.</summary>

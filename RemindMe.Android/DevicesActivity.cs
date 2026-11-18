@@ -70,7 +70,7 @@ public sealed class DevicesActivity : Screen
         var now = AppState.Clock.UtcNow;
         var live = AppState.Sync?.Peers() ?? [];
         foreach (var p in live)
-            AddRow(list, p.Name, PairText.DeviceStatus(p), p.Linked ? null : p.NodeId);
+            AddRow(list, p.Name, PairText.DeviceStatus(p), p.Linked || p.OtherProtocol is not null ? null : p.NodeId);   // another version can't link until updated
         foreach (var k in AppState.Settings.KnownPeers.Where(k => live.All(p => p.NodeId != k.NodeId)))
             AddRow(list, k.Name, PairText.LastInSync(k, AppState.Sync?.OtherProtocolOf(k.NodeId), now, AppState.Clock.Zone) + (k.Address is { } at ? $" · {at}" : ""), null);
         if (list.ChildCount == 0)

@@ -219,7 +219,8 @@ public static class AlarmEngine
     /// <summary>The state to store with a newly saved schedule: only occurrences after
     /// <paramref name="now"/> fire, and a countdown starts (paused, if the task was).</summary>
     /// <param name="old">The task's previous state, or null for a new task.</param>
-    /// <param name="def">The saved definition, carrying its new ScheduleRevision.</param>
+    /// <param name="def">The saved definition, carrying its new ScheduleRevision, and its
+    /// Incarnation, which the state takes too.</param>
     /// <param name="keepPaused">A paused task stays paused (an edit), rather than running
     /// (a countdown restarted on purpose).</param>
     /// <remarks>DoneThrough is set to <paramref name="now"/>, not raised to it: this is the
@@ -227,6 +228,7 @@ public static class AlarmEngine
     public static TaskState FreshState(TaskState? old, TaskDefinition def, DateTimeOffset now, bool keepPaused = true) => new()
     {
         Revision = def.ScheduleRevision,
+        Incarnation = def.Incarnation,
         DoneThroughUtc = now,
         CountdownEndsUtc = def.Kind == ScheduleKind.Countdown ? TimeMath.TruncateToSecond(now) + def.Duration : null,
         PausedAtUtc = keepPaused && old?.PausedAtUtc is not null ? TimeMath.TruncateToSecond(now) : null,

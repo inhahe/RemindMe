@@ -185,7 +185,9 @@ Open **Devices…** (in the toolbar or the tray menu).
   task deleted elsewhere says so, and saving there keeps your changes as a new
   task. Only restoring a backup brings a deleted task back.
 - **Keep linked devices on the same version** of the app: versions whose sync
-  differs don't sync with each other until both are updated.
+  differs don't sync with each other until both are updated. The Devices list
+  then says which device to update, and the task list's status line says "a
+  linked device runs another version".
 - **Leave the sync group…** stops this device syncing. It keeps its tasks, and the
   others keep theirs.
 - **This device's name** is what your other devices call it. It is the computer's

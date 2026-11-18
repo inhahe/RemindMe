@@ -63,15 +63,16 @@ public sealed class SyncTests : IDisposable
     {
         private readonly TcpClient _c;
         private readonly NetworkStream _s;
-        public string Node { get; } = Guid.NewGuid().ToString("N");
+        public string Node { get; private init; } = Guid.NewGuid().ToString("N");
 
         private RawPeer(TcpClient c) { _c = c; _s = c.GetStream(); }
 
-        public static async Task<RawPeer> ConnectAsync(SyncEngine to)
+        /// <param name="node">The node ID its hellos give; a new one by default.</param>
+        public static async Task<RawPeer> ConnectAsync(SyncEngine to, string? node = null)
         {
             var c = new TcpClient();
             await c.ConnectAsync(IPAddress.Loopback, to.ListenPort);
-            return new RawPeer(c);
+            return node is null ? new RawPeer(c) : new RawPeer(c) { Node = node };
         }
 
         public Task SendAsync(SyncMessage m) => Protocol.WriteFrameAsync(_s, Protocol.Serialize(m), default);
@@ -995,6 +996,40 @@ public sealed class SyncTests : IDisposable
         await other.HelloAsync(Guid.NewGuid().ToString("N"), proto: Protocol.Version + 1);
         Assert.Equal(MessageTypes.Hello, (await other.ReceiveAsync())!.Type);
         Assert.Null(await other.ReceiveAsync());
+    }
+
+    [Fact]
+    public async Task ALinkedDeviceOnAnotherProtocolIsShownSoUntilItIsInSync()
+    {
+        // Refused at hello, as it must be, a linked device on another version of the app is
+        // shown as such (and logged once, though it says so at every dial); a stranger's
+        // claim isn't kept. Updated, it syncs, and is shown as such no more.
+        var a = NewIdentity("A");
+        var b = NewIdentity("B", a.GroupId, a.GroupKeyBase64);
+        var known = new List<KnownPeer> { new(b.NodeId, "B", DateTimeOffset.UtcNow) };
+        var log = new List<string>();
+        var (ea, _) = Node(a, Options(0, TimeSpan.FromMilliseconds(200), IPAddress.Loopback) with { KnownPeers = () => known }, log);
+        for (int i = 0; i < 2; i++)
+        {
+            using var old = await RawPeer.ConnectAsync(ea, b.NodeId);
+            await old.HelloAsync(a.GroupId, proto: Protocol.Version - 1);
+            Assert.Equal(MessageTypes.Hello, (await old.ReceiveAsync())!.Type);
+            Assert.Null(await old.ReceiveAsync());
+        }
+        Assert.Equal(Protocol.Version - 1, ea.OtherProtocolOf(b.NodeId));
+        lock (log) Assert.Single(log, l => l.StartsWith($"B speaking sync protocol {Protocol.Version - 1} ") && l.EndsWith(": update B to sync."));
+
+        using (var stranger = await RawPeer.ConnectAsync(ea))
+        {
+            await stranger.HelloAsync(Guid.NewGuid().ToString("N"), proto: Protocol.Version + 1);
+            Assert.Equal(MessageTypes.Hello, (await stranger.ReceiveAsync())!.Type);
+            Assert.Null(await stranger.ReceiveAsync());
+            Assert.Null(ea.OtherProtocolOf(stranger.Node));
+        }
+
+        Node(b, Addr(ea));
+        await WaitFor(() => ea.Peers().Any(p => p.NodeId == b.NodeId && p.Connected), "A and B in sync");
+        Assert.Null(ea.OtherProtocolOf(b.NodeId));
     }
 
     [Fact]

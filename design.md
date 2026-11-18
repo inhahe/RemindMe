@@ -478,6 +478,16 @@ separately (see *Simplification opportunities*).
   every-N-weeks, volume and fade-in fields, which an older build would drop and
   then erase everywhere with its next write; 5 made a deletion outrank later
   edits, which an older build would undo, and never converge with this one).
+  A refusal for this reason is shown, not just logged, since it is what the
+  user sees after updating one device and not the other: sync stops. Each app's
+  Devices list says which device to update (`PairText.DeviceStatus`,
+  `LastInSync`), and the status line says "a linked device runs another
+  version". `SyncEngine.OtherProtocolOf` reads a nearby device's protocol from
+  its announcement. For a linked device it reads the one claimed in the hello
+  it was refused for: shown for 10 minutes, renewed at each dial, dropped once
+  the device is in sync, and logged once rather than at every dial. A hello is
+  unauthenticated, so this is a hint shown, never acted on. Only linked
+  devices' hellos are kept, so a flood of made-up IDs can't grow the table.
 - **Bounded noise.** At most 256 devices are remembered from announcements. When
   the table is full, a proven member still gets in, in place of the stalest
   stranger, and a stranger's announcement can't take over a fresh member's

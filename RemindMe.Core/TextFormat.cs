@@ -21,11 +21,24 @@ public static class PairText
 
     /// <summary>A device's line in the Devices list.</summary>
     public static string DeviceStatus(Sync.PeerInfo p) =>
-        p.Linked ? (p.Connected ? "Linked, in sync" : "Linked, connecting…") : "Not linked";
+        p.OtherProtocol is { } other ? OtherVersion(other, p.Linked)
+        : p.Linked ? (p.Connected ? "Linked, in sync" : "Linked, connecting…") : "Not linked";
 
     /// <summary>The line of a linked device that isn't connected now.</summary>
-    public static string LastInSync(KnownPeer k, DateTimeOffset now, TimeZoneInfo zone) =>
-        $"Linked, last in sync {TextFormat.Span(TimeMath.ToWall(k.LastSeenUtc, zone), TimeMath.ToWall(now, zone), 2)} ago";
+    /// <param name="otherProtocol">The sync protocol it was last refused for speaking
+    /// (<see cref="Sync.SyncEngine.OtherProtocolOf"/>), if any.</param>
+    public static string LastInSync(KnownPeer k, int? otherProtocol, DateTimeOffset now, TimeZoneInfo zone) =>
+        otherProtocol is { } other ? OtherVersion(other, linked: true)
+        : $"Linked, last in sync {TextFormat.Span(TimeMath.ToWall(k.LastSeenUtc, zone), TimeMath.ToWall(now, zone), 2)} ago";
+
+    /// <summary>The line of a device speaking another sync protocol, which this one refuses
+    /// until one of the two is updated: which, its number says.</summary>
+    private static string OtherVersion(int protocol, bool linked)
+    {
+        bool older = protocol < Sync.Protocol.Version;
+        return $"{(linked ? "Linked, but runs" : "Runs")} {(older ? "an older" : "a newer")} version of RemindMe: "
+            + $"update {(older ? "it" : "this device")} to {(linked ? "sync" : "link")}";
+    }
 
     /// <summary>The requesting device's line while it waits for the other to accept.</summary>
     public static string Progress(Sync.PairProgress p) => p.Stage switch
@@ -107,16 +120,24 @@ public static class TextFormat
 
     /// <summary>The task list's status line's word on sync: " · in sync with 2 devices",
     /// " · no device connected" (say for days, while a linked device is unreachable: worth
-    /// seeing), " · sync isn't running" (it couldn't start: its port taken, say), or nothing
-    /// while sync is off or nothing is linked yet.</summary>
+    /// seeing), " · a linked device runs another version" (one was updated, the other not
+    /// yet: they don't sync), " · sync isn't running" (it couldn't start: its port taken,
+    /// say), or nothing while sync is off or nothing is linked yet.</summary>
     /// <param name="running">Whether the sync engine runs.</param>
     /// <param name="linked">How many devices this one is linked with.</param>
     /// <param name="inSync">How many of them are in sync now.</param>
-    public static string SyncSummary(bool syncOn, bool running, int linked, int inSync) =>
-        !syncOn || linked == 0 ? ""
-        : !running ? " · sync isn't running"
-        : inSync == 0 ? " · no device connected"
-        : $" · in sync with {inSync} device{(inSync == 1 ? "" : "s")}";
+    /// <param name="otherVersion">How many of them speak another sync protocol
+    /// (<see cref="Sync.SyncEngine.OtherProtocolOf"/>).</param>
+    public static string SyncSummary(bool syncOn, bool running, int linked, int inSync, int otherVersion)
+    {
+        if (!syncOn || linked == 0) return "";
+        if (!running) return " · sync isn't running";
+        string other = otherVersion == 1 ? "a linked device runs another version" : $"{otherVersion} linked devices run another version";
+        string synced = $"in sync with {inSync} device{(inSync == 1 ? "" : "s")}";
+        return otherVersion > 0 ? (inSync > 0 ? $" · {synced}; {other}" : $" · {other}")
+            : inSync == 0 ? " · no device connected"
+            : $" · {synced}";
+    }
 
     /// <summary>"Exported 3 tasks." or "Exported 3 tasks to C:\…\file.json.": what an export did.</summary>
     /// <param name="count">How many tasks the file holds.</param>

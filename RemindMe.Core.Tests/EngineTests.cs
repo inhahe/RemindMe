@@ -444,11 +444,30 @@ public class TextFormatTests
     [Fact]
     public void TheStatusLineSaysWhetherAnyDeviceIsInSync()
     {
-        Assert.Equal("", TextFormat.SyncSummary(syncOn: false, running: false, linked: 1, inSync: 0));
-        Assert.Equal("", TextFormat.SyncSummary(syncOn: true, running: true, linked: 0, inSync: 0));   // nothing to sync with
-        Assert.Equal(" · sync isn't running", TextFormat.SyncSummary(syncOn: true, running: false, linked: 1, inSync: 0));
-        Assert.Equal(" · no device connected", TextFormat.SyncSummary(syncOn: true, running: true, linked: 1, inSync: 0));
-        Assert.Equal(" · in sync with 1 device", TextFormat.SyncSummary(syncOn: true, running: true, linked: 2, inSync: 1));
-        Assert.Equal(" · in sync with 2 devices", TextFormat.SyncSummary(syncOn: true, running: true, linked: 2, inSync: 2));
+        Assert.Equal("", TextFormat.SyncSummary(syncOn: false, running: false, linked: 1, inSync: 0, otherVersion: 0));
+        Assert.Equal("", TextFormat.SyncSummary(syncOn: true, running: true, linked: 0, inSync: 0, otherVersion: 0));   // nothing to sync with
+        Assert.Equal(" · sync isn't running", TextFormat.SyncSummary(syncOn: true, running: false, linked: 1, inSync: 0, otherVersion: 0));
+        Assert.Equal(" · no device connected", TextFormat.SyncSummary(syncOn: true, running: true, linked: 1, inSync: 0, otherVersion: 0));
+        Assert.Equal(" · in sync with 1 device", TextFormat.SyncSummary(syncOn: true, running: true, linked: 2, inSync: 1, otherVersion: 0));
+        Assert.Equal(" · in sync with 2 devices", TextFormat.SyncSummary(syncOn: true, running: true, linked: 2, inSync: 2, otherVersion: 0));
+        // One device updated, the other not yet: they don't sync, and the line says why.
+        Assert.Equal(" · a linked device runs another version", TextFormat.SyncSummary(syncOn: true, running: true, linked: 1, inSync: 0, otherVersion: 1));
+        Assert.Equal(" · in sync with 1 device; 2 linked devices run another version",
+            TextFormat.SyncSummary(syncOn: true, running: true, linked: 3, inSync: 1, otherVersion: 2));
+    }
+
+    [Fact]
+    public void TheDevicesListSaysWhichDeviceToUpdate()
+    {
+        var older = new Sync.PeerInfo("n", "Phone", Linked: true, Connected: false, Address: null, OtherProtocol: Sync.Protocol.Version - 1);
+        Assert.Equal("Linked, but runs an older version of RemindMe: update it to sync", PairText.DeviceStatus(older));
+        var newer = older with { Linked = false, OtherProtocol = Sync.Protocol.Version + 1 };
+        Assert.Equal("Runs a newer version of RemindMe: update this device to link", PairText.DeviceStatus(newer));
+        Assert.Equal("Linked, connecting…", PairText.DeviceStatus(older with { OtherProtocol = null }));
+        var k = new KnownPeer("n", "Phone", new DateTimeOffset(2026, 6, 1, 9, 0, 0, TimeSpan.Zero));
+        var now = k.LastSeenUtc.AddHours(2);
+        Assert.Equal("Linked, last in sync 2 hours ago", PairText.LastInSync(k, null, now, TimeZoneInfo.Utc));
+        Assert.Equal("Linked, but runs a newer version of RemindMe: update this device to sync",
+            PairText.LastInSync(k, Sync.Protocol.Version + 1, now, TimeZoneInfo.Utc));
     }
 }

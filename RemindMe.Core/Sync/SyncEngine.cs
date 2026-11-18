@@ -59,7 +59,9 @@ public sealed record SyncOptions
 /// <param name="Linked">In this node's sync group.</param>
 /// <param name="Connected">A session to it is open (and, when linked, authenticated).</param>
 /// <param name="Address">Where it was last seen.</param>
-public sealed record PeerInfo(string NodeId, string Name, bool Linked, bool Connected, string? Address);
+/// <param name="OtherProtocol">The sync protocol it speaks, when not this build's
+/// (<see cref="Protocol.Version"/>): the two refuse each other until one is updated.</param>
+public sealed record PeerInfo(string NodeId, string Name, bool Linked, bool Connected, string? Address, int? OtherProtocol = null);
 
 /// <summary>
 /// A pairing waiting for this device's user, on either side: both users compare the codes
@@ -147,6 +149,15 @@ public sealed class SyncEngine : IDisposable
     /// here, so a flood can't grow it).</summary>
     private readonly ConcurrentDictionary<string, LastAnnouncement> _memberLast = new();
     private readonly ConcurrentDictionary<string, byte> _clockLogged = new();
+    /// <summary>The sync protocol each linked device last spoke when refused for it, and when
+    /// (<see cref="Ticks"/>): from its hello, which nothing authenticates, so it is only shown
+    /// (<see cref="OtherProtocolOf"/>), never acted on. Linked devices only, so a flood of
+    /// made-up IDs can't grow it; dropped once the device is in sync.</summary>
+    private readonly ConcurrentDictionary<string, (int Proto, long At)> _otherProtocol = new();
+    /// <summary>How long a refused hello's protocol is shown for: a device that still speaks
+    /// another one says so again at the next dial, whichever side dials (each redials a
+    /// linked device it can reach a minute apart at most).</summary>
+    private static readonly TimeSpan OtherProtocolShown = TimeSpan.FromMinutes(10);
     /// <summary>This process's ID in its announcements, and how many it has sent.</summary>
     private readonly string _boot = Guid.NewGuid().ToString("N");
     private long _announced;
@@ -256,7 +267,8 @@ public sealed class SyncEngine : IDisposable
         var now = DateTimeOffset.UtcNow;
         foreach (var (node, n) in _nearby)
             if (now - n.Seen <= PeerExpiry)
-                result[node] = new PeerInfo(node, Protocol.CleanName(n.Msg.Name, node[..8]), IsMember(n, group), false, n.Ep.Address.ToString());
+                result[node] = new PeerInfo(node, Protocol.CleanName(n.Msg.Name, node[..8]), IsMember(n, group), false,
+                    n.Ep.Address.ToString(), OtherProtocolOf(node));
         lock (_lock)
         {
             foreach (var (node, s) in _sessions)
@@ -267,6 +279,17 @@ public sealed class SyncEngine : IDisposable
             }
         }
         return result.Values.OrderByDescending(p => p.Linked).ThenBy(p => p.Name, StringComparer.CurrentCultureIgnoreCase).ToList();
+    }
+
+    /// <summary>The sync protocol <paramref name="node"/> speaks when it isn't this build's, so
+    /// that the two refuse each other: from its announcement (while heard), or for a linked
+    /// device from the hello it was refused for (shown <see cref="OtherProtocolShown"/>, and
+    /// not once it is in sync). Null when it speaks this one, or nothing says otherwise.</summary>
+    public int? OtherProtocolOf(string node)
+    {
+        if (_nearby.TryGetValue(node, out var n) && DateTimeOffset.UtcNow - n.Seen <= PeerExpiry && n.Msg.Proto is { } p)
+            return p != Protocol.Version ? p : null;
+        return _otherProtocol.TryGetValue(node, out var o) && Ticks - o.At <= (long)OtherProtocolShown.TotalMilliseconds ? o.Proto : null;
     }
 
     /// <summary>The state of each configured remote address, for the Devices screen.</summary>
@@ -854,8 +877,7 @@ public sealed class SyncEngine : IDisposable
     private void OnHello(PeerSession s, SyncMessage hello)
     {
         var id = Identity;
-        if (hello.Proto != Protocol.Version)
-            _log?.Invoke($"A device speaking sync protocol {hello.Proto} connected from {s.RemoteEndPoint}; this one speaks {Protocol.Version}. Update both to the same version.");
+        if (hello.Proto != Protocol.Version) NoteOtherProtocol(s, hello);
         bool accepted = s.AcceptHello(hello, id.NodeId, id.GroupId, id.GroupKey);
         if (s.IsProbe)
         {
@@ -915,6 +937,26 @@ public sealed class SyncEngine : IDisposable
         if (installed) RaisePeersChanged();
     }
 
+    /// <summary>A hello in another sync protocol, which <see cref="PeerSession.AcceptHello"/>
+    /// refuses. A linked device's is recorded for <see cref="OtherProtocolOf"/>, and logged
+    /// when it first says so (it says so at every dial); anyone else's is logged.</summary>
+    private void NoteOtherProtocol(PeerSession s, SyncMessage hello)
+    {
+        int proto = hello.Proto ?? 0;
+        var node = hello.Node;
+        var linked = node is null ? null : KnownPeers().FirstOrDefault(k => k.NodeId == node);
+        if (linked is not null)
+        {
+            bool news = !_otherProtocol.TryGetValue(linked.NodeId, out var old) || old.Proto != proto;
+            _otherProtocol[linked.NodeId] = (proto, Ticks);
+            if (!news) return;
+            RaisePeersChanged();
+        }
+        string who = linked is not null ? linked.Name : "A device";
+        string update = proto < Protocol.Version ? $"update {(linked is not null ? linked.Name : "it")}" : "update this one";
+        _log?.Invoke($"{who} speaking sync protocol {proto} connected from {s.RemoteEndPoint}; this one speaks {Protocol.Version}: {update} to sync.");
+    }
+
     private void OnAuthenticated(PeerSession s)
     {
         if (s.IsProbe)
@@ -938,6 +980,7 @@ public sealed class SyncEngine : IDisposable
         }
         replaced?.Close();
         _remoteErrors.TryRemove(s.RemoteAddress ?? "", out _);
+        _otherProtocol.TryRemove(s.PeerNode!, out _);
         _log?.Invoke($"In sync with {s.Describe()}.");
         _ = s.SendAsync(new SyncMessage { Type = MessageTypes.Digest, Digest = _store.Digest().ToList() });
         _redial.TryRemove(s.PeerNode!, out _);

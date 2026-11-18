@@ -335,16 +335,22 @@ once the tasks have changed and nothing more has changed for 5 s
 
 ## Sync merge
 
-Each part of a task merges on its own:
+Each part of a task merges on its own. The definition is two parts:
 
-- **Definition**: the higher `DefRank` wins: `(Incarnation, Deleted,
-  ScheduleRevision, DefVersion)`, compared in that order. Within one
-  incarnation, then, a deletion outranks every edit; a schedule change
-  outranks an edit of the schedule before it; and otherwise the last writer
-  wins.
-- **State**: the higher `StateRank` wins: `(Incarnation, Revision,
-  StateVersion)`. Within one incarnation and revision (one schedule),
-  `DoneThroughUtc` is always the **maximum** of the two sides, whichever wins.
+- **Definition, all but the schedule** (the description, the reminder
+  interval, the restart mode, the sounds, whether it is deleted): the higher
+  `DefRank` wins: `(Incarnation, Deleted, DefVersion)`, compared in that order.
+  Within one incarnation, then, a deletion outranks every edit, and otherwise
+  the last writer wins.
+- **The definition's schedule** (the fields `TaskDefinition.WithScheduleOf`
+  copies, `ScheduleFields`: when the task comes up): the higher `ScheduleRank`
+  wins: `(Incarnation, ScheduleRevision, ScheduleStamp)`. The stamp is the
+  `Hlc` of the change that set the schedule. Two devices changing the schedule
+  out of touch reach the same revision, but never the same stamp.
+- **State**: the higher `StateRank` wins: the schedule it was written for
+  (`ScheduleRank`, from its own incarnation, revision and stamp), then
+  `StateVersion`. Within one schedule, `DoneThroughUtc` is always the
+  **maximum** of the two sides, whichever wins.
 
 The maximum is what makes "done" stick. Suppose the phone was off when a task
 fell due, and the PC marked it done meanwhile. The phone triggers it on startup,
@@ -352,18 +358,35 @@ but triggering writes nothing, so when the PC's larger `DoneThrough` arrives the
 phone's popup simply closes. Nothing can lower `DoneThrough`, so no ordering of
 messages can bring a finished occurrence back.
 
-The definition and the state that win are always of the same schedule, since
-both rank by incarnation and then by schedule revision. A definition of one
-schedule with a state of another can be broken beyond repair: a countdown's
-definition with a one-time task's state has no countdown end, and never rings.
-Two cases would otherwise make that pair:
+The definition's schedule and the state rank alike, so the two that win are
+always of one schedule. A definition of one schedule with a state of another
+can be broken beyond repair: a countdown's definition with a one-time task's
+state has no countdown end, and never rings. The cases that would otherwise
+make that pair:
 - Out of touch, one device changes a task's schedule, and the other edits only
-  its description, or its reminder interval on the alarm screen. That edit is
-  the newer definition, of the old schedule. It loses to the schedule change,
-  and is lost.
+  its description, or its reminder interval on the alarm screen. The schedule
+  and the rest merge apart, so both edits stand. `Save` gives each part a new
+  version only when it changes: saving only a schedule doesn't make the old
+  description outrank one made elsewhere. And a save that keeps the schedule
+  keeps it exactly, fields that don't count included, and `Edit` never touches
+  it: one schedule's fields are the same everywhere.
+- Both devices change the schedule out of touch: the later stamp wins, the
+  definition's schedule and the state alike.
 - A task restored from a backup, while a device that hadn't heard of its
   deletion holds a later schedule's state of it. The restore's new incarnation
   outranks that state.
+
+`MergeRules.Mismatched` tells such a pair. Merging never makes one of records
+that aren't, but older builds did (the first case above, with the definition
+winning whole). The store repairs one wherever it appears (`TaskStore.Repaired`):
+at load, and in what an import or a sync stores. It gives the task a new
+schedule, the one its definition describes, starting now, and logs that. A
+schedule saved before stamps existed has none: `MergeRules.WithLegacyStamps`
+gives it `TaskDefinition.LegacyScheduleStamp`, a hash of the schedule that every
+device works out alike. It also gives one to the state, when the state is of the
+same incarnation and revision. Two devices holding one such schedule then agree
+it is one. Two holding different ones of one revision (changed on each, out of
+touch, before updating) pick the same.
 
 A deletion has to outrank later edits because the alternative brings deleted
 tasks back. Suppose the PC deletes a task while the phone, out of touch, still
@@ -378,7 +401,7 @@ the old incarnation made elsewhere: those edit the task that was deleted, as
 the deletion outranked them too. A device never writes over a tombstone:
 `TaskStore.Save` and `Edit` refuse one, returning null. An editor left open
 across a deletion therefore can't undo it; saving there adds the edits as a new
-task (`Add`). Digests carry both parts' ranks, so each side knows which copy
+task (`Add`). Digests carry every part's rank, so each side knows which copy
 wins, and two devices in sync have nothing more to send each other.
 
 Two devices restoring the same task without hearing of each other give it the
@@ -527,7 +550,8 @@ separately (see *Simplification opportunities*).
   hello claiming the ID of a device in sync now isn't kept either, and
   `OtherProtocolOf` says nothing while a device is in sync. A member announcing
   another protocol isn't dialled: its hello would only be refused, every few
-  seconds. And a nearby device on another protocol can't be linked: neither
+  seconds. Its announcement, which its MAC proves, is kept and logged instead,
+  once, and dropped when it announces this protocol. And a nearby device on another protocol can't be linked: neither
   Devices list offers Link for it.
 - **Bounded noise.** At most 256 devices are remembered from announcements. When
   the table is full, a proven member still gets in, in place of the stalest

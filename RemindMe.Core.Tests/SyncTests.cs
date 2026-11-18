@@ -1051,17 +1051,22 @@ public sealed class SyncTests : IDisposable
     {
         // Its hello would be refused: dialling it at each announcement would only churn.
         var a = NewIdentity("A");
-        var (ea, _) = Node(a);
+        var log = new List<string>();
+        var (ea, _) = Node(a, Options(0, TimeSpan.FromMilliseconds(200), IPAddress.Loopback), log);
         using var listener = new TcpListener(IPAddress.Loopback, 0);
         listener.Start();
         int port = ((IPEndPoint)listener.LocalEndpoint).Port;
         var b = new string('f', 32);   // above A's ID, so A is the one to dial
         ea.OnAnnounced(MemberAnnouncement(a, b, port, DateTimeOffset.UtcNow, proto: Protocol.Version - 1), IPAddress.Loopback);
+        ea.OnAnnounced(MemberAnnouncement(a, b, port, DateTimeOffset.UtcNow, seq: 2, proto: Protocol.Version - 1), IPAddress.Loopback);
         Assert.Equal(Protocol.Version - 1, ea.Peers().Single(p => p.NodeId == b).OtherProtocol);
+        Assert.Equal(Protocol.Version - 1, ea.OtherProtocolOf(b));
+        // Logged once, though it says so at every announcement: nothing else would say why.
+        lock (log) Assert.Single(log, l => l.StartsWith($"B speaking sync protocol {Protocol.Version - 1} announced itself at ") && l.EndsWith(": update B to sync."));
         var dialled = listener.AcceptTcpClientAsync();
         Assert.NotSame(dialled, await Task.WhenAny(dialled, Task.Delay(1500)));
-        // Updated, it is dialled at its next announcement.
-        ea.OnAnnounced(MemberAnnouncement(a, b, port, DateTimeOffset.UtcNow, seq: 2), IPAddress.Loopback);
+        // Updated, it is dialled at its next announcement, and what it said before is gone.
+        ea.OnAnnounced(MemberAnnouncement(a, b, port, DateTimeOffset.UtcNow, seq: 3), IPAddress.Loopback);
         Assert.Null(ea.Peers().Single(p => p.NodeId == b).OtherProtocol);
         Assert.Same(dialled, await Task.WhenAny(dialled, Task.Delay(5000)));
         (await dialled).Dispose();

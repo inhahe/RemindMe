@@ -36,7 +36,7 @@
              Not shared: each opening makes a new one, with the theme as it is then, as a
              closed menu outside every window misses a switch between light and dark. -->
         <ContextMenu x:Key="TrayMenu" x:Shared="False" Placement="MousePoint">
-            <MenuItem Header="_Show RemindMe" Click="TrayShow_Click" FontWeight="SemiBold" />
+            <MenuItem Header="Show _RemindMe" Click="TrayShow_Click" FontWeight="SemiBold" />
             <Separator />
             <MenuItem Header="_New task…" Click="New_Click">
                 <MenuItem.Icon><TextBlock Style="{StaticResource Icon}" Text="{x:Static local:Icons.New}" /></MenuItem.Icon>

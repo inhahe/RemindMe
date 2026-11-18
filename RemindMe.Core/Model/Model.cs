@@ -57,8 +57,9 @@ public static class Platforms
     public const string Android = "android";
 }
 
-/// <summary>The part of a task the user edits. Synced as a whole, the copy of the higher
-/// <see cref="DefRank"/> winning.</summary>
+/// <summary>The part of a task the user edits. Synced in two halves: its schedule (the
+/// fields <see cref="WithScheduleOf"/> copies) by <see cref="ScheduleRank"/>, as the state is,
+/// and the rest by <see cref="DefRank"/>.</summary>
 public sealed record TaskDefinition
 {
     public string Description { get; init; } = "";
@@ -117,6 +118,14 @@ public sealed record TaskDefinition
     /// with such an edit carries the new value in <see cref="TaskState.Revision"/>.</summary>
     public int ScheduleRevision { get; init; }
 
+    /// <summary>The version of the schedule: when it was last set (the schedule fields are
+    /// those <see cref="WithScheduleOf"/> copies). With <see cref="ScheduleRevision"/> it says
+    /// which schedule this is: two devices changing the schedule out of touch reach the same
+    /// revision, but never the same stamp. The state written for it carries it too
+    /// (<see cref="TaskState.ScheduleStamp"/>), so the schedule and the state that win a merge
+    /// are always of one schedule (<see cref="ScheduleRank"/>).</summary>
+    public Hlc ScheduleStamp { get; init; }
+
     /// <summary>Tombstone: the task was deleted. Kept so the deletion syncs.</summary>
     public bool Deleted { get; init; }
 
@@ -149,6 +158,43 @@ public sealed record TaskDefinition
         };
     }
 
+    /// <summary>This definition with <paramref name="other"/>'s schedule: every field that
+    /// says when the task comes up, and the schedule's revision and stamp. The rest (the
+    /// description, the reminder interval, the restart mode, the sounds, whether it is
+    /// deleted, its incarnation) stays this one's. The two halves merge apart: an edit of
+    /// either doesn't undo one of the other made elsewhere.</summary>
+    public TaskDefinition WithScheduleOf(TaskDefinition other) => this with
+    {
+        Kind = other.Kind,
+        IntervalCount = other.IntervalCount, Unit = other.Unit, Start = other.Start,
+        Days = other.Days, TimeOfDay = other.TimeOfDay, WeekInterval = other.WeekInterval,
+        WeeksFrom = other.WeeksFrom, FirstDayOfWeek = other.FirstDayOfWeek,
+        At = other.At,
+        Duration = other.Duration,
+        ScheduleRevision = other.ScheduleRevision, ScheduleStamp = other.ScheduleStamp,
+    };
+
+    /// <summary>The names of the fields <see cref="WithScheduleOf"/> copies: a test checks that
+    /// every field of a definition is either one of these or one it leaves.</summary>
+    public static readonly string[] ScheduleFields =
+    [
+        nameof(Kind), nameof(IntervalCount), nameof(Unit), nameof(Start), nameof(Days), nameof(TimeOfDay),
+        nameof(WeekInterval), nameof(WeeksFrom), nameof(FirstDayOfWeek), nameof(At), nameof(Duration),
+        nameof(ScheduleRevision), nameof(ScheduleStamp),
+    ];
+
+    /// <summary>The stamp of a schedule saved before stamps existed (none, in the file): one
+    /// every device works out alike from the schedule itself, so that two devices holding
+    /// the same such schedule agree it is one, and two holding different ones (changed on
+    /// each, out of touch, before updating) still pick the same.</summary>
+    public Hlc LegacyScheduleStamp()
+    {
+        var text = string.Join("|", Kind, IntervalCount, Unit, Start.Ticks, Days, TimeOfDay.Ticks, WeekInterval,
+            WeeksFrom.DayNumber, FirstDayOfWeek, At.Ticks, Duration.Ticks);
+        var hash = System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(text));
+        return new Hlc(0, 0, "~" + Convert.ToHexString(hash, 0, 16));
+    }
+
     /// <summary>True when the two definitions would fire at different times.</summary>
     public bool ScheduleDiffers(TaskDefinition other) =>
         Kind != other.Kind || Kind switch
@@ -179,9 +225,9 @@ public sealed record TaskDefinition
 }
 
 /// <summary>What has happened to a task over time. Synced last-writer-wins by
-/// <see cref="StateRank"/>, (<see cref="Incarnation"/>, <see cref="Revision"/>,
-/// <see cref="AlarmTask.StateVersion"/>), except <see cref="DoneThroughUtc"/>, which merges
-/// by maximum within one incarnation and revision.</summary>
+/// <see cref="StateRank"/>: the schedule it was written for, then
+/// <see cref="AlarmTask.StateVersion"/>; except <see cref="DoneThroughUtc"/>, which merges by
+/// maximum within one schedule.</summary>
 public sealed record TaskState
 {
     /// <summary>The <see cref="TaskDefinition.ScheduleRevision"/> this state was written against.</summary>
@@ -191,6 +237,10 @@ public sealed record TaskState
     /// later one outranks any state of an earlier one, whatever its revision: a restored
     /// task's state is never one written for the task as it was before its deletion.</summary>
     public int Incarnation { get; init; }
+
+    /// <summary>The <see cref="TaskDefinition.ScheduleStamp"/> of the schedule this state was
+    /// written for: with <see cref="Incarnation"/> and <see cref="Revision"/>, which schedule.</summary>
+    public Hlc ScheduleStamp { get; init; }
 
     /// <summary>Wall-clock time replacing <see cref="TaskDefinition.Start"/> after a
     /// FromDone task is marked done.</summary>

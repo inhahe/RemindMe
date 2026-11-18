@@ -88,9 +88,12 @@ public static class Protocol
     /// pairing acceptance, member counts in the commitment. 3: pairing rounds, MACed and
     /// dated announcements. 4: tasks carry a pause, every-N-weeks fields, a volume and a
     /// fade-in; a build without them would drop them, and its next write would erase them
-    /// everywhere. 5: a deletion outranks a later edit (<see cref="DefRank"/>), and digests
-    /// carry what that needs; a build ranking by version alone would bring deleted tasks
-    /// back, and never converge with one that doesn't.</summary>
+    /// everywhere. 5: incarnations and schedule stamps. A deletion outranks a later edit, and
+    /// only a restore (a new incarnation) outranks it (<see cref="DefRank"/>). A definition's
+    /// schedule merges apart from the rest of it, with the state, by
+    /// <see cref="ScheduleRank"/>, so the two are always of one schedule. Digests carry all of
+    /// it. A build without these would bring deleted tasks back, pair schedules with other
+    /// schedules' states, and never converge with this one.</summary>
     public const int Version = 5;
     public const int DefaultPort = 37660;
     /// <summary>Discovery always uses this UDP port, whatever TCP port a node listens on,

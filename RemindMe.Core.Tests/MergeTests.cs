@@ -292,34 +292,119 @@ public class MergeTests
     [Theory]
     [InlineData(true)]
     [InlineData(false)]
-    public void AScheduleChangeOutranksAnEditOfTheScheduleBefore(bool changeArrivesFirst)
+    public void AScheduleChangeAndAnEditOfTheRestMadeElsewhereBothStand(bool changeArrivesFirst)
     {
         // Out of touch, the PC turns a countdown into a one-time task (a new schedule), and
-        // the phone, later, changes only the countdown's description and, on its alarm
-        // screen, its reminder interval: newer definitions of the old schedule. The task
-        // that wins must be one schedule, definition and state: a countdown's definition
-        // with the one-time task's state has no end, and never rings.
+        // the phone, later, changes only the description and, on its alarm screen, the
+        // reminder interval. The schedule merges with the state, the rest by version: both
+        // edits stand, and the schedule and the state are of one schedule. (A countdown's
+        // definition with the one-time task's state would have no end, and never ring.)
         var (a, b, ca, cb) = TwoDevices();
         var t = a.Add(new TaskDefinition { Description = "tea", Kind = ScheduleKind.Countdown, Duration = TimeSpan.FromHours(2) });
         Sync(a, b);
         ca.Advance(TimeSpan.FromMinutes(1));
         var once = a.Save(t.Id, t.Def with { Kind = ScheduleKind.Once, At = Wall(ca.UtcNow).AddHours(1) })!;
         cb.Advance(TimeSpan.FromMinutes(5));
-        var edited = b.Save(t.Id, t.Def with { Description = "green tea" })!;
+        Assert.Equal(1, b.Save(t.Id, t.Def with { Description = "green tea" })!.Def.ScheduleRevision);
         Assert.NotNull(b.Edit(t.Id, d => d with { ReminderMinutes = 5 }));
-        Assert.True(b.Get(t.Id)!.DefVersion > once.DefVersion);
         Meet(a, b, changeArrivesFirst);
         foreach (var s in new[] { a, b })
         {
             var x = s.Get(t.Id)!;
-            Assert.Equal(ScheduleKind.Once, x.Def.Kind);
-            Assert.Equal(x.Def.ScheduleRevision, x.State.Revision);
-            Assert.Equal(once.Def.At, x.Def.At);
+            Assert.Equal((ScheduleKind.Once, once.Def.At), (x.Def.Kind, x.Def.At));
+            Assert.Equal(("green tea", 5), (x.Def.Description, x.Def.ReminderMinutes));
+            Assert.False(MergeRules.Mismatched(x));
         }
         Assert.Equal(a.Get(t.Id), b.Get(t.Id));
         Assert.Empty(a.NewerThan(b.Digest()));   // and each knows the other has it: nothing to send again
         Assert.Empty(b.NewerThan(a.Digest()));
-        Assert.Equal(1, edited.Def.ScheduleRevision);
+    }
+
+    [Fact]
+    public void AScheduleChangeMadeLaterLeavesAnEditOfTheRestMadeElsewhere()
+    {
+        // The other way round: the phone changes the description first, the PC moves the
+        // task later. Saving only a schedule leaves the rest's version alone, so the PC's
+        // unchanged description doesn't outrank the phone's new one.
+        var (a, b, ca, cb) = TwoDevices();
+        var t = a.Add(Hourly(ca));
+        Sync(a, b);
+        cb.Advance(TimeSpan.FromMinutes(1));
+        b.Save(t.Id, t.Def with { Description = "pills, with food" });
+        ca.Advance(TimeSpan.FromMinutes(5));
+        var moved = a.Save(t.Id, t.Def with { Start = Wall(ca.UtcNow).AddHours(1) })!;
+        Assert.Equal(t.DefVersion, moved.DefVersion);
+        Sync(a, b);
+        var x = a.Get(t.Id)!;
+        Assert.Equal(("pills, with food", moved.Def.Start), (x.Def.Description, x.Def.Start));
+        Assert.Equal(x, b.Get(t.Id));
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void TwoScheduleChangesOfOneRevisionComeTogetherAsOne(bool pcFirst)
+    {
+        // Out of touch, the PC makes a task a one-time task and the phone, later, a 3-hour
+        // countdown: both revision 2. Then the PC's alarm rings and is dismissed, a state
+        // write newer than the phone's. The stamps tell the two schedules apart, so the
+        // schedule and the state that win are one: the phone's, the later.
+        var (a, b, ca, cb) = TwoDevices();
+        var t = a.Add(Hourly(ca));
+        Sync(a, b);
+        ca.Advance(TimeSpan.FromMinutes(1));
+        var once = a.Save(t.Id, t.Def with { Kind = ScheduleKind.Once, At = Wall(ca.UtcNow).AddMinutes(30) })!;
+        cb.Advance(TimeSpan.FromMinutes(2));
+        var countdown = b.Save(t.Id, t.Def with { Kind = ScheduleKind.Countdown, Duration = TimeSpan.FromHours(3) })!;
+        Assert.Equal((2, 2), (once.Def.ScheduleRevision, countdown.Def.ScheduleRevision));
+        ca.Advance(TimeSpan.FromMinutes(40));
+        Assert.True(a.Status(t.Id)!.ShouldAlert);
+        Assert.True(a.Dismiss(t.Id)!.StateVersion > countdown.StateVersion);
+        Meet(a, b, pcFirst);
+        foreach (var s in new[] { a, b })
+        {
+            var x = s.Get(t.Id)!;
+            Assert.Equal(ScheduleKind.Countdown, x.Def.Kind);
+            Assert.False(MergeRules.Mismatched(x));
+            Assert.NotNull(x.State.CountdownEndsUtc);
+        }
+        Assert.Equal(a.Get(t.Id), b.Get(t.Id));
+        Assert.Empty(a.NewerThan(b.Digest()));
+        Assert.Empty(b.NewerThan(a.Digest()));
+    }
+
+    [Fact]
+    public void EveryFieldOfADefinitionIsInOneHalf()
+    {
+        // The schedule merges apart from the rest (WithScheduleOf): a new field must be put in
+        // one half or the other, knowingly.
+        string[] rest =
+        [
+            nameof(TaskDefinition.Description), nameof(TaskDefinition.Restart), nameof(TaskDefinition.ReminderMinutes),
+            nameof(TaskDefinition.WindowsSound), nameof(TaskDefinition.AndroidSound), nameof(TaskDefinition.SoundMode),
+            nameof(TaskDefinition.Volume), nameof(TaskDefinition.FadeInSeconds), nameof(TaskDefinition.Deleted),
+            nameof(TaskDefinition.Incarnation),
+        ];
+        var all = typeof(TaskDefinition).GetProperties().Where(p => p.CanWrite).Select(p => p.Name).Order().ToList();
+        Assert.Equal(all, TaskDefinition.ScheduleFields.Concat(rest).Order().ToList());
+
+        // And WithScheduleOf takes exactly the schedule's fields from the other.
+        var one = new TaskDefinition();
+        var other = new TaskDefinition
+        {
+            Description = "x", Kind = ScheduleKind.Weekly, IntervalCount = 7, Unit = IntervalUnit.Weeks, Start = new DateTime(2030, 1, 1),
+            Restart = RestartMode.OnSchedule, Days = 3, TimeOfDay = new TimeOnly(7, 7), WeekInterval = 3, WeeksFrom = new DateOnly(2030, 1, 1),
+            FirstDayOfWeek = DayOfWeek.Sunday, At = new DateTime(2030, 2, 2), Duration = TimeSpan.FromHours(7), ReminderMinutes = 77,
+            WindowsSound = new SoundRef(SoundSource.File, "w", "w"), AndroidSound = new SoundRef(SoundSource.File, "a", "a"), SoundMode = SoundMode.Repeat,
+            Volume = 70, FadeInSeconds = 7, ScheduleRevision = 7, ScheduleStamp = new Hlc(7, 7, "n"), Deleted = true, Incarnation = 7,
+        };
+        var merged = one.WithScheduleOf(other);
+        foreach (var p in typeof(TaskDefinition).GetProperties().Where(p => p.CanWrite))
+        {
+            var expected = TaskDefinition.ScheduleFields.Contains(p.Name) ? p.GetValue(other) : p.GetValue(one);
+            Assert.True(Equals(expected, p.GetValue(merged)), p.Name);
+            Assert.False(Equals(p.GetValue(one), p.GetValue(other)), $"{p.Name} isn't set apart in this test");
+        }
     }
 
     [Fact]
@@ -419,8 +504,20 @@ public class MergeTests
             foreach (var c in clocks) c.Advance(TimeSpan.FromMinutes(rng.Next(1, 20)));
             var s = stores[i];
             var live = s.Live();
-            switch (rng.Next(8))
+            switch (rng.Next(10))
             {
+                case 7 when live.Count > 0:
+                    // A schedule change: another length, a later start, or another kind.
+                    var r = live[rng.Next(live.Count)];
+                    var start = Wall(clocks[i].UtcNow).AddMinutes(rng.Next(1, 120));
+                    s.Save(r.Id, rng.Next(3) switch
+                    {
+                        0 => r.Def with { IntervalCount = rng.Next(1, 4) },
+                        1 => r.Def with { Kind = ScheduleKind.Interval, Start = start },
+                        _ => r.Def with { Kind = ScheduleKind.Once, At = start },
+                    });
+                    break;
+                case 8 when live.Count > 0: s.Edit(live[rng.Next(live.Count)].Id, d => d with { ReminderMinutes = rng.Next(0, 30) }); break;
                 case 5 when rng.Next(3) == 0: exports.Add(s.Export()); break;
                 // An old export restores the tasks deleted since: new incarnations.
                 case 6 when exports.Count > 0 && rng.Next(2) == 0: s.Import(exports[rng.Next(exports.Count)]); break;
@@ -444,11 +541,125 @@ public class MergeTests
             Assert.Equal(expected, s.All().OrderBy(t => t.Id).ToList());
         Assert.Contains(expected, t => t.Def.Incarnation > 0);   // restores happened
         Assert.Contains(expected, t => t.Def.Deleted);
+        Assert.Contains(expected, t => t.Def.ScheduleRevision > 2);   // and schedule changes
+        Assert.All(expected, t => Assert.False(MergeRules.Mismatched(t), "a schedule with another's state"));
     }
 }
 
 public class PersistenceTests
 {
+    /// <summary>The tasks of <paramref name="exports"/> (export files, the first one's first,
+    /// and so on) as an older version's tasks.json holds them: no schedule stamps.
+    /// <paramref name="stateFrom"/> takes each task's state from another export instead.</summary>
+    private static string LegacyStoreFile(string export, string? stateFrom = null)
+    {
+        var tasks = System.Text.Json.Nodes.JsonNode.Parse(export)!["tasks"]!.AsArray();
+        var states = stateFrom is null ? null : System.Text.Json.Nodes.JsonNode.Parse(stateFrom)!["tasks"]!.AsArray();
+        for (int i = 0; i < tasks.Count; i++)
+        {
+            var t = tasks[i]!.AsObject();
+            if (states is not null) t["state"] = states[i]!["state"]!.DeepClone();
+            t["def"]!.AsObject().Remove("scheduleStamp");
+            t["state"]!.AsObject().Remove("scheduleStamp");
+        }
+        return new System.Text.Json.Nodes.JsonObject { ["format"] = 1, ["tasks"] = tasks.DeepClone() }.ToJsonString();
+    }
+
+    private static TaskStore Load(DirectoryInfo dir, string name, string json, FakeClock clock, List<string>? log = null)
+    {
+        var path = Path.Combine(dir.FullName, name);
+        File.WriteAllText(path, json);
+        return new TaskStore(path, name, clock, log is null ? null : log.Add);
+    }
+
+    [Fact]
+    public void AnOlderVersionsTasksGetScheduleStampsEveryDeviceAgreesOn()
+    {
+        // The same task, saved by an older version on both devices: each works out the same
+        // stamp, so the two agree it is one schedule, and have nothing to send each other.
+        var dir = Directory.CreateTempSubdirectory();
+        try
+        {
+            var clock = new FakeClock(NY(2026, 6, 1, 9), NewYork);
+            var src = new TaskStore(null, "src", clock);
+            src.Add(new TaskDefinition { Description = "pills", Kind = ScheduleKind.Weekly, Days = 0b0111110 });
+            var file = LegacyStoreFile(src.Export());
+            var a = Load(dir, "a", file, clock);
+            var b = Load(dir, "b", file, clock);
+            var t = a.All().Single();
+            Assert.False(MergeRules.Mismatched(t));
+            Assert.Equal(t.Def.LegacyScheduleStamp(), t.Def.ScheduleStamp);
+            Assert.Equal(t, b.All().Single());
+            Assert.Empty(a.NewerThan(b.Digest()));
+            Assert.Empty(b.NewerThan(a.Digest()));
+        }
+        finally { dir.Delete(true); }
+    }
+
+    [Fact]
+    public void TwoOlderSchedulesOfOneRevisionComeTogetherAsOne()
+    {
+        // Changed on each device out of touch, before updating: one revision, two schedules,
+        // both unstamped. Each device's stamp is worked out from its schedule, so the two
+        // pick the same one, definition and state.
+        var dir = Directory.CreateTempSubdirectory();
+        try
+        {
+            var clock = new FakeClock(NY(2026, 6, 1, 9), NewYork);
+            var src = new TaskStore(null, "src", clock);
+            var t = src.Add(new TaskDefinition { Description = "tea", Kind = ScheduleKind.Countdown, Duration = TimeSpan.FromHours(2) });
+            var other = new TaskStore(null, "other", clock);
+            other.Merge(src.All());
+            clock.Advance(TimeSpan.FromMinutes(1));
+            src.Save(t.Id, t.Def with { Kind = ScheduleKind.Once, At = new DateTime(2026, 6, 1, 12, 0, 0) });
+            other.Save(t.Id, t.Def with { Duration = TimeSpan.FromHours(3) });
+            var a = Load(dir, "a", LegacyStoreFile(src.Export()), clock);
+            var b = Load(dir, "b", LegacyStoreFile(other.Export()), clock);
+            var toB = a.NewerThan(b.Digest());
+            var toA = b.NewerThan(a.Digest());
+            b.Merge(toB);
+            a.Merge(toA);
+            var x = a.Get(t.Id)!;
+            Assert.Equal(x, b.Get(t.Id));
+            Assert.False(MergeRules.Mismatched(x));
+            Assert.Equal(2, x.Def.ScheduleRevision);
+        }
+        finally { dir.Delete(true); }
+    }
+
+    [Fact]
+    public void AnOlderVersionsTaskWhoseDefinitionAndStateDifferIsRepaired()
+    {
+        // Under an older version, one device made a countdown a one-time task and the other,
+        // later, edited only the countdown's description: every device kept the countdown's
+        // definition with the one-time task's state, which has no countdown end, so it never
+        // rang. Loaded now, it starts afresh on its schedule, and says so in the log.
+        var dir = Directory.CreateTempSubdirectory();
+        try
+        {
+            var clock = new FakeClock(NY(2026, 6, 1, 9), NewYork);
+            var src = new TaskStore(null, "src", clock);
+            var t = src.Add(new TaskDefinition { Description = "tea", Kind = ScheduleKind.Countdown, Duration = TimeSpan.FromHours(2) });
+            var countdown = src.Export();
+            clock.Advance(TimeSpan.FromMinutes(1));
+            src.Save(t.Id, t.Def with { Kind = ScheduleKind.Once, At = new DateTime(2026, 6, 1, 12, 0, 0) });
+            var once = src.Export();
+            var log = new List<string>();
+            var a = Load(dir, "a", LegacyStoreFile(countdown, stateFrom: once), clock, log);
+            var x = a.Get(t.Id)!;
+            Assert.False(MergeRules.Mismatched(x));
+            Assert.Equal(ScheduleKind.Countdown, x.Def.Kind);
+            Assert.Equal(clock.UtcNow + TimeSpan.FromHours(2), x.State.CountdownEndsUtc);
+            Assert.Equal(3, x.Def.ScheduleRevision);   // past the one-time state's
+            Assert.Contains(log, l => l.Contains("\"tea\"") && l.Contains("starts afresh"));
+            // Saved so: loaded again, nothing more to repair.
+            log.Clear();
+            Assert.Equal(x, new TaskStore(Path.Combine(dir.FullName, "a"), "a", clock, log.Add).Get(t.Id));
+            Assert.Empty(log);
+        }
+        finally { dir.Delete(true); }
+    }
+
     [Fact]
     public void ACorruptFileIsKeptAsideAndTheBackupUsed()
     {
@@ -701,35 +912,29 @@ public class ExportImportTests
         Assert.Equal(NY(2026, 6, 6, 8), a.Status(t.Id)!.NextOccurrence);
     }
 
-    /// <summary>The definition syncs apart from the state: this device has another's new
-    /// schedule (revision 2) but not yet its state, deletes the task, and imports a file of
-    /// revision 1. The restored task must outrank that revision-2 state when it arrives.</summary>
     [Fact]
-    public void ATombstoneWhoseScheduleIsAheadOfItsStateIsOutrankedToo()
+    public void ARecordWhoseDefinitionAndStateDifferIsRepairedOnArrival()
     {
+        // As an older version's merge could leave one: the 20:00 schedule's definition with
+        // the 8:00 schedule's state. Stored here, it is given a schedule of its own, the one its
+        // definition describes, and rings by it.
         var a = NewStore("node-a");
         var t = a.Add(new TaskDefinition
         {
             Description = "daily", Kind = ScheduleKind.Interval, Unit = IntervalUnit.Days, Start = new DateTime(2026, 6, 1, 8, 0, 0),
             Restart = RestartMode.OnSchedule,
         });
-        var file = a.Export();
         var b = NewStore("node-b");
         b.Merge(a.All());
         _clock.Advance(TimeSpan.FromMinutes(1));
         var rescheduled = b.Save(t.Id, t.Def with { Start = new DateTime(2026, 6, 1, 20, 0, 0) })!;   // revision 2
-        a.Merge([rescheduled with { State = a.Get(t.Id)!.State, StateVersion = a.Get(t.Id)!.StateVersion }]);   // its definition only
-        Assert.Equal((2, 1), (a.Get(t.Id)!.Def.ScheduleRevision, a.Get(t.Id)!.State.Revision));
-        a.Delete(t.Id);
-        _clock.UtcNow = NY(2026, 6, 5, 10);
-
-        a.Import(file);
-        Assert.Equal(1, a.Get(t.Id)!.State.Incarnation);
-        a.Merge(b.All());   // b's revision-2 state arrives
-        var back = a.Get(t.Id)!;
-        Assert.Equal(new DateTime(2026, 6, 1, 8, 0, 0), back.Def.Start);
-        Assert.Equal((1, 1), (back.State.Incarnation, back.State.Revision));   // the state still belongs to the schedule shown
-        Assert.Equal(NY(2026, 6, 6, 8), a.Status(t.Id)!.NextOccurrence);
+        var c = NewStore("node-c");
+        c.Merge([rescheduled with { State = t.State, StateVersion = t.StateVersion }]);
+        var x = c.Get(t.Id)!;
+        Assert.False(MergeRules.Mismatched(x));
+        Assert.Equal((3, 3), (x.Def.ScheduleRevision, x.State.Revision));
+        Assert.Equal(new DateTime(2026, 6, 1, 20, 0, 0), x.Def.Start);
+        Assert.Equal(NY(2026, 6, 1, 20), c.Status(t.Id)!.NextOccurrence);
     }
 
     [Fact]

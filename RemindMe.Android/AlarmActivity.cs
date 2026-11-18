@@ -97,7 +97,6 @@ public sealed class AlarmActivity : Screen
         ShowChoices(t.Def);
         Find<View>(Resource.Id.restart_panel).Visibility = t.Def.Kind == ScheduleKind.Interval ? ViewStates.Visible : ViewStates.Gone;
         _silencedAlert = null;
-        Find<Button>(Resource.Id.silence).Enabled = true;
         Find<TextView>(Resource.Id.error).Text = "";
         Refresh();
     }
@@ -132,21 +131,23 @@ public sealed class AlarmActivity : Screen
         base.OnDestroy();
     }
 
+    /// <summary>Silences the task shown, if it rings. A screen opened by "Show alarm" for a
+    /// snoozed task doesn't: silenced then, its reminder would ring with Silence greyed out.</summary>
     private void Silence()
     {
+        if (AppState.Store.Status(_id) is not { ShouldAlert: true } st) return;
         RingingService.Silence(_id);
-        _silencedAlert = AppState.Store.Status(_id)?.AlertDue;
+        _silencedAlert = st.AlertDue;
         Find<Button>(Resource.Id.silence).Enabled = false;
     }
 
-    /// <summary>Asks whether to delete the task shown, silencing it meanwhile if it rings (a
-    /// screen opened by "Show alarm" for a snoozed task doesn't: silenced now, its reminder
-    /// would ring with Silence greyed out). Over the lock screen the phone is unlocked first:
+    /// <summary>Asks whether to delete the task shown, silencing it meanwhile (if it rings:
+    /// <see cref="Silence"/>). Over the lock screen the phone is unlocked first:
     /// anyone can answer an alarm there, but deleting a task, on every linked device, is the
     /// owner's call. Deleted, the task leaves this screen by itself (<see cref="Refresh"/>).</summary>
     private void AskToDelete()
     {
-        if (AppState.Store.Status(_id)?.ShouldAlert == true) Silence();
+        Silence();
         var id = _id;
         void Ask()
         {
@@ -198,11 +199,9 @@ public sealed class AlarmActivity : Screen
         var st = AlarmEngine.Evaluate(t, now, zone);
         // Dealt with elsewhere (a notification button, another device): nothing to show here.
         if (!(st.ShouldAlert || (_shownOnRequest && st.Triggered))) { NextOrFinish(); return; }
-        if (_silencedAlert is not null && _silencedAlert != st.AlertDue)
-        {
-            _silencedAlert = null;
-            Find<Button>(Resource.Id.silence).Enabled = true;
-        }
+        // Silence is there while the task rings, until silenced; a later alert can be again.
+        if (_silencedAlert is not null && _silencedAlert != st.AlertDue) _silencedAlert = null;
+        Find<Button>(Resource.Id.silence).Enabled = st.ShouldAlert && _silencedAlert is null;
         var d = t.Def;
         string when = st.Latest is { } l ? TextFormat.When(l, now, zone) : "";
         Find<TextView>(Resource.Id.heading).Text = $"⏰ {AlarmEngine.AlertTitle(st)} · {when} · {TextFormat.Schedule(d, t.State, now, zone)}";

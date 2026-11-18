@@ -149,9 +149,10 @@ public sealed class SyncEngine : IDisposable
     /// here, so a flood can't grow it).</summary>
     private readonly ConcurrentDictionary<string, LastAnnouncement> _memberLast = new();
     private readonly ConcurrentDictionary<string, byte> _clockLogged = new();
-    /// <summary>The sync protocol each linked device last spoke when refused for it, and when
-    /// (<see cref="Ticks"/>): from its hello, which nothing authenticates, so it is only shown
-    /// (<see cref="OtherProtocolOf"/>), never acted on. Linked devices only, so a flood of
+    /// <summary>The sync protocol each device of the group last spoke when refused for it,
+    /// and when (<see cref="Ticks"/>): a linked device's hello, which nothing authenticates,
+    /// or a member's announcement, which its MAC does. Only shown
+    /// (<see cref="OtherProtocolOf"/>), never acted on. The group's devices only, so a flood of
     /// made-up IDs can't grow it; dropped once the device is in sync.</summary>
     private readonly ConcurrentDictionary<string, (int Proto, long At)> _otherProtocol = new();
     /// <summary>How long a refused hello's protocol is shown for: a device that still speaks
@@ -551,7 +552,13 @@ public sealed class SyncEngine : IDisposable
 
         // Only group members are dialled; others wait for a pairing. Nor is a member that
         // announces another sync protocol: its hello would be refused, every few seconds.
-        if (!member || msg.Proto != Protocol.Version) return;
+        if (!member) return;
+        if (msg.Proto != Protocol.Version)
+        {
+            NoteOtherProtocol(node, msg.Name, msg.Proto ?? 0, ep.ToString(), member: true);
+            return;
+        }
+        _otherProtocol.TryRemove(node, out _);   // updated: what it said before no longer holds
         lock (_lock) if (_sessions.ContainsKey(node)) { _nearby[node] = _nearby[node] with { FirstSeen = now }; return; }
         if (MayDial(node, now - (old?.FirstSeen ?? now))) _ = DialNodeAsync(node, ep);
     }
@@ -887,7 +894,8 @@ public sealed class SyncEngine : IDisposable
     private void OnHello(PeerSession s, SyncMessage hello)
     {
         var id = Identity;
-        if (hello.Proto != Protocol.Version) NoteOtherProtocol(s, hello);
+        if (hello.Proto != Protocol.Version)
+            NoteOtherProtocol(hello.Node, hello.Name, hello.Proto ?? 0, s.RemoteEndPoint?.ToString() ?? "?", member: false);
         bool accepted = s.AcceptHello(hello, id.NodeId, id.GroupId, id.GroupKey);
         if (s.IsProbe)
         {
@@ -947,25 +955,29 @@ public sealed class SyncEngine : IDisposable
         if (installed) RaisePeersChanged();
     }
 
-    /// <summary>A hello in another sync protocol, which <see cref="PeerSession.AcceptHello"/>
-    /// refuses. A linked device's is recorded for <see cref="OtherProtocolOf"/>, and logged
-    /// when it first says so (it says so at every dial); anyone else's is logged. One that
-    /// claims the ID of a linked device in sync now isn't that device: it is anyone's.</summary>
-    private void NoteOtherProtocol(PeerSession s, SyncMessage hello)
+    /// <summary>A device speaking another sync protocol, which <see cref="PeerSession.AcceptHello"/>
+    /// refuses: in a hello, or in a member's announcement (then it isn't dialled). A device of
+    /// the group (linked here, or a member: <paramref name="member"/>) is recorded for
+    /// <see cref="OtherProtocolOf"/>, and logged when it first says so (it says so at every
+    /// dial, or every announcement); anyone else's hello is logged as it comes. A claim to the
+    /// ID of a device in sync now isn't that device's: it is anyone's.</summary>
+    /// <param name="name">The name it gave.</param>
+    /// <param name="from">Where it came from, for the log.</param>
+    private void NoteOtherProtocol(string? node, string? name, int proto, string from, bool member)
     {
-        int proto = hello.Proto ?? 0;
-        var node = hello.Node;
-        var linked = node is null || InSync(node) ? null : KnownPeers().FirstOrDefault(k => k.NodeId == node);
-        if (linked is not null)
+        var linked = node is null ? null : KnownPeers().FirstOrDefault(k => k.NodeId == node);
+        bool ours = node is not null && !InSync(node) && (member || linked is not null);
+        string who = !ours ? "A device" : linked?.Name ?? Protocol.CleanName(name, node![..8]);
+        if (ours)
         {
-            bool news = !_otherProtocol.TryGetValue(linked.NodeId, out var old) || old.Proto != proto;
-            _otherProtocol[linked.NodeId] = (proto, Ticks);
+            bool news = !_otherProtocol.TryGetValue(node!, out var old) || old.Proto != proto;
+            _otherProtocol[node!] = (proto, Ticks);
             if (!news) return;
             RaisePeersChanged();
         }
-        string who = linked is not null ? linked.Name : "A device";
-        string update = proto < Protocol.Version ? $"update {(linked is not null ? linked.Name : "it")}" : "update this one";
-        _log?.Invoke($"{who} speaking sync protocol {proto} connected from {s.RemoteEndPoint}; this one speaks {Protocol.Version}: {update} to sync.");
+        string update = proto < Protocol.Version ? $"update {(ours ? who : "it")}" : "update this one";
+        _log?.Invoke($"{who} speaking sync protocol {proto} {(member ? "announced itself at" : "connected from")} {from}; "
+            + $"this one speaks {Protocol.Version}: {update} to sync.");
     }
 
     private void OnAuthenticated(PeerSession s)

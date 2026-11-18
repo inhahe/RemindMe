@@ -179,6 +179,10 @@ Open **Devices…** (in the toolbar or the tray menu).
   networks use, and only over IPv4.
 - **Bridging**: a device linked to both a far device and the ones near it
   carries updates between them, so every linked device stays in sync.
+- **Changes made out of touch.** A task's schedule (when it comes up) and the
+  rest of it (its description, reminder interval and sounds) sync separately.
+  If one device moves a task while another changes its description, both
+  changes stand. If both devices change the same thing, the later change wins.
 - **A deletion stands.** Suppose a device out of touch changed a task (say, its
   reminder interval) after another device deleted it. When the two meet, the
   task stays deleted, and the change goes with it. An editor still open on a

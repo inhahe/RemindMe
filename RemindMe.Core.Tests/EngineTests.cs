@@ -338,13 +338,15 @@ public class EngineTests
     public void ANewScheduleOutranksAStateFromAHigherRevisionThanItsDefinition()
     {
         var t = EveryHourFromNow(RestartMode.FromDone);
-        // As after a merge that kept an older definition but a newer state.
+        // As an older version's merge could leave one: an older definition, a newer state.
+        // Repaired on arrival, past both; a new schedule then outranks that.
         var skewed = t with { State = t.State with { Revision = 5 } };
         var store = new TaskStore(null, "b", _clock);
         store.Merge([skewed]);
+        Assert.Equal((6, 6), (store.Get(t.Id)!.Def.ScheduleRevision, store.Get(t.Id)!.State.Revision));
         var saved = store.Save(t.Id, t.Def with { IntervalCount = 3 })!;
-        Assert.Equal(6, saved.Def.ScheduleRevision);
-        Assert.Equal(6, saved.State.Revision);
+        Assert.Equal(7, saved.Def.ScheduleRevision);
+        Assert.Equal(7, saved.State.Revision);
     }
 
     [Fact]

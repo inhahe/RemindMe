@@ -1030,6 +1030,16 @@ public sealed class SyncTests : IDisposable
         Node(b, Addr(ea));
         await WaitFor(() => ea.Peers().Any(p => p.NodeId == b.NodeId && p.Connected), "A and B in sync");
         Assert.Null(ea.OtherProtocolOf(b.NodeId));
+
+        // While B is in sync, a hello claiming its ID in another protocol says nothing about it.
+        using (var impostor = await RawPeer.ConnectAsync(ea, b.NodeId))
+        {
+            await impostor.HelloAsync(a.GroupId, proto: Protocol.Version - 1);
+            Assert.Equal(MessageTypes.Hello, (await impostor.ReceiveAsync())!.Type);
+            Assert.Null(await impostor.ReceiveAsync());
+        }
+        Assert.Null(ea.OtherProtocolOf(b.NodeId));
+        Assert.Equal(0, ea.OtherProtocolCount(known));
     }
 
     [Fact]

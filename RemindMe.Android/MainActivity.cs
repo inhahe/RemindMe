@@ -75,7 +75,7 @@ public sealed class MainActivity : Screen
             + (ringing > 0 ? $" · {ringing} ringing" : "") + (waiting > 0 ? $" · {waiting} waiting to be marked done" : "")
             + TextFormat.SyncSummary(AppState.Settings.SyncEnabled, AppState.Sync is not null,
                 AppState.Settings.KnownPeers.Count, AppState.Sync?.InSyncCount() ?? 0,
-                AppState.Settings.KnownPeers.Count(k => AppState.Sync?.OtherProtocolOf(k.NodeId) is not null));
+                AppState.Sync?.OtherProtocolCount(AppState.Settings.KnownPeers) ?? 0);
     }
 
     private void ShowActions(TaskStatus st, View anchor)

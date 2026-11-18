@@ -135,11 +135,15 @@
                     <Spinner android:id="@+id/fade_in" android:layout_width="match_parent" android:layout_height="wrap_content" />
                 </LinearLayout>
             </com.google.android.material.card.MaterialCardView>
-
-            <TextView android:id="@+id/error" android:layout_width="match_parent" android:layout_height="wrap_content"
-                android:textColor="@color/error" />
         </LinearLayout>
     </ScrollView>
+
+    <!-- Below the scrolling part, so they are seen wherever the form is scrolled. The notice
+         that the task has been deleted has a line of its own: a validation error mustn't hide it. -->
+    <TextView android:id="@+id/deleted_notice" android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:paddingHorizontal="12dp" android:paddingTop="6dp" android:textColor="@color/error" android:visibility="gone" />
+    <TextView android:id="@+id/error" android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:paddingHorizontal="12dp" android:textColor="@color/error" />
 
     <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
         android:gravity="center_vertical" android:padding="8dp">

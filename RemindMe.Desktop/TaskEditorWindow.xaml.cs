@@ -21,8 +21,10 @@ public partial class TaskEditorWindow : Window
     private readonly TaskDefinition _original;
     private readonly CheckBox[] _days = new CheckBox[7];
     private SoundRef? _sound;
-    /// <summary>The task has been deleted on a linked device since this opened.</summary>
+    /// <summary>The task has been deleted since this opened, on a linked device (or here an
+    /// instant before Save): Save adds the edits as a new task.</summary>
     private bool _deleted;
+    private bool _closed;
 
     /// <summary>The task being edited, or null for a new one.</summary>
     public Guid? TaskId => _id;
@@ -108,22 +110,37 @@ public partial class TaskEditorWindow : Window
         RefreshDefaults();
         AppHost.SettingsChanged += RefreshDefaults;
         AppHost.Store.Changed += OnStoreChanged;
-        Closed += (_, _) => { AppHost.SettingsChanged -= RefreshDefaults; AppHost.Store.Changed -= OnStoreChanged; };
+        Closed += (_, _) =>
+        {
+            _closed = true;
+            AppHost.SettingsChanged -= RefreshDefaults;
+            AppHost.Store.Changed -= OnStoreChanged;
+        };
 
         Loaded += (_, _) => { Description.Focus(); Description.CaretIndex = Description.Text.Length; };
     }
 
+    /// <summary>Follows its task being deleted, or brought back (an import restoring it).</summary>
     private void OnStoreChanged(StoreChange change)
     {
-        if (_id is not { } id || !change.Tasks.Any(t => t.Id == id && t.Def.Deleted)) return;
+        if (_id is not { } id || change.Tasks.FirstOrDefault(t => t.Id == id) is not { } changed) return;
         AppHost.OnUi(() =>
         {
-            if (!IsVisible) return;   // closed meanwhile
-            if (!change.FromSync) { Close(); return; }
-            _deleted = true;
-            Title = "Edit task (deleted)";
-            ErrorText.Text = TextFormat.DeletedWhileEditing;
+            // Not IsVisible: an open editor is hidden too while its owner is minimized.
+            if (_closed) return;
+            if (changed.Def.Deleted && !change.FromSync) { Close(); return; }
+            ShowDeleted(AppHost.Store.Get(id) is not { Def.Deleted: false });
         });
+    }
+
+    /// <summary>Shows whether the task has been deleted since this opened (here or on a
+    /// linked device): then Save adds the edits as a new task, and says so.</summary>
+    private void ShowDeleted(bool deleted)
+    {
+        _deleted = deleted;
+        Title = deleted ? "Edit task (deleted)" : "Edit task";
+        DeletedNotice.Text = deleted ? TextFormat.DeletedWhileEditing : "";
+        SaveButton.Content = deleted ? "Save as _new task" : "_Save";
     }
 
     private void BuildDayBoxes()
@@ -204,9 +221,7 @@ public partial class TaskEditorWindow : Window
         if (_id is not { } id || _deleted) AppHost.Store.Add(def);
         else if (AppHost.Store.Save(id, def, restart) is null)
         {
-            // Deleted an instant ago: say so first, and the next Save adds it.
-            _deleted = true;
-            ErrorText.Text = TextFormat.DeletedWhileEditing;
+            ShowDeleted(true);   // deleted an instant ago: say so first, and the next Save adds it
             return;
         }
         Close();
@@ -260,7 +275,7 @@ public partial class TaskEditorWindow : Window
             d = d with { Kind = ScheduleKind.Once, At = (OnceDate.SelectedDate ?? DateTime.Today).Date + time.ToTimeSpan() };
             // Saving a schedule only lets occurrences after the save fire, so a time already
             // past would never ring; say so instead of silently saving a dead task.
-            bool changed = _original.Kind != ScheduleKind.Once || _original.At != d.At;
+            bool changed = _deleted || _original.Kind != ScheduleKind.Once || _original.At != d.At;   // a deleted task's edits are added afresh
             if (errors.Count == 0 && changed && TimeMath.ToInstant(d.At, AppHost.Clock.Zone) <= AppHost.Clock.UtcNow)
                 errors.Add("That date and time has already passed.");
         }

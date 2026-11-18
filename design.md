@@ -358,6 +358,18 @@ across a deletion therefore can't undo it; saving there adds the edits as a new
 task (`Add`). Digests carry each definition's rank, so each side knows which of
 the two copies wins.
 
+Two devices restoring the same task without hearing of each other give it the
+same incarnation. The two restores are then one life of the task, and a
+deletion of it outranks both, as it outranks every edit of its incarnation.
+
+Records written before protocol 5 all have incarnation 0. A task restored under
+an older build (by an import, or by those builds' editors saving over a
+tombstone) therefore ranks below its tombstone. That matters only for a device
+still holding the tombstone that hadn't synced the restore when both were
+updated: there the task is deleted again. This is accepted. Telling such a
+restore from an ordinary edit would take a marker kept for good, for a moment
+that passes with the update.
+
 That last rule is what makes "done" stick. Suppose the phone was off when a task
 fell due, and the PC marked it done meanwhile. The phone triggers it on startup,
 but triggering writes nothing, so when the PC's larger `DoneThrough` arrives the
@@ -658,9 +670,12 @@ separately (see *Simplification opportunities*).
   stay answerable. In the editor, the description `TextBox` has
   `AcceptsReturn`, so Enter adds a line. There is no default button; Esc is
   `IsCancel`, and Cancel closes the window. An editor whose task is deleted
-  closes, when that was done on this computer (the list, an alarm window). When
-  the deletion came from a linked device, it says so, and Save adds the edits as
-  a new task.
+  closes, when that was done on this computer (the list, an alarm window),
+  including while it is hidden with its minimized owner. When the deletion came
+  from a linked device, it says so in its title and on a line of its own, which a
+  validation error doesn't replace. Save becomes "Save as new task" and adds the
+  edits as one. A one-time date already past is refused then, as for any new
+  task. Restored meanwhile (an import), the task is edited as before.
 - `AlarmWindow`: one per ringing task, topmost. Closing it any way the user can
   dismisses the task; `CloseQuietly` and exiting the app (`AppHost.Exiting`,
   also set when Windows ends the session) don't. The task stays due and rings
@@ -876,7 +891,12 @@ it runs on Android 10 (API 29) and up. The root namespace is
   task it asks about. It goes when the screen moves on to another task or
   closes.
 - `TaskEditActivity`: once its task is deleted (from its alarm screen, or on a
-  linked device), it says so, and Save adds the edits as a new task.
+  linked device), it says so, in the toolbar and on a line below the scrolling
+  form (where the validation errors are too), and "Save as new task" adds the
+  edits as a new task. Restored meanwhile, the task is edited as before. Opened
+  from a list that hadn't caught up with a deletion, it says the task has just
+  been deleted and closes, except when recreated (rotation), where it carries on
+  as above.
 - **Direct boot**: the app is `directBootAware`, and its files live in
   device-protected storage. The locked-boot receiver can then set alarms before
   the first unlock after a restart, so a phone that rebooted overnight for an

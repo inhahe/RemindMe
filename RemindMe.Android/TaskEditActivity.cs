@@ -44,6 +44,14 @@ public sealed class TaskEditActivity : Screen
         SetContentView(Resource.Layout.activity_edit);
         _chooser = new SoundChooser(this, v => { _sound = v; ShowSound(); });
         var existing = Guid.TryParse(Intent?.GetStringExtra("task"), out var g) ? AppState.Store.Get(g) : null;
+        if (existing is { Def.Deleted: true } && savedInstanceState is null)
+        {
+            // Tapped in a list that hadn't caught up yet. (Recreated, the editor carries on:
+            // it says the task is deleted, and keeps what was typed.)
+            Ui.Toast(this, "That task has just been deleted.");
+            Finish();
+            return;
+        }
         _id = existing?.Id;
         Ui.SetupToolbar(this, existing is null ? "New task" : "Edit task", back: true);
 
@@ -144,16 +152,23 @@ public sealed class TaskEditActivity : Screen
         base.OnDestroy();
     }
 
+    /// <summary>Follows the task being deleted, or brought back (an import restoring it).</summary>
     private void CheckDeleted()
     {
-        if (!_deleted && _id is { } id && AppState.Store.Get(id) is not { Def.Deleted: false }) ShowDeleted();
+        if (_id is { } id) ShowDeleted(AppState.Store.Get(id) is not { Def.Deleted: false });
     }
 
-    private void ShowDeleted()
+    /// <summary>Shows whether the task has been deleted since this opened (on its alarm
+    /// screen, or on a linked device): then Save adds the edits as a new task, and says so.</summary>
+    private void ShowDeleted(bool deleted)
     {
-        _deleted = true;
-        Find<TextView>(Resource.Id.error).Text = TextFormat.DeletedWhileEditing;
-        Find<Button>(Resource.Id.delete).Visibility = ViewStates.Gone;
+        _deleted = deleted;
+        SupportActionBar!.Title = deleted ? "Edit task (deleted)" : "Edit task";
+        var notice = Find<TextView>(Resource.Id.deleted_notice);
+        notice.Text = TextFormat.DeletedWhileEditing;
+        notice.Visibility = deleted ? ViewStates.Visible : ViewStates.Gone;
+        Find<Button>(Resource.Id.save).Text = deleted ? "Save as new task" : "Save";
+        Find<Button>(Resource.Id.delete).Visibility = deleted ? ViewStates.Gone : ViewStates.Visible;
     }
 
     // Recreating the activity (rotation, dark mode, the process restarted behind a picker)
@@ -279,7 +294,7 @@ public sealed class TaskEditActivity : Screen
         else
         {
             d = d with { Kind = ScheduleKind.Once, At = _onceDate.Date + _onceTime.ToTimeSpan() };
-            bool changed = _original.Kind != ScheduleKind.Once || _original.At != d.At;
+            bool changed = _deleted || _original.Kind != ScheduleKind.Once || _original.At != d.At;   // a deleted task's edits are added afresh
             if (changed && TimeMath.ToInstant(d.At, AppState.Clock.Zone) <= AppState.Clock.UtcNow)
                 errors.Add("That date and time has already passed.");
         }
@@ -304,7 +319,7 @@ public sealed class TaskEditActivity : Screen
         if (_id is not { } id || _deleted) AppState.Store.Add(d);
         else if (AppState.Store.Save(id, d, restart.Visibility == ViewStates.Visible && restart.Checked) is null)
         {
-            ShowDeleted();   // deleted an instant ago: say so first, and the next Save adds it
+            ShowDeleted(true);   // deleted an instant ago: say so first, and the next Save adds it
             return;
         }
         Finish();

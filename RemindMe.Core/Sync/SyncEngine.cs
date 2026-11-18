@@ -283,14 +283,20 @@ public sealed class SyncEngine : IDisposable
 
     /// <summary>The sync protocol <paramref name="node"/> speaks when it isn't this build's, so
     /// that the two refuse each other: from its announcement (while heard), or for a linked
-    /// device from the hello it was refused for (shown <see cref="OtherProtocolShown"/>, and
-    /// not once it is in sync). Null when it speaks this one, or nothing says otherwise.</summary>
+    /// device from the hello it was refused for (shown <see cref="OtherProtocolShown"/>).
+    /// Null when it speaks this one, or nothing says otherwise, and always while it is in
+    /// sync: whatever a hello claiming its ID said, it speaks this one.</summary>
     public int? OtherProtocolOf(string node)
     {
+        lock (_lock) if (_sessions.TryGetValue(node, out var s) && s.Authenticated) return null;
         if (_nearby.TryGetValue(node, out var n) && DateTimeOffset.UtcNow - n.Seen <= PeerExpiry && n.Msg.Proto is { } p)
             return p != Protocol.Version ? p : null;
         return _otherProtocol.TryGetValue(node, out var o) && Ticks - o.At <= (long)OtherProtocolShown.TotalMilliseconds ? o.Proto : null;
     }
+
+    /// <summary>How many of the devices <paramref name="linked"/> speak another sync protocol
+    /// (<see cref="OtherProtocolOf"/>): the status line's count.</summary>
+    public int OtherProtocolCount(IEnumerable<KnownPeer> linked) => linked.Count(k => OtherProtocolOf(k.NodeId) is not null);
 
     /// <summary>The state of each configured remote address, for the Devices screen.</summary>
     public IReadOnlyList<(string Address, string State)> RemoteStates()

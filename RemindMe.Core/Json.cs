@@ -23,12 +23,24 @@ internal sealed class CamelCaseEnum<T>() : JsonStringEnumConverter<T>(JsonNaming
 [JsonSerializable(typeof(ExportFile))]
 [JsonSerializable(typeof(SyncMessage))]
 [JsonSerializable(typeof(string[]))]
+[JsonSerializable(typeof(TaskDefinition))]
 internal sealed partial class CoreJson : JsonSerializerContext;
 
 public static class Json
 {
     /// <summary>Indented, for the files people may open.</summary>
     internal static CoreJson Files => CoreJson.Default;
+
+    /// <summary><paramref name="d"/> as text: an editor keeps the definition it opened with
+    /// across its screen's recreation (Android), to save only what was edited in it.</summary>
+    public static string Serialize(TaskDefinition d) => JsonSerializer.Serialize(d, Wire.TaskDefinition);
+
+    /// <summary>A definition <see cref="Serialize"/> wrote; null if <paramref name="json"/> isn't one.</summary>
+    public static TaskDefinition? DeserializeDefinition(string json)
+    {
+        try { return JsonSerializer.Deserialize(json, Wire.TaskDefinition); }
+        catch (JsonException) { return null; }
+    }
 
     /// <summary>Compact, for the wire.</summary>
     internal static readonly CoreJson Wire = new(new JsonSerializerOptions

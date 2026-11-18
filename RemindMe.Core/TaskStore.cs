@@ -258,15 +258,22 @@ public sealed class TaskStore
                 State = t.State with { Incarnation = t.Def.Incarnation, Revision = t.Def.ScheduleRevision, ScheduleStamp = t.Def.ScheduleStamp },
             };
         }
-        var def = t.Def with
-        {
-            ScheduleRevision = MergeRules.Next(Math.Max(t.Def.ScheduleRevision, t.State.Revision), MergeRules.MaxRevision),
-            ScheduleStamp = Versions.Tick(),
-        };
+        // Its stamp is worked out from the schedule, as a legacy one is (milliseconds 0), and
+        // not taken from the clock: every device that repairs this task (upgrading on different
+        // days, say) gives it the same one, and it ranks below any change made since, on a
+        // device that repaired it before.
+        var def = t.Def with { ScheduleRevision = NextRevision(t) };
+        def = def with { ScheduleStamp = def.LegacyScheduleStamp() };
         _log?.Invoke($"\"{name}\": its state was another kind of schedule's (an older version's merge), so it "
             + "couldn't ring; it starts afresh on its schedule.");
         return t with { Def = def, State = AlarmEngine.FreshState(t.State, def, now), StateVersion = Versions.Tick() };
     }
+
+    /// <summary>The revision of a new schedule of <paramref name="t"/>: past both its
+    /// definition's and its state's (an older version's records can have the state's ahead).
+    /// A count, for reading: schedules rank by their stamps.</summary>
+    private static int NextRevision(AlarmTask t) =>
+        MergeRules.Next(Math.Max(t.Def.ScheduleRevision, t.State.Revision), MergeRules.MaxRevision);
 
     /// <summary>Every task, deleted ones (tombstones) included.</summary>
     public IReadOnlyList<AlarmTask> All() { lock (_lock) return _tasks.Values.ToList(); }
@@ -311,68 +318,64 @@ public sealed class TaskStore
     /// <summary>Saves the editor's result for the existing task <paramref name="id"/>.</summary>
     /// <param name="def">The definition as edited; its ScheduleRevision and ScheduleStamp,
     /// Deleted and Incarnation are set here.</param>
-    /// <param name="restartCountdown">Start a countdown again from now, running even if it was
-    /// paused, though its length didn't change. Ignored unless <paramref name="def"/> is a
-    /// countdown: a paused task saved as another kind stays paused.</param>
+    /// <param name="restartCountdown">Start the countdown again from now, running even if it
+    /// was paused, though its length didn't change: the countdown the task has, or the one the
+    /// editor makes it. Ignored for any other kind: a paused task saved as another kind stays
+    /// paused.</param>
     /// <param name="editedFrom">The definition the editor opened with. Only what the editor
-    /// changed from it is saved, laid on the task as it is now: the schedule as a whole, and
-    /// each other field on its own. So what changed elsewhere meanwhile (synced in while the
-    /// editor was open), and not in the editor, stays. Null: the task as it is now.</param>
+    /// changed from it is saved, laid on the task as it is now: the schedule's times as a
+    /// whole, the restart mode, and each other field on its own. So what changed elsewhere
+    /// meanwhile (synced in while the editor was open), and not in the editor, stays. Null:
+    /// the task as it is now.</param>
     /// <returns>The stored task; null, with nothing saved, when there is no such task or it
     /// has been deleted (here or on a linked device): an editor left open across a deletion
     /// mustn't undo it. Keeping the edits means adding them as a new task.</returns>
-    public AlarmTask? Save(Guid id, TaskDefinition def, bool restartCountdown = false, TaskDefinition? editedFrom = null)
+    public AlarmTask? Save(Guid id, TaskDefinition def, bool restartCountdown = false, TaskDefinition? editedFrom = null) =>
+        Write(id, _ => def, editedFrom, restartCountdown);
+
+    /// <summary>Changes the definition without touching when the task comes up (the alarm
+    /// window's reminder interval, a sound choice); or its restart mode, which keeps the
+    /// task's state. <paramref name="change"/> is applied to the task as it is now.</summary>
+    /// <returns>The stored task; null, with nothing changed, when there is no such task or
+    /// it has been deleted.</returns>
+    public AlarmTask? Edit(Guid id, Func<TaskDefinition, TaskDefinition> change) => Write(id, change, null, false);
+
+    /// <summary>Saves what <paramref name="edit"/> makes of the task as it is now, changed from
+    /// <paramref name="editedFrom"/> (or from the task as it is now): see <see cref="Save"/>.</summary>
+    private AlarmTask? Write(Guid id, Func<TaskDefinition, TaskDefinition> edit, TaskDefinition? editedFrom, bool restartCountdown)
     {
         var now = _clock.UtcNow;
         AlarmTask result;
         lock (_lock)
         {
             if (!_tasks.TryGetValue(id, out var old) || old.Def.Deleted) return null;
+            var def = edit(old.Def);
             var from = editedFrom ?? old.Def;
-            bool reschedule = from.ScheduleDiffers(def) || (restartCountdown && def.Kind == ScheduleKind.Countdown);
             // The two halves merge apart (MergeRules.Merge), so each gets a new version only
             // when it changes. A new schedule outranks every one this device has seen of the
             // task (its stamp is later than all of them); unchanged, it is kept exactly, fields
             // that don't count included, so that one schedule is always the same everywhere.
+            bool newTimes = from.ScheduleDiffers(def);
+            bool newRestart = def.Restart != from.Restart;
+            var times = newTimes ? def : old.Def;   // the times: the editor's, or the task's as it is now
+            bool restart = restartCountdown && times.Kind == ScheduleKind.Countdown;
             var rest = old.Def.WithRestEditsOf(from, def);
             bool restChanged = rest != old.Def;
-            def = reschedule
-                ? rest.WithScheduleOf(def) with
-                {
-                    ScheduleRevision = MergeRules.Next(Math.Max(old.Def.ScheduleRevision, old.State.Revision), MergeRules.MaxRevision),
-                    ScheduleStamp = Versions.Tick(),
-                }
-                : rest;
-            result = old with { Def = def, DefVersion = restChanged ? Versions.Tick() : old.DefVersion };
-            if (reschedule)
-                result = result with
-                {
-                    State = AlarmEngine.FreshState(old.State, def, now,
-                        keepPaused: !(restartCountdown && def.Kind == ScheduleKind.Countdown)),
-                    StateVersion = Versions.Tick(),
-                };
+            result = old;
+            if (newTimes || newRestart || restart)
+            {
+                var schedule = times with { Restart = newRestart ? def.Restart : old.Def.Restart };
+                rest = rest.WithScheduleOf(schedule) with { ScheduleRevision = NextRevision(old), ScheduleStamp = Versions.Tick() };
+                // New times, or the countdown restarted, start the state afresh; a new restart
+                // mode alone keeps it, as the schedule it now is.
+                var state = newTimes || restart
+                    ? AlarmEngine.FreshState(old.State, rest, now, keepPaused: !restart)
+                    : old.State with { Incarnation = rest.Incarnation, Revision = rest.ScheduleRevision, ScheduleStamp = rest.ScheduleStamp };
+                result = result with { State = state, StateVersion = Versions.Tick() };
+            }
+            result = result with { Def = rest, DefVersion = restChanged ? Versions.Tick() : old.DefVersion };
             if (result == old) return old;
             _tasks[result.Id] = result;
-            SaveLocked();
-        }
-        Raise([result], false);
-        return result;
-    }
-
-    /// <summary>Changes the definition without touching the schedule (the alarm window's
-    /// reminder interval and restart mode, a sound choice).</summary>
-    /// <returns>The stored task; null, with nothing changed, when there is no such task or
-    /// it has been deleted.</returns>
-    public AlarmTask? Edit(Guid id, Func<TaskDefinition, TaskDefinition> change)
-    {
-        AlarmTask result;
-        lock (_lock)
-        {
-            if (!_tasks.TryGetValue(id, out var old) || old.Def.Deleted) return null;
-            var def = (change(old.Def) with { Deleted = false, Incarnation = old.Def.Incarnation }).WithScheduleOf(old.Def);
-            if (old.Def == def) return old;
-            result = old with { Def = def, DefVersion = Versions.Tick() };
-            _tasks[id] = result;
             SaveLocked();
         }
         Raise([result], false);
@@ -504,7 +507,7 @@ public sealed class TaskStore
     }
 
     /// <summary><paramref name="r"/> with whatever came up before <paramref name="now"/>
-    /// passed over: DoneThrough raised to now, which within one revision only ever rises, so
+    /// passed over: DoneThrough raised to now, which within one schedule only ever rises, so
     /// the record keeps its version. A paused task keeps its own: resuming passes over the
     /// past anyway, and a paused countdown's end may lie in the past until it is resumed.</summary>
     private static AlarmTask PassOverPast(AlarmTask r, DateTimeOffset now) =>

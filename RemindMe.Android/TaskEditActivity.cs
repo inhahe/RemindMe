@@ -177,6 +177,9 @@ public sealed class TaskEditActivity : Screen
     protected override void OnSaveInstanceState(Bundle outState)
     {
         base.OnSaveInstanceState(outState);
+        // What it opened with: Save keeps only what was edited here, and the fields kept
+        // across recreation are edits of this, not of the task as it is by then.
+        outState.PutString("original", Json.Serialize(_original));
         outState.PutLong("startDate", _startDate.Ticks);
         outState.PutLong("startTime", _startTime.Ticks);
         outState.PutLong("weeklyTime", _weeklyTime.Ticks);
@@ -191,6 +194,7 @@ public sealed class TaskEditActivity : Screen
 
     private void Restore(Bundle s)
     {
+        if (s.GetString("original") is { } original && Json.DeserializeDefinition(original) is { } d) _original = d;
         _startDate = new DateTime(s.GetLong("startDate"));
         _startTime = new TimeOnly(s.GetLong("startTime"));
         _weeklyTime = new TimeOnly(s.GetLong("weeklyTime"));

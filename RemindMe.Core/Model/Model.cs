@@ -118,7 +118,7 @@ public sealed record TaskDefinition
     /// with such an edit carries the new value in <see cref="TaskState.Revision"/>.</summary>
     public int ScheduleRevision { get; init; }
 
-    /// <summary>The version of the schedule: when it was last set (the schedule fields are
+    /// <summary>The version of the schedule: when it was last set (the schedule's fields are
     /// those <see cref="WithScheduleOf"/> copies), which says which schedule this is. The
     /// state written for it carries it too (<see cref="TaskState.ScheduleStamp"/>), so the
     /// schedule and the state that win a merge are always of one schedule, the later set
@@ -158,29 +158,21 @@ public sealed record TaskDefinition
     }
 
     /// <summary>This definition with <paramref name="other"/>'s schedule: every field that
-    /// says when the task comes up, and the schedule's revision and stamp. The rest (the
-    /// description, the reminder interval, the restart mode, the sounds, whether it is
-    /// deleted, its incarnation) stays this one's. The two halves merge apart: an edit of
-    /// either doesn't undo one of the other made elsewhere.</summary>
+    /// says when the task comes up (the restart mode included, which says when an interval
+    /// task comes up next), and the schedule's revision and stamp. The rest (the
+    /// description, the reminder interval, the sounds, whether it is deleted, its
+    /// incarnation) stays this one's. The two halves merge apart: an edit of either doesn't
+    /// undo one of the other made elsewhere.</summary>
     public TaskDefinition WithScheduleOf(TaskDefinition other) => this with
     {
         Kind = other.Kind,
-        IntervalCount = other.IntervalCount, Unit = other.Unit, Start = other.Start,
+        IntervalCount = other.IntervalCount, Unit = other.Unit, Start = other.Start, Restart = other.Restart,
         Days = other.Days, TimeOfDay = other.TimeOfDay, WeekInterval = other.WeekInterval,
         WeeksFrom = other.WeeksFrom, FirstDayOfWeek = other.FirstDayOfWeek,
         At = other.At,
         Duration = other.Duration,
         ScheduleRevision = other.ScheduleRevision, ScheduleStamp = other.ScheduleStamp,
     };
-
-    /// <summary>The names of the fields <see cref="WithScheduleOf"/> copies: a test checks that
-    /// every field of a definition is either one of these or one it leaves.</summary>
-    public static readonly string[] ScheduleFields =
-    [
-        nameof(Kind), nameof(IntervalCount), nameof(Unit), nameof(Start), nameof(Days), nameof(TimeOfDay),
-        nameof(WeekInterval), nameof(WeeksFrom), nameof(FirstDayOfWeek), nameof(At), nameof(Duration),
-        nameof(ScheduleRevision), nameof(ScheduleStamp),
-    ];
 
     /// <summary>The stamp of a schedule saved before stamps existed (none, in the file): one
     /// every device works out alike from the schedule itself, so that two devices holding
@@ -195,16 +187,16 @@ public sealed record TaskDefinition
         return new Hlc(0, ScheduleRevision, "~" + Convert.ToHexString(hash, 0, 16));
     }
 
-    /// <summary>This definition, with the fields outside its schedule (<see cref="RestFields"/>)
-    /// that <paramref name="edited"/> changes from <paramref name="from"/>: an editor's save,
-    /// laid on the task as it is now. A field changed elsewhere since the editor opened, and
-    /// not here, keeps its newer value.</summary>
+    /// <summary>This definition, with the fields outside its schedule that
+    /// <paramref name="edited"/> changes from <paramref name="from"/>: an editor's save, laid
+    /// on the task as it is now. A field changed elsewhere since the editor opened, and not
+    /// here, keeps its newer value. Whether the task is deleted, and its incarnation, are the
+    /// store's to set, not an editor's.</summary>
     /// <param name="from">The definition the editor opened with.</param>
     /// <param name="edited">What the editor saves.</param>
     public TaskDefinition WithRestEditsOf(TaskDefinition from, TaskDefinition edited) => this with
     {
         Description = edited.Description != from.Description ? edited.Description : Description,
-        Restart = edited.Restart != from.Restart ? edited.Restart : Restart,
         ReminderMinutes = edited.ReminderMinutes != from.ReminderMinutes ? edited.ReminderMinutes : ReminderMinutes,
         WindowsSound = edited.WindowsSound != from.WindowsSound ? edited.WindowsSound : WindowsSound,
         AndroidSound = edited.AndroidSound != from.AndroidSound ? edited.AndroidSound : AndroidSound,
@@ -213,13 +205,6 @@ public sealed record TaskDefinition
         FadeInSeconds = edited.FadeInSeconds != from.FadeInSeconds ? edited.FadeInSeconds : FadeInSeconds,
     };
 
-    /// <summary>The fields <see cref="WithRestEditsOf"/> takes: all but the schedule's, and
-    /// whether the task is deleted and its incarnation, which only the store sets.</summary>
-    public static readonly string[] RestFields =
-    [
-        nameof(Description), nameof(Restart), nameof(ReminderMinutes), nameof(WindowsSound), nameof(AndroidSound),
-        nameof(SoundMode), nameof(Volume), nameof(FadeInSeconds),
-    ];
 
     /// <summary>True when the two definitions would fire at different times.</summary>
     public bool ScheduleDiffers(TaskDefinition other) =>

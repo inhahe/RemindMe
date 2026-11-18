@@ -18,6 +18,7 @@ public class AccessKeyTests
     {
         var dir = new DirectoryInfo(AppContext.BaseDirectory);
         while (dir is not null && !File.Exists(Path.Combine(dir.FullName, "RemindMe.slnx"))) dir = dir.Parent;
+        Assert.True(dir is not null, $"No RemindMe.slnx above {AppContext.BaseDirectory}: the test reads the desktop's sources");
         return new DirectoryInfo(Path.Combine(dir!.FullName, "RemindMe.Desktop"));
     }
 
@@ -48,13 +49,17 @@ public class AccessKeyTests
                         c.Keys.Add(k);
                     }
             }
-            // The texts the window's code gives its controls: "A.Content = B.Header = x ? "..." : "...";".
+            // The texts the window's code gives its controls: "A.Content = B.Header = x ? "..." : "...";",
+            // and controls it makes: "new Button { Content = "..." }" (each a control of its own).
             var code = new FileInfo(xaml.FullName + ".cs");
             if (code.Exists)
-                foreach (Match m in Regex.Matches(File.ReadAllText(code.FullName), @"((?:\w+\.(?:Content|Header)\s*=\s*)+)([^;]*);"))
+            {
+                var source = File.ReadAllText(code.FullName);
+                static List<char> KeysIn(string expression) =>
+                    Regex.Matches(expression, @"\$?""((?:[^""\\]|\\.)*)""").Select(l => KeyOf(l.Groups[1].Value)).OfType<char>().ToList();
+                foreach (Match m in Regex.Matches(source, @"((?:\w+\.(?:Content|Header)\s*=\s*)+)([^;]*);"))
                 {
-                    var literals = Regex.Matches(m.Groups[2].Value, @"\$?""((?:[^""\\]|\\.)*)""").Select(l => l.Groups[1].Value);
-                    var found = literals.Select(KeyOf).OfType<char>().ToList();
+                    var found = KeysIn(m.Groups[2].Value);
                     if (found.Count == 0) continue;
                     foreach (Match target in Regex.Matches(m.Groups[1].Value, @"(\w+)\.(?:Content|Header)"))
                     {
@@ -63,6 +68,10 @@ public class AccessKeyTests
                         c.Keys.UnionWith(found);
                     }
                 }
+                foreach (Match m in Regex.Matches(source, @"(?<![.\w])(?:Content|Header)\s*=\s*([^,;}\r\n]*)"))
+                    if (KeysIn(m.Groups[1].Value) is { Count: > 0 } found)
+                        keys[$"new at {code.Name}:{m.Index}"] = ("window", [.. found]);
+            }
             foreach (var scope in keys.GroupBy(kv => kv.Value.Scope))
                 foreach (var key in scope.SelectMany(kv => kv.Value.Keys.Select(k => (k, kv.Key))).GroupBy(p => p.k))
                     if (key.Count() > 1)

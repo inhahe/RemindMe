@@ -558,7 +558,6 @@ public sealed class SyncEngine : IDisposable
             NoteOtherProtocol(node, msg.Name, msg.Proto ?? 0, ep.ToString(), member: true);
             return;
         }
-        _otherProtocol.TryRemove(node, out _);   // updated: what it said before no longer holds
         lock (_lock) if (_sessions.ContainsKey(node)) { _nearby[node] = _nearby[node] with { FirstSeen = now }; return; }
         if (MayDial(node, now - (old?.FirstSeen ?? now))) _ = DialNodeAsync(node, ep);
     }
@@ -965,6 +964,12 @@ public sealed class SyncEngine : IDisposable
     /// <param name="from">Where it came from, for the log.</param>
     private void NoteOtherProtocol(string? node, string? name, int proto, string from, bool member)
     {
+        // Said before, and still so (every dial, every announcement): only when, to renew it.
+        if (node is not null && _otherProtocol.TryGetValue(node, out var said) && said.Proto == proto && !InSync(node))
+        {
+            _otherProtocol[node] = (proto, Ticks);
+            return;
+        }
         // A member in sync now announcing another protocol is a stale session, or another
         // install with its ID: it says so every few seconds, and logging that would only flood.
         if (member && node is not null && InSync(node)) return;

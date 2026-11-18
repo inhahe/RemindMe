@@ -140,8 +140,10 @@ sync: each device reaches the same answer independently.
   30 minutes or an hour, `AlarmEngine.SnoozePresets`, on both alarm screens)
   sets `SnoozeUntil = now + preset` instead, leaving the task's reminder
   interval as it is.
-- **Saving a schedule change**: `ScheduleRevision++`, a fresh state with
-  `DoneThrough = save time`, and `Anchor` cleared. Only occurrences after the save
+- **Saving a schedule change**: a new schedule (`ScheduleStamp`, and
+  `ScheduleRevision++`), a fresh state with `DoneThrough = save time`, and
+  `Anchor` cleared. A new restart mode alone is a new schedule too, but keeps
+  the state: the times are the same. Only occurrences after the save
   fire. A start of "now", the editor's default, therefore means the first alarm
   comes one interval from now, not immediately. A paused task stays paused,
   except a countdown restarted on purpose, which runs. The editor's "start the
@@ -237,8 +239,8 @@ from sync.
   edits: not here, and not on the device it came from once the two are linked,
   as fresh versions would.
 - Nothing in the past rings: wherever the file's state replaces this device's
-  (a task it doesn't have, or the file's state is of a newer revision),
-  `DoneThrough` is raised to the import time. Within one revision that is "done"
+  (a task it doesn't have, or the file's state is of a later schedule),
+  `DoneThrough` is raised to the import time. Within one schedule that is "done"
   moving forward, which merging carries as it is, so the version stays. A
   paused task keeps its own, since resuming passes over the past anyway. One
   consequence: once linked, the raise reaches the device the file came from too,
@@ -344,12 +346,13 @@ once the tasks have changed and nothing more has changed for 5 s
 Each part of a task merges on its own. The definition is two parts:
 
 - **Definition, all but the schedule** (the description, the reminder
-  interval, the restart mode, the sounds, whether it is deleted): the higher
+  interval, the sounds, whether it is deleted): the higher
   `DefRank` wins: `(Incarnation, Deleted, DefVersion)`, compared in that order.
   Within one incarnation, then, a deletion outranks every edit, and otherwise
   the last writer wins.
 - **The definition's schedule** (the fields `TaskDefinition.WithScheduleOf`
-  copies, `ScheduleFields`: when the task comes up): the higher `ScheduleRank`
+  copies: when the task comes up, the restart mode included, which says when an
+  interval task comes up next): the higher `ScheduleRank`
   wins: `(Incarnation, ScheduleStamp)`. The stamp is the `Hlc` of the change
   that set the schedule, so the schedule set last wins. A schedule set after
   another was seen has a later stamp, since every version a device issues is
@@ -376,11 +379,14 @@ make that pair:
   version only when it changes: saving only a schedule doesn't make the old
   description outrank one made elsewhere. And a save that keeps the schedule
   keeps it exactly, fields that don't count included, and `Edit` never touches
-  it: one schedule's fields are the same everywhere. An editor passes the
-  definition it opened with (`Save`'s `editedFrom`). Only what was changed in it
-  is saved, laid on the task as it is now: the schedule as a whole, and each
-  other field on its own (`WithRestEditsOf`). So an editor left open while a
-  change elsewhere synced in doesn't write its stale copy over it.
+  it (the alarm screen's restart mode is a new schedule of the same times,
+  with the state kept). An editor passes the definition it opened with
+  (`Save`'s `editedFrom`; Android keeps it across the screen's recreation).
+  Only what was changed in it is saved, laid on the task as it is now: the
+  schedule's times as a whole, the restart mode, and each other field on its
+  own (`WithRestEditsOf`). "Start the countdown again" restarts the countdown
+  the task has now, unless the editor changed the times. So an editor left open
+  while a change elsewhere synced in doesn't write its stale copy over it.
 - Both devices change the schedule out of touch: the later stamp wins, the
   definition's schedule and the state alike.
 - A task restored from a backup, while a device that hadn't heard of its
@@ -395,7 +401,10 @@ serve the definition's schedule (`StateFits`: any but a countdown's without an
 end) is taken as that schedule's. It keeps its "done", anchor and snooze, and
 every device does the same with the same record, so nothing new is written. A
 state that can't serve it gives way to a new schedule, the one the definition
-describes, starting now. A
+describes, starting now. That schedule's stamp is worked out as a legacy one
+is, not taken from the clock. Every device that repairs the task (updating on
+different days, say) gives it the same stamp, and it ranks below any change made
+since on a device that repaired it earlier. A
 schedule saved before stamps existed has none: `MergeRules.WithLegacyStamps`
 gives it `TaskDefinition.LegacyScheduleStamp`, a hash of the schedule that every
 device works out alike (culture-free), with the revision as its counter, so
@@ -567,7 +576,8 @@ separately (see *Simplification opportunities*).
   `OtherProtocolOf` says nothing while a device is in sync. A member announcing
   another protocol isn't dialled: its hello would only be refused, every few
   seconds. Its announcement, which its MAC proves, is kept and logged instead,
-  once, and dropped when it announces this protocol. One from a member in sync
+  once. Once it announces this protocol it is shown so: its announcement is read
+  first, and what was kept stays to keep the log to once. One from a member in sync
   now (a stale session, or another install with its ID) is ignored. And a
   nearby device on another protocol can't be linked: neither Devices list
   offers Link for it.
@@ -677,12 +687,10 @@ separately (see *Simplification opportunities*).
   and redialling) are updated from `PeerSeen`, with each one's LAN address, and
   `PeerSeen` fires only for sessions of the current group. So leaving a group,
   which closes its sessions, doesn't bring its devices straight back.
-- **Merge across revisions**: `DoneThroughUtc` takes the maximum only between
-  states of the same schedule revision. A newer revision replaces it outright,
-  which is the one way a `DoneThrough` left in the future by a wrong clock
-  gets lowered: saving the schedule again. A new revision is
-  `max(definition's, state's) + 1`, since the two merge separately and the
-  state can be ahead.
+- **Merge across schedules**: `DoneThroughUtc` takes the maximum only between
+  states of the same schedule. A later schedule replaces it outright, which is
+  the one way a `DoneThrough` left in the future by a wrong clock gets lowered:
+  saving the schedule again.
 
 ## Testing
 
@@ -751,8 +759,8 @@ separately (see *Simplification opportunities*).
   Alt+letter always acts at once (with two, WPF only moves the focus between
   them). Text that isn't the app's own, a sound's name, goes into a control's
   `Content` through `AccessKeys.Literal`. Its underscores are doubled, so none
-  takes a key. `AccessKeyTests` checks every window's XAML, and the texts its
-  code sets, with each menu a scope of its own.
+  takes a key. `AccessKeyTests` checks every window's XAML, the texts its code
+  sets and the controls it makes, with each menu a scope of its own.
 - `AlarmWindow`: one per ringing task, topmost. Closing it any way the user can
   dismisses the task; `CloseQuietly` and exiting the app (`AppHost.Exiting`,
   also set when Windows ends the session) don't. The task stays due and rings

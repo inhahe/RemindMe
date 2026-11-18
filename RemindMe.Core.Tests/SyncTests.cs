@@ -1047,6 +1047,28 @@ public sealed class SyncTests : IDisposable
     }
 
     [Fact]
+    public async Task AClaimInALinkedDevicesNameIsLoggedOnceWhateverItAnnounces()
+    {
+        // Linked B, not in sync, announces this protocol, while hellos in its name come in
+        // another (a stale second install, or anyone: a hello proves nothing). Logged once,
+        // however its announcements and the hellos interleave.
+        var a = NewIdentity("A");
+        var b = NewIdentity("B", a.GroupId, a.GroupKeyBase64);
+        var known = new List<KnownPeer> { new(b.NodeId, "B", DateTimeOffset.UtcNow) };
+        var log = new List<string>();
+        var (ea, _) = Node(a, Options(0, TimeSpan.FromMilliseconds(200), IPAddress.Loopback) with { KnownPeers = () => known }, log);
+        for (int i = 0; i < 3; i++)
+        {
+            ea.OnAnnounced(MemberAnnouncement(a, b.NodeId, 9, DateTimeOffset.UtcNow, seq: i + 1), IPAddress.Loopback);
+            using var old = await RawPeer.ConnectAsync(ea, b.NodeId);
+            await old.HelloAsync(a.GroupId, proto: Protocol.Version - 1);
+            Assert.Equal(MessageTypes.Hello, (await old.ReceiveAsync())!.Type);
+            Assert.Null(await old.ReceiveAsync());
+        }
+        lock (log) Assert.Single(log, l => l.Contains("speaking sync protocol"));
+    }
+
+    [Fact]
     public async Task AnAnnouncementInTheNameOfADeviceInSyncIsIgnored()
     {
         // While B is in sync, an announcement in its name in another protocol (a stale session,
@@ -1083,7 +1105,7 @@ public sealed class SyncTests : IDisposable
         lock (log) Assert.Single(log, l => l.StartsWith($"B speaking sync protocol {Protocol.Version - 1} announced itself at ") && l.EndsWith(": update B to sync."));
         var dialled = listener.AcceptTcpClientAsync();
         Assert.NotSame(dialled, await Task.WhenAny(dialled, Task.Delay(1500)));
-        // Updated, it is dialled at its next announcement, and what it said before is gone.
+        // Updated, it is dialled at its next announcement, and shown so.
         ea.OnAnnounced(MemberAnnouncement(a, b, port, DateTimeOffset.UtcNow, seq: 3), IPAddress.Loopback);
         Assert.Null(ea.Peers().Single(p => p.NodeId == b).OtherProtocol);
         Assert.Same(dialled, await Task.WhenAny(dialled, Task.Delay(5000)));

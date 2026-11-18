@@ -46,10 +46,13 @@ is.
 
 ## Data model (`Model/`)
 
-An `AlarmTask` is `Id` (a `Guid`) plus two parts that sync independently, each
-with its own version (a hybrid logical clock, `Hlc`):
+An `AlarmTask` is `Id` (a `Guid`) plus parts that sync independently, each with
+its own version (a hybrid logical clock, `Hlc`): the definition's schedule, the
+rest of the definition, and the state (*Sync merge*).
 
-**`TaskDefinition`** is what the user edits, versioned by `DefVersion`:
+**`TaskDefinition`** is what the user edits. Its schedule (the fields
+`ScheduleFields` lists, `Kind` through `Duration`) is versioned by
+`ScheduleStamp`, and the rest by `DefVersion`:
 
 | Field | Meaning |
 |---|---|
@@ -66,7 +69,8 @@ with its own version (a hybrid logical clock, `Hlc`):
 | `WindowsSound`, `AndroidSound` | A `SoundRef` per platform, since a sound picked on one means nothing on the other. `null` means the device's default applies (R11). |
 | `SoundMode` | `Once` or `Repeat`. `null` means the device's default applies. |
 | `Volume`, `FadeInSeconds` | S10: percent of the device's alarm volume, and how long the sound takes to grow to it. `null` means the device's default applies; the choices both apps offer are `SoundLevels.Volumes` and `SoundLevels.FadeIns`. |
-| `ScheduleRevision` | Goes up on every change that affects *when* the task fires |
+| `ScheduleRevision` | Goes up on every change that affects *when* the task fires. A count, for reading; schedules rank by their stamps. |
+| `ScheduleStamp` | The `Hlc` of the change that set the schedule: which schedule this is. Two devices changing it out of touch get different stamps, and the later wins. |
 | `Deleted` | Tombstone. A deleted task keeps its ID, so a deletion syncs like any other edit. |
 | `Incarnation` | How many times the task has been brought back after a deletion (by an import). A deletion outranks every edit of its incarnation, and only a later incarnation outranks the deletion: see *Sync merge*. |
 
@@ -75,6 +79,7 @@ with its own version (a hybrid logical clock, `Hlc`):
 | Field | Meaning |
 |---|---|
 | `Revision` | The `ScheduleRevision` this state was written against |
+| `ScheduleStamp` | The `ScheduleStamp` of the schedule this state was written for: the schedule and the state that win a merge are always of one schedule |
 | `Incarnation` | The definition's `Incarnation` this state was written for: a restored task's state outranks every state of the task before its deletion (*Sync merge*) |
 | `Anchor` | Wall-clock time that replaces `Start` after a `FromDone` mark-done |
 | `CountdownEndsUtc` | When a running countdown ends. An instant, so it survives reboots (R12). |
@@ -262,8 +267,9 @@ the document picker on Android.
 once the tasks have changed and nothing more has changed for 5 s
 (`Backups.Settle`). Import is therefore the restore.
 - **What counts as a change**: `Backups.Fingerprint`, the live tasks' IDs and
-  `DefVersion`s. Adding, editing and deleting change it, whether made here or
-  arriving by sync. Marking done, snoozing and pausing don't, so they write
+  the versions of both halves of each definition (`DefVersion` and
+  `ScheduleStamp`; saving a schedule alone leaves `DefVersion`). Adding,
+  editing and deleting change it, whether made here or arriving by sync. Marking done, snoozing and pausing don't, so they write
   nothing. A backup is written only when the fingerprint differs from that of
   this device's newest backup, so a restart or an import that changes nothing
   writes nothing.
@@ -344,12 +350,13 @@ Each part of a task merges on its own. The definition is two parts:
   the last writer wins.
 - **The definition's schedule** (the fields `TaskDefinition.WithScheduleOf`
   copies, `ScheduleFields`: when the task comes up): the higher `ScheduleRank`
-  wins: `(Incarnation, ScheduleRevision, ScheduleStamp)`. The stamp is the
-  `Hlc` of the change that set the schedule. Two devices changing the schedule
-  out of touch reach the same revision, but never the same stamp.
+  wins: `(Incarnation, ScheduleStamp)`. The stamp is the `Hlc` of the change
+  that set the schedule, so the schedule set last wins. A schedule set after
+  another was seen has a later stamp, since every version a device issues is
+  later than all it has seen. A device that changes the schedule more often
+  doesn't win for that.
 - **State**: the higher `StateRank` wins: the schedule it was written for
-  (`ScheduleRank`, from its own incarnation, revision and stamp), then
-  `StateVersion`. Within one schedule, `DoneThroughUtc` is always the
+  (`ScheduleRank`, from its own incarnation and stamp), then `StateVersion`. Within one schedule, `DoneThroughUtc` is always the
   **maximum** of the two sides, whichever wins.
 
 The maximum is what makes "done" stick. Suppose the phone was off when a task
@@ -369,7 +376,11 @@ make that pair:
   version only when it changes: saving only a schedule doesn't make the old
   description outrank one made elsewhere. And a save that keeps the schedule
   keeps it exactly, fields that don't count included, and `Edit` never touches
-  it: one schedule's fields are the same everywhere.
+  it: one schedule's fields are the same everywhere. An editor passes the
+  definition it opened with (`Save`'s `editedFrom`). Only what was changed in it
+  is saved, laid on the task as it is now: the schedule as a whole, and each
+  other field on its own (`WithRestEditsOf`). So an editor left open while a
+  change elsewhere synced in doesn't write its stale copy over it.
 - Both devices change the schedule out of touch: the later stamp wins, the
   definition's schedule and the state alike.
 - A task restored from a backup, while a device that hadn't heard of its
@@ -379,11 +390,16 @@ make that pair:
 `MergeRules.Mismatched` tells such a pair. Merging never makes one of records
 that aren't, but older builds did (the first case above, with the definition
 winning whole). The store repairs one wherever it appears (`TaskStore.Repaired`):
-at load, and in what an import or a sync stores. It gives the task a new
-schedule, the one its definition describes, starting now, and logs that. A
+at load, and in what an import or a sync stores. It logs that. A state that can
+serve the definition's schedule (`StateFits`: any but a countdown's without an
+end) is taken as that schedule's. It keeps its "done", anchor and snooze, and
+every device does the same with the same record, so nothing new is written. A
+state that can't serve it gives way to a new schedule, the one the definition
+describes, starting now. A
 schedule saved before stamps existed has none: `MergeRules.WithLegacyStamps`
 gives it `TaskDefinition.LegacyScheduleStamp`, a hash of the schedule that every
-device works out alike. It also gives one to the state, when the state is of the
+device works out alike (culture-free), with the revision as its counter, so
+older schedules keep their order and rank below any set since. It also gives one to the state, when the state is of the
 same incarnation and revision. Two devices holding one such schedule then agree
 it is one. Two holding different ones of one revision (changed on each, out of
 touch, before updating) pick the same.
@@ -551,8 +567,10 @@ separately (see *Simplification opportunities*).
   `OtherProtocolOf` says nothing while a device is in sync. A member announcing
   another protocol isn't dialled: its hello would only be refused, every few
   seconds. Its announcement, which its MAC proves, is kept and logged instead,
-  once, and dropped when it announces this protocol. And a nearby device on another protocol can't be linked: neither
-  Devices list offers Link for it.
+  once, and dropped when it announces this protocol. One from a member in sync
+  now (a stale session, or another install with its ID) is ignored. And a
+  nearby device on another protocol can't be linked: neither Devices list
+  offers Link for it.
 - **Bounded noise.** At most 256 devices are remembered from announcements. When
   the table is full, a proven member still gets in, in place of the stalest
   stranger, and a stranger's announcement can't take over a fresh member's
@@ -733,7 +751,8 @@ separately (see *Simplification opportunities*).
   Alt+letter always acts at once (with two, WPF only moves the focus between
   them). Text that isn't the app's own, a sound's name, goes into a control's
   `Content` through `AccessKeys.Literal`. Its underscores are doubled, so none
-  takes a key.
+  takes a key. `AccessKeyTests` checks every window's XAML, and the texts its
+  code sets, with each menu a scope of its own.
 - `AlarmWindow`: one per ringing task, topmost. Closing it any way the user can
   dismisses the task; `CloseQuietly` and exiting the app (`AppHost.Exiting`,
   also set when Windows ends the session) don't. The task stays due and rings

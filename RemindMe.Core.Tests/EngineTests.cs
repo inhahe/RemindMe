@@ -338,15 +338,19 @@ public class EngineTests
     public void ANewScheduleOutranksAStateFromAHigherRevisionThanItsDefinition()
     {
         var t = EveryHourFromNow(RestartMode.FromDone);
-        // As an older version's merge could leave one: an older definition, a newer state.
-        // Repaired on arrival, past both; a new schedule then outranks that.
-        var skewed = t with { State = t.State with { Revision = 5 } };
+        // As an older version's merge could leave one: an older definition, a newer state. The
+        // state fits the schedule, so it is taken as the definition's; a new schedule then
+        // outranks both, by its stamp.
+        var skewed = t with { State = t.State with { Revision = 5, ScheduleStamp = new Hlc(1, 0, "x") } };
         var store = new TaskStore(null, "b", _clock);
         store.Merge([skewed]);
-        Assert.Equal((6, 6), (store.Get(t.Id)!.Def.ScheduleRevision, store.Get(t.Id)!.State.Revision));
+        Assert.False(MergeRules.Mismatched(store.Get(t.Id)!));
+        Assert.Equal(t.State.DoneThroughUtc, store.Get(t.Id)!.State.DoneThroughUtc);
+        _clock.Advance(TimeSpan.FromMinutes(1));
         var saved = store.Save(t.Id, t.Def with { IntervalCount = 3 })!;
-        Assert.Equal(7, saved.Def.ScheduleRevision);
-        Assert.Equal(7, saved.State.Revision);
+        Assert.False(MergeRules.Mismatched(saved));
+        Assert.True(saved.Def.ScheduleStamp > skewed.State.ScheduleStamp && saved.Def.ScheduleStamp > t.Def.ScheduleStamp);
+        Assert.Equal(saved, MergeRules.Merge(saved, skewed));
     }
 
     [Fact]

@@ -104,6 +104,12 @@ public class BackupTests
         Assert.NotEqual(edited, Backups.Fingerprint(store.Live()));
         store.Delete(other.Id);
         Assert.Equal(edited, Backups.Fingerprint(store.Live()));   // back to the same tasks
+        // A change of the schedule alone (the rest keeps its version) counts too.
+        var before = store.Get(t.Id)!;
+        var moved = store.Save(t.Id, before.Def with { IntervalCount = 2 })!;
+        Assert.Equal(before.DefVersion, moved.DefVersion);
+        Assert.NotEqual(edited, Backups.Fingerprint(store.Live()));
+        edited = Backups.Fingerprint(store.Live());
 
         // A file's fingerprint is its tasks', and survives an import, which keeps versions.
         var json = store.Export();

@@ -219,7 +219,7 @@ public partial class TaskEditorWindow : Window
         }
         bool restart = RestartCountdown.Visibility == Visibility.Visible && RestartCountdown.IsChecked == true;
         if (_id is not { } id || _deleted) AppHost.Store.Add(def);
-        else if (AppHost.Store.Save(id, def, restart) is null)
+        else if (AppHost.Store.Save(id, def, restart, editedFrom: _original) is null)
         {
             ShowDeleted(true);   // deleted an instant ago: say so first, and the next Save adds it
             return;

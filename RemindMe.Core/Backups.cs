@@ -72,15 +72,16 @@ public static class Backups
     }
 
     /// <summary>What a backup has to keep up with: which tasks there are, and each one's
-    /// definition (as its version, which every edit, here or elsewhere, changes). Marking
-    /// done, snoozing and pausing change neither, so they don't call for a new backup.</summary>
+    /// definition, as the versions of its two halves (the schedule's stamp, and the rest's
+    /// version), one of which every edit, here or elsewhere, changes. Marking done, snoozing
+    /// and pausing change neither, so they don't call for a new backup.</summary>
     /// <remarks>Only well-formed records count, as in a file, where an export of them would
     /// leave the rest out: the store and its backup must agree whatever the store holds.</remarks>
     public static string Fingerprint(IEnumerable<AlarmTask> tasks)
     {
         var text = new StringBuilder();
         foreach (var t in tasks.Where(t => MergeRules.IsWellFormed(t) && !t.Def.Deleted).OrderBy(t => t.Id))
-            text.Append(t.Id).Append(' ').Append(t.DefVersion.ToString()).Append('\n');
+            text.Append(t.Id).Append(' ').Append(t.DefVersion.ToString()).Append(' ').Append(t.Def.ScheduleStamp.ToString()).Append('\n');
         return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(text.ToString())));
     }
 

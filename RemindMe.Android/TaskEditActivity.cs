@@ -316,7 +316,7 @@ public sealed class TaskEditActivity : Screen
         if (errors.Count > 0) return;
         var restart = Find<CheckBox>(Resource.Id.cd_restart);
         if (_id is not { } id || _deleted) AppState.Store.Add(d);
-        else if (AppState.Store.Save(id, d, restart.Visibility == ViewStates.Visible && restart.Checked) is null)
+        else if (AppState.Store.Save(id, d, restart.Visibility == ViewStates.Visible && restart.Checked, editedFrom: _original) is null)
         {
             ShowDeleted(true);   // deleted an instant ago: say so first, and the next Save adds it
             return;

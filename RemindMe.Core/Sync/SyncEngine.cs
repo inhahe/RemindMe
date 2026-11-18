@@ -965,6 +965,9 @@ public sealed class SyncEngine : IDisposable
     /// <param name="from">Where it came from, for the log.</param>
     private void NoteOtherProtocol(string? node, string? name, int proto, string from, bool member)
     {
+        // A member in sync now announcing another protocol is a stale session, or another
+        // install with its ID: it says so every few seconds, and logging that would only flood.
+        if (member && node is not null && InSync(node)) return;
         var linked = node is null ? null : KnownPeers().FirstOrDefault(k => k.NodeId == node);
         bool ours = node is not null && !InSync(node) && (member || linked is not null);
         string who = !ours ? "A device" : linked?.Name ?? Protocol.CleanName(name, node![..8]);

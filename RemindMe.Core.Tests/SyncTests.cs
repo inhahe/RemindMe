@@ -1047,6 +1047,24 @@ public sealed class SyncTests : IDisposable
     }
 
     [Fact]
+    public async Task AnAnnouncementInTheNameOfADeviceInSyncIsIgnored()
+    {
+        // While B is in sync, an announcement in its name in another protocol (a stale session,
+        // or another install with its ID) is neither kept nor logged, at each of many.
+        var a = NewIdentity("A");
+        var b = NewIdentity("B", a.GroupId, a.GroupKeyBase64);
+        var known = new List<KnownPeer> { new(b.NodeId, "B", DateTimeOffset.UtcNow) };
+        var log = new List<string>();
+        var (ea, _) = Node(a, Options(0, TimeSpan.FromMilliseconds(200), IPAddress.Loopback) with { KnownPeers = () => known }, log);
+        Node(b, Addr(ea));
+        await WaitFor(() => ea.Peers().Any(p => p.NodeId == b.NodeId && p.Connected), "A and B in sync");
+        for (int seq = 1; seq <= 3; seq++)
+            ea.OnAnnounced(MemberAnnouncement(a, b.NodeId, 9, DateTimeOffset.UtcNow, seq: seq, proto: Protocol.Version - 1), IPAddress.Loopback);
+        lock (log) Assert.DoesNotContain(log, l => l.Contains("speaking sync protocol"));
+        Assert.Null(ea.OtherProtocolOf(b.NodeId));
+    }
+
+    [Fact]
     public async Task AMemberAnnouncingAnotherProtocolIsShownSoAndNotDialled()
     {
         // Its hello would be refused: dialling it at each announcement would only churn.

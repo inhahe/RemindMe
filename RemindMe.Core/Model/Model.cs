@@ -119,11 +119,10 @@ public sealed record TaskDefinition
     public int ScheduleRevision { get; init; }
 
     /// <summary>The version of the schedule: when it was last set (the schedule fields are
-    /// those <see cref="WithScheduleOf"/> copies). With <see cref="ScheduleRevision"/> it says
-    /// which schedule this is: two devices changing the schedule out of touch reach the same
-    /// revision, but never the same stamp. The state written for it carries it too
-    /// (<see cref="TaskState.ScheduleStamp"/>), so the schedule and the state that win a merge
-    /// are always of one schedule (<see cref="ScheduleRank"/>).</summary>
+    /// those <see cref="WithScheduleOf"/> copies), which says which schedule this is. The
+    /// state written for it carries it too (<see cref="TaskState.ScheduleStamp"/>), so the
+    /// schedule and the state that win a merge are always of one schedule, the later set
+    /// (<see cref="ScheduleRank"/>).</summary>
     public Hlc ScheduleStamp { get; init; }
 
     /// <summary>Tombstone: the task was deleted. Kept so the deletion syncs.</summary>
@@ -186,14 +185,41 @@ public sealed record TaskDefinition
     /// <summary>The stamp of a schedule saved before stamps existed (none, in the file): one
     /// every device works out alike from the schedule itself, so that two devices holding
     /// the same such schedule agree it is one, and two holding different ones (changed on
-    /// each, out of touch, before updating) still pick the same.</summary>
+    /// each, out of touch, before updating) still pick the same. It orders after an older
+    /// build's earlier revisions, as they ranked then, and before any stamp of a schedule set
+    /// since (its milliseconds are 0).</summary>
     public Hlc LegacyScheduleStamp()
     {
-        var text = string.Join("|", Kind, IntervalCount, Unit, Start.Ticks, Days, TimeOfDay.Ticks, WeekInterval,
-            WeeksFrom.DayNumber, FirstDayOfWeek, At.Ticks, Duration.Ticks);
+        var text = FormattableString.Invariant($"{Kind}|{IntervalCount}|{Unit}|{Start.Ticks}|{Days}|{TimeOfDay.Ticks}|{WeekInterval}|{WeeksFrom.DayNumber}|{FirstDayOfWeek}|{At.Ticks}|{Duration.Ticks}");
         var hash = System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(text));
-        return new Hlc(0, 0, "~" + Convert.ToHexString(hash, 0, 16));
+        return new Hlc(0, ScheduleRevision, "~" + Convert.ToHexString(hash, 0, 16));
     }
+
+    /// <summary>This definition, with the fields outside its schedule (<see cref="RestFields"/>)
+    /// that <paramref name="edited"/> changes from <paramref name="from"/>: an editor's save,
+    /// laid on the task as it is now. A field changed elsewhere since the editor opened, and
+    /// not here, keeps its newer value.</summary>
+    /// <param name="from">The definition the editor opened with.</param>
+    /// <param name="edited">What the editor saves.</param>
+    public TaskDefinition WithRestEditsOf(TaskDefinition from, TaskDefinition edited) => this with
+    {
+        Description = edited.Description != from.Description ? edited.Description : Description,
+        Restart = edited.Restart != from.Restart ? edited.Restart : Restart,
+        ReminderMinutes = edited.ReminderMinutes != from.ReminderMinutes ? edited.ReminderMinutes : ReminderMinutes,
+        WindowsSound = edited.WindowsSound != from.WindowsSound ? edited.WindowsSound : WindowsSound,
+        AndroidSound = edited.AndroidSound != from.AndroidSound ? edited.AndroidSound : AndroidSound,
+        SoundMode = edited.SoundMode != from.SoundMode ? edited.SoundMode : SoundMode,
+        Volume = edited.Volume != from.Volume ? edited.Volume : Volume,
+        FadeInSeconds = edited.FadeInSeconds != from.FadeInSeconds ? edited.FadeInSeconds : FadeInSeconds,
+    };
+
+    /// <summary>The fields <see cref="WithRestEditsOf"/> takes: all but the schedule's, and
+    /// whether the task is deleted and its incarnation, which only the store sets.</summary>
+    public static readonly string[] RestFields =
+    [
+        nameof(Description), nameof(Restart), nameof(ReminderMinutes), nameof(WindowsSound), nameof(AndroidSound),
+        nameof(SoundMode), nameof(Volume), nameof(FadeInSeconds),
+    ];
 
     /// <summary>True when the two definitions would fire at different times.</summary>
     public bool ScheduleDiffers(TaskDefinition other) =>
@@ -239,7 +265,7 @@ public sealed record TaskState
     public int Incarnation { get; init; }
 
     /// <summary>The <see cref="TaskDefinition.ScheduleStamp"/> of the schedule this state was
-    /// written for: with <see cref="Incarnation"/> and <see cref="Revision"/>, which schedule.</summary>
+    /// written for: with <see cref="Incarnation"/>, which schedule.</summary>
     public Hlc ScheduleStamp { get; init; }
 
     /// <summary>Wall-clock time replacing <see cref="TaskDefinition.Start"/> after a

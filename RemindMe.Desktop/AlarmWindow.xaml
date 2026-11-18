@@ -54,6 +54,9 @@
             <DockPanel Margin="0,14,0,0" LastChildFill="False">
                 <Button x:Name="SilenceButton" DockPanel.Dock="Left" Content="_Silence" Click="Silence_Click"
                         ToolTip="Stop the sound but keep this window open" />
+                <!-- Mark done only ends this time: a repeating task comes up again. -->
+                <Button DockPanel.Dock="Left" Content="_Delete…" Click="Delete_Click" Margin="8,0,0,0"
+                        ToolTip="Delete this task, so that it never comes up again, on any linked device" />
                 <Button DockPanel.Dock="Right" Content="_Mark done" Click="Done_Click" Margin="8,0,0,0" Style="{StaticResource Primary}" />
                 <Button DockPanel.Dock="Right" Content="_Close, remind me later" IsCancel="True" Click="Dismiss_Click" />
             </DockPanel>

@@ -56,6 +56,9 @@ task's sound:
 - **Silence**: stops the sound but keeps the window open.
 - **Remind me in 5 min, 10 min, 30 min or 1 h**: closes the alarm and brings it
   back after that long, this once, whatever the task's reminder interval is.
+- **Delete…**: deletes the task, after asking, so that it never comes up again,
+  on any linked device. (For a repeating task, Mark done ends only this time.)
+  The phone's alarm screen has it too, below the reminder interval.
 
 You can change the reminder interval and the restart choice right there in the
 alarm window.

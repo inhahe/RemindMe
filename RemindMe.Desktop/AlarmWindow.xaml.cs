@@ -148,6 +148,18 @@ public partial class AlarmWindow : Window
 
     private void Dismiss_Click(object sender, RoutedEventArgs e) => Close();
 
+    /// <summary>Deletes the task, after asking: for a repeating task Mark done only ends this
+    /// time, and it comes up again.</summary>
+    private void Delete_Click(object sender, RoutedEventArgs e)
+    {
+        var name = TextFormat.Snippet(AppHost.Store.Get(_id)?.Def.Description ?? "", 40);
+        if (MessageBox.Show(this, $"Delete \"{(name.Length > 0 ? name : "this task")}\"? It won't come up again, on any linked device.",
+                "Delete", MessageBoxButton.OKCancel, MessageBoxImage.Question) != MessageBoxResult.OK)
+            return;
+        AppHost.Store.Delete(_id);
+        CloseQuietly();
+    }
+
     protected override void OnClosing(CancelEventArgs e)
     {
         base.OnClosing(e);

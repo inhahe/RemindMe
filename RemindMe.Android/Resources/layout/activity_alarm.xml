@@ -39,6 +39,11 @@
             </LinearLayout>
             <TextView android:id="@+id/error" android:layout_width="match_parent" android:layout_height="wrap_content"
                 android:textColor="@color/error" />
+            <!-- Mark done only ends this time: a repeating task comes up again. Out of the way
+                 of the big buttons below, so that it isn't tapped by mistake. -->
+            <Button android:id="@+id/delete" style="@style/Widget.Material3.Button.TextButton"
+                android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="16dp"
+                android:text="Delete this task" android:textColor="@color/error" />
         </LinearLayout>
     </ScrollView>
 

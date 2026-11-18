@@ -158,7 +158,7 @@ public static class Ui
     public static void ConfirmDelete(Context c, Guid id, Action? then = null)
     {
         var name = TextFormat.Snippet(AppState.Store.Get(id)?.Def.Description ?? "", 40);
-        Confirm(c, "Delete", $"Delete \"{(name.Length > 0 ? name : "this task")}\"?", "Delete", () =>
+        Confirm(c, "Delete", $"Delete \"{(name.Length > 0 ? name : "this task")}\"? It won't come up again, on any linked device.", "Delete", () =>
         {
             AppState.Store.Delete(id);
             then?.Invoke();

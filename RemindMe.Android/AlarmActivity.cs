@@ -47,6 +47,8 @@ public sealed class AlarmActivity : Screen
         SetContentView(Resource.Layout.activity_alarm);
         Find<Button>(Resource.Id.done).Click += (_, _) => Leave(done: true);
         Find<Button>(Resource.Id.later).Click += (_, _) => Leave(done: false);
+        // Gone from the store, the task leaves this screen by itself (Refresh).
+        Find<Button>(Resource.Id.delete).Click += (_, _) => Ui.ConfirmDelete(this, _id);
         Find<Button>(Resource.Id.silence).Click += (_, _) =>
         {
             RingingService.Silence(_id);

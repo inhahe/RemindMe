@@ -239,6 +239,16 @@ public static class TextFormat
         return string.Join(", ", list);
     }
 
+    /// <summary>The question both apps ask before deleting.</summary>
+    /// <param name="descriptions">The descriptions of the tasks to delete, one or more.</param>
+    public static string DeleteQuestion(IReadOnlyList<string> descriptions)
+    {
+        if (descriptions.Count != 1)
+            return $"Delete these {descriptions.Count} tasks? They won't come up again, on any linked device.";
+        var name = Snippet(descriptions[0], 40);
+        return $"Delete \"{(name.Length > 0 ? name : "this task")}\"? It won't come up again, on any linked device.";
+    }
+
     /// <summary>What an editor says once its task has been deleted, here or elsewhere.</summary>
     public const string DeletedWhileEditing =
         "This task has been deleted, here or on a linked device. Saving keeps your changes as a new task.";

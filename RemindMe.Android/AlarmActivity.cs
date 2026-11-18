@@ -5,6 +5,7 @@ using Android.Content.PM;
 using Android.OS;
 using Android.Views;
 using Android.Widget;
+using AlertDialog = AndroidX.AppCompat.App.AlertDialog;
 
 namespace RemindMe.Droid;
 
@@ -33,6 +34,8 @@ public sealed class AlarmActivity : Screen
     /// <summary>The alert the user silenced here: a later alert of the same task sounds
     /// again, and can be silenced again.</summary>
     private DateTimeOffset? _silencedAlert;
+    /// <summary>"Delete this task?", while it is up: it goes with the task it asks about.</summary>
+    private AlertDialog? _deleteQuestion;
 
     public static Intent IntentFor(Context c, Guid task, bool onRequest = false) =>
         new Intent(c, typeof(AlarmActivity)).PutExtra("task", task.ToString()).PutExtra("show", onRequest)
@@ -47,14 +50,8 @@ public sealed class AlarmActivity : Screen
         SetContentView(Resource.Layout.activity_alarm);
         Find<Button>(Resource.Id.done).Click += (_, _) => Leave(done: true);
         Find<Button>(Resource.Id.later).Click += (_, _) => Leave(done: false);
-        // Gone from the store, the task leaves this screen by itself (Refresh).
-        Find<Button>(Resource.Id.delete).Click += (_, _) => Ui.ConfirmDelete(this, _id);
-        Find<Button>(Resource.Id.silence).Click += (_, _) =>
-        {
-            RingingService.Silence(_id);
-            _silencedAlert = AppState.Store.Status(_id)?.AlertDue;
-            Find<Button>(Resource.Id.silence).Enabled = false;
-        };
+        Find<Button>(Resource.Id.delete).Click += (_, _) => AskToDelete();
+        Find<Button>(Resource.Id.silence).Click += (_, _) => Silence();
         var snooze = Find<LinearLayout>(Resource.Id.snooze_row);
         foreach (var preset in AlarmEngine.SnoozePresets)
         {
@@ -94,6 +91,7 @@ public sealed class AlarmActivity : Screen
 
     private void Show(AlarmTask t, bool onRequest)
     {
+        DismissDeleteQuestion();
         _id = t.Id;
         _shownOnRequest = onRequest;
         ShowChoices(t.Def);
@@ -122,7 +120,45 @@ public sealed class AlarmActivity : Screen
     protected override void OnDestroy()
     {
         AppState.TasksChanged -= Refresh;
+        DismissDeleteQuestion();   // a dialog outliving its activity leaks its window
         base.OnDestroy();
+    }
+
+    private void Silence()
+    {
+        RingingService.Silence(_id);
+        _silencedAlert = AppState.Store.Status(_id)?.AlertDue;
+        Find<Button>(Resource.Id.silence).Enabled = false;
+    }
+
+    /// <summary>Asks whether to delete the task shown, silencing it meanwhile. Over the lock
+    /// screen the phone is unlocked first: anyone can answer an alarm there, but deleting a
+    /// task, on every linked device, is the owner's call. Deleted, the task leaves this
+    /// screen by itself (<see cref="Refresh"/>).</summary>
+    private void AskToDelete()
+    {
+        Silence();
+        var id = _id;
+        void Ask()
+        {
+            if (id != _id || IsFinishing) return;   // the screen moved on while unlocking
+            DismissDeleteQuestion();
+            _deleteQuestion = Ui.ConfirmDelete(this, id);
+        }
+        var keyguard = (KeyguardManager?)GetSystemService(KeyguardService);
+        if (keyguard?.IsKeyguardLocked == true) keyguard.RequestDismissKeyguard(this, new WhenUnlocked(Ask));
+        else Ask();
+    }
+
+    private void DismissDeleteQuestion()
+    {
+        _deleteQuestion?.Dismiss();
+        _deleteQuestion = null;
+    }
+
+    private sealed class WhenUnlocked(Action then) : KeyguardManager.KeyguardDismissCallback
+    {
+        public override void OnDismissSucceeded() => then();
     }
 
     private void Tick()

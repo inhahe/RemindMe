@@ -149,21 +149,20 @@ public static class Ui
 
     public static void Toast(Context c, string text) => Android.Widget.Toast.MakeText(c, text, ToastLength.Short)!.Show();
 
-    public static void Confirm(Context c, string title, string message, string ok, Action onOk) =>
+    /// <returns>The dialog, showing.</returns>
+    public static AlertDialog Confirm(Context c, string title, string message, string ok, Action onOk) =>
         new AlertDialog.Builder(c).SetTitle(title)!.SetMessage(message)!
-            .SetPositiveButton(ok, (_, _) => onOk())!.SetNegativeButton("Cancel", (_, _) => { })!.Show();
+            .SetPositiveButton(ok, (_, _) => onOk())!.SetNegativeButton("Cancel", (_, _) => { })!.Show()!;
 
     /// <summary>Asks whether to delete the task <paramref name="id"/>, named by its
     /// description, and deletes it if so; <paramref name="then"/> runs after that.</summary>
-    public static void ConfirmDelete(Context c, Guid id, Action? then = null)
-    {
-        var name = TextFormat.Snippet(AppState.Store.Get(id)?.Def.Description ?? "", 40);
-        Confirm(c, "Delete", $"Delete \"{(name.Length > 0 ? name : "this task")}\"? It won't come up again, on any linked device.", "Delete", () =>
+    /// <returns>The question, showing.</returns>
+    public static AlertDialog ConfirmDelete(Context c, Guid id, Action? then = null) =>
+        Confirm(c, "Delete", TextFormat.DeleteQuestion([AppState.Store.Get(id)?.Def.Description ?? ""]), "Delete", () =>
         {
             AppState.Store.Delete(id);
             then?.Invoke();
         });
-    }
 
     public static ArrayAdapter<string> SpinnerAdapter(Context c, IList<string> items)
     {

@@ -207,8 +207,8 @@ public partial class MainWindow : Window
     {
         var sel = SelectedRows();
         if (sel.Count == 0) return;
-        string what = sel.Count == 1 ? $"\"{sel[0].Description}\"" : $"these {sel.Count} tasks";
-        if (MessageBox.Show(this, $"Delete {what}?", "Delete", MessageBoxButton.OKCancel, MessageBoxImage.Question) != MessageBoxResult.OK)
+        var question = TextFormat.DeleteQuestion(sel.Select(r => AppHost.Store.Get(r.Id)?.Def.Description ?? "").ToList());
+        if (MessageBox.Show(this, question, "Delete", MessageBoxButton.OKCancel, MessageBoxImage.Question) != MessageBoxResult.OK)
             return;
         foreach (var row in sel) AppHost.Store.Delete(row.Id);   // an editor open on one closes itself
     }

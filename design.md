@@ -655,7 +655,11 @@ separately (see *Simplification opportunities*).
   dismisses the task; `CloseQuietly` and exiting the app (`AppHost.Exiting`,
   also set when Windows ends the session) don't. The task stays due and rings
   late on the next start. Of the reminder and restart fields, it writes back
-  only the ones the user changed.
+  only the ones the user changed. **Delete…** silences the alarm, asks
+  (`TextFormat.DeleteQuestion`, which every delete prompt on both apps uses),
+  and goes through `AlarmCoordinator.UserDeleted`, as Mark done goes through
+  `UserMarkedDone`. It is there because Mark done only ends this time of a
+  repeating task.
 - `SoundService`: one sound at a time (D5). The newest alert's sound plays, and
   stopping it resumes the newest remaining looping one. WAV files play through
   `SoundPlayer`, which needs no Media Foundation, so Windows N editions work too;
@@ -855,7 +859,12 @@ it runs on Android 10 (API 29) and up. The root namespace is
   again for the task it shows, it keeps what the user has typed. Opened from
   "Show alarm", it stays up while its task is merely waiting. Back counts as
   Close, remind me later, and only reminder and restart fields the user changed
-  are written back.
+  are written back. "Delete this task" silences the alarm, and asks first.
+  Over the lock screen, the phone is unlocked before it asks
+  (`RequestDismissKeyguard`): anyone can answer an alarm there, but deleting the
+  task on every linked device is for the owner. The question belongs to the
+  task it asks about. It goes when the screen moves on to another task or
+  closes.
 - `TaskEditActivity`: once its task is deleted (from its alarm screen, or on a
   linked device), it says so, and Save adds the edits as a new task.
 - **Direct boot**: the app is `directBootAware`, and its files live in

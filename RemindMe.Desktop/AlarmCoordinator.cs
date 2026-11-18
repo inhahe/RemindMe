@@ -79,6 +79,7 @@ public sealed class AlarmCoordinator : IDisposable
         }
         foreach (var (id, w) in _windows.Where(kv => !live.Contains(kv.Key)).ToList())
             CloseWindow(id, w);
+        _forced.RemoveWhere(id => !live.Contains(id));
 
         _wake.WakeFor(AppHost.Settings.WakeFromSleep ? AlarmEngine.NextWakeUp(statuses) : null, now);
         _wake.KeepAwake(_windows.Values.Any(Sounds.IsPlaying));
@@ -111,6 +112,13 @@ public sealed class AlarmCoordinator : IDisposable
         _forced.Remove(id);
         _windows.Remove(id);
         _store.MarkDone(id);
+    }
+
+    /// <summary>Called by an alarm window whose task the user deleted.</summary>
+    internal void UserDeleted(Guid id)
+    {
+        if (_windows.Remove(id, out var w)) w.CloseQuietly();
+        _store.Delete(id);
     }
 
     private void CloseWindow(Guid id, AlarmWindow w)

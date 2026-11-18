@@ -246,10 +246,10 @@ from sync.
   task was restored elsewhere and backed up since) isn't restored again. It
   merges like any record, so it can't outrank edits made since the backup.
 - Records that aren't well formed (`MergeRules.IsWellFormed`: no ID,
-  definition or state, a null description or sound name, an incarnation
-  outside 0 to `MaxIncarnation`, which a restore's +1 mustn't overflow) are
-  skipped, as sync skips them. JSON can leave a member null whatever its declared type: an
-  explicit `null`, or a record's missing constructor parameter.
+  definition or state, a null description or sound name, an incarnation or
+  revision out of range: see *Sync merge*) are skipped, as sync skips them.
+  JSON can leave a member null whatever its declared type: an explicit `null`,
+  or a record's missing constructor parameter.
 - The change is raised as a local one, so it reaches linked devices like an
   edit.
 - A file that isn't an export of this app (`tasks` missing, say), or is from a
@@ -338,16 +338,32 @@ once the tasks have changed and nothing more has changed for 5 s
 Each part of a task merges on its own:
 
 - **Definition**: the higher `DefRank` wins: `(Incarnation, Deleted,
-  DefVersion)`, compared in that order. Within one incarnation, then, a deletion
-  outranks every edit, and otherwise the last writer wins.
+  ScheduleRevision, DefVersion)`, compared in that order. Within one
+  incarnation, then, a deletion outranks every edit; a schedule change
+  outranks an edit of the schedule before it; and otherwise the last writer
+  wins.
 - **State**: the higher `StateRank` wins: `(Incarnation, Revision,
   StateVersion)`. Within one incarnation and revision (one schedule),
   `DoneThroughUtc` is always the **maximum** of the two sides, whichever wins.
-  The state's incarnation means a restored definition always comes back with
-  its own state. Otherwise a later schedule's state, written elsewhere for the
-  task before its deletion, would outrank it by revision. That state can be
-  another kind's (a one-time task's, with no countdown end), and with it the
-  restored task would never ring.
+
+The maximum is what makes "done" stick. Suppose the phone was off when a task
+fell due, and the PC marked it done meanwhile. The phone triggers it on startup,
+but triggering writes nothing, so when the PC's larger `DoneThrough` arrives the
+phone's popup simply closes. Nothing can lower `DoneThrough`, so no ordering of
+messages can bring a finished occurrence back.
+
+The definition and the state that win are always of the same schedule, since
+both rank by incarnation and then by schedule revision. A definition of one
+schedule with a state of another can be broken beyond repair: a countdown's
+definition with a one-time task's state has no countdown end, and never rings.
+Two cases would otherwise make that pair:
+- Out of touch, one device changes a task's schedule, and the other edits only
+  its description, or its reminder interval on the alarm screen. That edit is
+  the newer definition, of the old schedule. It loses to the schedule change,
+  and is lost.
+- A task restored from a backup, while a device that hadn't heard of its
+  deletion holds a later schedule's state of it. The restore's new incarnation
+  outranks that state.
 
 A deletion has to outrank later edits because the alternative brings deleted
 tasks back. Suppose the PC deletes a task while the phone, out of touch, still
@@ -362,12 +378,19 @@ the old incarnation made elsewhere: those edit the task that was deleted, as
 the deletion outranked them too. A device never writes over a tombstone:
 `TaskStore.Save` and `Edit` refuse one, returning null. An editor left open
 across a deletion therefore can't undo it; saving there adds the edits as a new
-task (`Add`). Digests carry each definition's rank, so each side knows which of
-the two copies wins.
+task (`Add`). Digests carry both parts' ranks, so each side knows which copy
+wins, and two devices in sync have nothing more to send each other.
 
 Two devices restoring the same task without hearing of each other give it the
-same incarnation. The two restores are then one life of the task, and a
-deletion of it outranks both, as it outranks every edit of its incarnation.
+same incarnation. The two restores are then one life of the task: the later
+schedule of the two wins, and a deletion of it outranks both, as it outranks
+every edit of its incarnation.
+
+Incarnations and revisions only grow, one at a time. `MergeRules.Next` stops
+them at `MaxIncarnation` and `MaxRevision`, which only corrupt input could
+reach. A record claiming more, or a state of a later incarnation than its
+definition, is malformed (`IsWellFormed`), so what this device writes is
+always taken by the others.
 
 Records written before protocol 5 all have incarnation 0. A task restored under
 an older build (by an import, or by those builds' editors saving over a
@@ -376,12 +399,6 @@ still holding the tombstone that hadn't synced the restore when both were
 updated: there the task is deleted again. This is accepted. Telling such a
 restore from an ordinary edit would take a marker kept for good, for a moment
 that passes with the update.
-
-That last rule is what makes "done" stick. Suppose the phone was off when a task
-fell due, and the PC marked it done meanwhile. The phone triggers it on startup,
-but triggering writes nothing, so when the PC's larger `DoneThrough` arrives the
-phone's popup simply closes. Nothing can lower `DoneThrough`, so no ordering of
-messages can bring a finished occurrence back.
 
 `Hlc` is `(milliseconds, counter, nodeId)`. Each local write ticks it to
 `max(wall clock, last)`, and receiving a record advances it past the incoming
@@ -688,6 +705,11 @@ separately (see *Simplification opportunities*).
   validation error doesn't replace. Save becomes "Save as new task" and adds the
   edits as one. A one-time date already past is refused then, as for any new
   task. Restored meanwhile (an import), the task is edited as before.
+- **Access keys**: in each window, each access key belongs to one control, so
+  Alt+letter always acts at once (with two, WPF only moves the focus between
+  them). Text that isn't the app's own, a sound's name, goes into a control's
+  `Content` through `AccessKeys.Literal`. Its underscores are doubled, so none
+  takes a key.
 - `AlarmWindow`: one per ringing task, topmost. Closing it any way the user can
   dismisses the task; `CloseQuietly` and exiting the app (`AppHost.Exiting`,
   also set when Windows ends the session) don't. The task stays due and rings

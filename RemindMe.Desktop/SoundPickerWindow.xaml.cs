@@ -35,10 +35,10 @@ public partial class SoundPickerWindow : Window
         SystemList.ItemsSource = sounds;
 
         if (allowDefault)
-            DefaultRadio.Content = $"_Default: {(AppHost.Settings.DefaultSound ?? SoundService.BuiltIn).Name}";
+            DefaultRadio.Content = $"_Default: {AccessKeys.Literal((AppHost.Settings.DefaultSound ?? SoundService.BuiltIn).Name)}";
         else
         {
-            DefaultRadio.Content = $"The _built-in alarm sound ({SoundService.BuiltIn.Name})";
+            DefaultRadio.Content = $"The _built-in alarm sound ({AccessKeys.Literal(SoundService.BuiltIn.Name)})";
             DefaultHint.Text = "Used when nothing else is chosen, or a chosen file goes missing.";
         }
 

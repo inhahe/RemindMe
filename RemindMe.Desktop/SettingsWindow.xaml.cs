@@ -40,7 +40,7 @@ public partial class SettingsWindow : Window
         Closed += (_, _) => AppHost.Backup.Changed -= ShowBackup;
     }
 
-    private void ShowSound() => SoundButton.Content = (_sound ?? SoundService.BuiltIn).Name + "…";
+    private void ShowSound() => SoundButton.Content = AccessKeys.Literal((_sound ?? SoundService.BuiltIn).Name) + "…";
 
     private string BackupFolder => AppHost.BackupFolderOf(_backupFolder);
 

@@ -289,16 +289,103 @@ public class MergeTests
         Assert.Equal(a.Get(t.Id), c.Get(t.Id));
     }
 
-    [Fact]
-    public void AnIncarnationOutOfRangeIsMalformed()
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void AScheduleChangeOutranksAnEditOfTheScheduleBefore(bool changeArrivesFirst)
     {
-        // A restore adds one: a record claiming the most there can be would overflow.
+        // Out of touch, the PC turns a countdown into a one-time task (a new schedule), and
+        // the phone, later, changes only the countdown's description and, on its alarm
+        // screen, its reminder interval: newer definitions of the old schedule. The task
+        // that wins must be one schedule, definition and state: a countdown's definition
+        // with the one-time task's state has no end, and never rings.
+        var (a, b, ca, cb) = TwoDevices();
+        var t = a.Add(new TaskDefinition { Description = "tea", Kind = ScheduleKind.Countdown, Duration = TimeSpan.FromHours(2) });
+        Sync(a, b);
+        ca.Advance(TimeSpan.FromMinutes(1));
+        var once = a.Save(t.Id, t.Def with { Kind = ScheduleKind.Once, At = Wall(ca.UtcNow).AddHours(1) })!;
+        cb.Advance(TimeSpan.FromMinutes(5));
+        var edited = b.Save(t.Id, t.Def with { Description = "green tea" })!;
+        Assert.NotNull(b.Edit(t.Id, d => d with { ReminderMinutes = 5 }));
+        Assert.True(b.Get(t.Id)!.DefVersion > once.DefVersion);
+        Meet(a, b, changeArrivesFirst);
+        foreach (var s in new[] { a, b })
+        {
+            var x = s.Get(t.Id)!;
+            Assert.Equal(ScheduleKind.Once, x.Def.Kind);
+            Assert.Equal(x.Def.ScheduleRevision, x.State.Revision);
+            Assert.Equal(once.Def.At, x.Def.At);
+        }
+        Assert.Equal(a.Get(t.Id), b.Get(t.Id));
+        Assert.Empty(a.NewerThan(b.Digest()));   // and each knows the other has it: nothing to send again
+        Assert.Empty(b.NewerThan(a.Digest()));
+        Assert.Equal(1, edited.Def.ScheduleRevision);
+    }
+
+    [Fact]
+    public void TwoRestoresOfDifferentSchedulesComeBackAsOne()
+    {
+        // A countdown is backed up, made a one-time task, backed up again, and deleted. Out
+        // of touch, the phone restores the one-time backup, and the PC, later, the countdown
+        // one: one incarnation, two schedules. The later schedule wins, definition and state.
+        var (a, b, ca, cb) = TwoDevices();
+        var t = a.Add(new TaskDefinition { Description = "tea", Kind = ScheduleKind.Countdown, Duration = TimeSpan.FromHours(2) });
+        var countdown = a.Export();
+        ca.Advance(TimeSpan.FromMinutes(1));
+        a.Save(t.Id, t.Def with { Kind = ScheduleKind.Once, At = Wall(ca.UtcNow).AddHours(3) });
+        var once = a.Export();
+        ca.Advance(TimeSpan.FromMinutes(1));
+        a.Delete(t.Id);
+        Sync(a, b);
+        cb.Advance(TimeSpan.FromMinutes(5));
+        Assert.Equal(new ImportResult(1, 0, 0), b.Import(once));
+        ca.Advance(TimeSpan.FromMinutes(10));
+        Assert.Equal(new ImportResult(1, 0, 0), a.Import(countdown));
+        Sync(a, b);
+        var x = a.Get(t.Id)!;
+        Assert.Equal((1, 1), (x.Def.Incarnation, x.State.Incarnation));
+        Assert.Equal(ScheduleKind.Once, x.Def.Kind);
+        Assert.Equal(x.Def.ScheduleRevision, x.State.Revision);
+        Assert.Equal(x, b.Get(t.Id));
+        Assert.Empty(a.NewerThan(b.Digest()));
+        Assert.Empty(b.NewerThan(a.Digest()));
+    }
+
+    [Fact]
+    public void IncarnationsAndRevisionsOutOfRangeAreMalformed()
+    {
+        // A restore and a schedule change each add one: a record claiming more than there can
+        // be would overflow. And a state can't be of a later incarnation than its definition.
         var (a, _, ca, _) = TwoDevices();
         var t = a.Add(Hourly(ca));
         Assert.True(MergeRules.IsWellFormed(t));
         Assert.False(MergeRules.IsWellFormed(t with { Def = t.Def with { Incarnation = int.MaxValue } }));
         Assert.False(MergeRules.IsWellFormed(t with { Def = t.Def with { Incarnation = -1 } }));
-        Assert.False(MergeRules.IsWellFormed(t with { State = t.State with { Incarnation = MergeRules.MaxIncarnation + 1 } }));
+        Assert.False(MergeRules.IsWellFormed(t with { State = t.State with { Incarnation = 1 } }));
+        Assert.False(MergeRules.IsWellFormed(t with { Def = t.Def with { ScheduleRevision = MergeRules.MaxRevision + 1 } }));
+        Assert.False(MergeRules.IsWellFormed(t with { State = t.State with { Revision = -1 } }));
+    }
+
+    [Fact]
+    public void AtTheCeilingsWhatThisDeviceWritesStaysWellFormed()
+    {
+        // Only corrupt input gets a task there; what this device then writes must still be
+        // taken by every other device, or they would never agree again.
+        var (a, b, ca, _) = TwoDevices();
+        var t = a.Add(Hourly(ca));
+        var top = t with
+        {
+            Def = t.Def with { Incarnation = MergeRules.MaxIncarnation, ScheduleRevision = MergeRules.MaxRevision },
+            State = t.State with { Incarnation = MergeRules.MaxIncarnation, Revision = MergeRules.MaxRevision },
+        };
+        b.Merge([top]);
+        var backup = b.Export();
+        ca.Advance(TimeSpan.FromMinutes(1));
+        var saved = b.Save(t.Id, top.Def with { IntervalCount = 2 })!;
+        Assert.True(MergeRules.IsWellFormed(saved));
+        b.Delete(t.Id);
+        b.Import(backup);
+        Assert.All(b.All(), r => Assert.True(MergeRules.IsWellFormed(r)));
     }
 
     [Fact]

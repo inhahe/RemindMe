@@ -288,11 +288,14 @@ public sealed class SyncEngine : IDisposable
     /// sync: whatever a hello claiming its ID said, it speaks this one.</summary>
     public int? OtherProtocolOf(string node)
     {
-        lock (_lock) if (_sessions.TryGetValue(node, out var s) && s.Authenticated) return null;
+        if (InSync(node)) return null;
         if (_nearby.TryGetValue(node, out var n) && DateTimeOffset.UtcNow - n.Seen <= PeerExpiry && n.Msg.Proto is { } p)
             return p != Protocol.Version ? p : null;
         return _otherProtocol.TryGetValue(node, out var o) && Ticks - o.At <= (long)OtherProtocolShown.TotalMilliseconds ? o.Proto : null;
     }
+
+    /// <summary>A session to <paramref name="node"/> has proved the group key: it is in sync now.</summary>
+    private bool InSync(string node) { lock (_lock) return _sessions.TryGetValue(node, out var s) && s.Authenticated; }
 
     /// <summary>How many linked devices speak another sync protocol (<see cref="OtherProtocolOf"/>):
     /// the status line's count, beside <see cref="InSyncCount"/>.</summary>
@@ -952,9 +955,7 @@ public sealed class SyncEngine : IDisposable
     {
         int proto = hello.Proto ?? 0;
         var node = hello.Node;
-        var linked = node is null ? null : KnownPeers().FirstOrDefault(k => k.NodeId == node);
-        if (linked is not null)
-            lock (_lock) if (_sessions.TryGetValue(linked.NodeId, out var live) && live.Authenticated) linked = null;
+        var linked = node is null || InSync(node) ? null : KnownPeers().FirstOrDefault(k => k.NodeId == node);
         if (linked is not null)
         {
             bool news = !_otherProtocol.TryGetValue(linked.NodeId, out var old) || old.Proto != proto;

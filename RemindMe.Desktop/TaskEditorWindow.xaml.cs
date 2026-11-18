@@ -159,7 +159,7 @@ public partial class TaskEditorWindow : Window
     /// <summary>Texts that show a default's current value.</summary>
     private void RefreshDefaults()
     {
-        SoundButton.Content = SoundService.Describe(_sound) + "…";
+        SoundButton.Content = AccessKeys.Literal(SoundService.Describe(_sound)) + "…";
         string mode = AppHost.Settings.DefaultSoundMode == SoundMode.Once ? "once each time" : "over and over";
         int sel = SoundModeBox.SelectedIndex;
         SoundModeBox.Items[0] = $"as the default says ({mode})";

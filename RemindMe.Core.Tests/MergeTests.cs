@@ -127,6 +127,26 @@ public class MergeTests
     }
 
     [Fact]
+    public void ADeletionStandsWhenTheOtherDeviceMarksItDoneLater()
+    {
+        // Deleted on one device while the other, out of touch, still rings it and has it
+        // marked done afterwards: sync doesn't bring it back, whichever way it runs.
+        var (a, b, ca, cb) = TwoDevices();
+        var t = a.Save(null, Hourly(ca));
+        Sync(a, b);
+        ca.UtcNow = NY(2026, 6, 1, 10, 1);
+        a.Delete(t.Id);
+        cb.UtcNow = NY(2026, 6, 1, 10, 30);
+        Assert.NotNull(b.MarkDone(t.Id));
+        Sync(b, a);
+        Assert.Empty(a.Live());
+        Assert.Empty(b.Live());
+        Sync(a, b);
+        Assert.Empty(a.Live());
+        Assert.Empty(b.Live());
+    }
+
+    [Fact]
     public void MergeIsOrderIndependent()
     {
         var (a, b, ca, cb) = TwoDevices();

@@ -68,6 +68,7 @@ with its own version (a hybrid logical clock, `Hlc`):
 | `Volume`, `FadeInSeconds` | S10: percent of the device's alarm volume, and how long the sound takes to grow to it. `null` means the device's default applies; the choices both apps offer are `SoundLevels.Volumes` and `SoundLevels.FadeIns`. |
 | `ScheduleRevision` | Goes up on every change that affects *when* the task fires |
 | `Deleted` | Tombstone. A deleted task keeps its ID, so a deletion syncs like any other edit. |
+| `Incarnation` | How many times the task has been brought back after a deletion (by an import). A deletion outranks every edit of its incarnation, and only a later incarnation outranks the deletion: see *Sync merge*. |
 
 **`TaskState`** is what happens over time, versioned by `StateVersion`:
 
@@ -236,9 +237,10 @@ from sync.
   paused task keeps its own, since resuming passes over the past anyway. One
   consequence: once linked, the raise reaches the device the file came from too,
   passing over an occurrence still waiting there, as marking it done here would.
-- A task this device deleted comes back with a fresh `DefVersion`, outranking
-  the tombstone, and its state merges as above. It gets a new revision, with a
-  fresh `StateVersion` and `DoneThrough` = now, only if the tombstone is of a
+- A task this device deleted comes back as a new incarnation, with a fresh
+  `DefVersion`, outranking the tombstone (and any edit of the deleted
+  incarnation made elsewhere), and its state merges as above. It gets a new
+  revision, with a fresh `StateVersion` and `DoneThrough` = now, only if the tombstone is of a
   newer revision than the file, in its state or in its definition (the task was
   rescheduled after the export, then deleted). The definition counts because it
   syncs apart from the state: a schedule's definition can arrive before its
@@ -334,9 +336,27 @@ once the tasks have changed and nothing more has changed for 5 s
 
 Each part of a task merges on its own:
 
-- **Definition**: last writer wins by `DefVersion`.
+- **Definition**: the higher `DefRank` wins: `(Incarnation, Deleted,
+  DefVersion)`, compared in that order. Within one incarnation, then, a deletion
+  outranks every edit, and otherwise the last writer wins.
 - **State**: last writer wins by `(Revision, StateVersion)`, except that
   `DoneThroughUtc` is always the **maximum** of the two sides, whichever wins.
+
+A deletion has to outrank later edits because the alternative brings deleted
+tasks back. Suppose the PC deletes a task while the phone, out of touch, still
+rings it, and there the user changes "remind me again after", or edits the
+description. That edit is newer than the deletion, but it was made without
+knowing of it. Last-writer-wins would let it bring the task back on both
+devices when they meet, and the task would ring again. The cost: such an edit
+is lost with the task. Bringing a task back on purpose has to outrank a
+deletion, and does so by starting a new incarnation. An import restoring a
+deleted task does this (*Export and import*). It also outranks every edit of
+the old incarnation made elsewhere: those edit the task that was deleted, as
+the deletion outranked them too. A device never writes over a tombstone:
+`TaskStore.Save` and `Edit` refuse one, returning null. An editor left open
+across a deletion therefore can't undo it; saving there adds the edits as a new
+task (`Add`). Digests carry each definition's rank, so each side knows which of
+the two copies wins.
 
 That last rule is what makes "done" stick. Suppose the phone was off when a task
 fell due, and the PC marked it done meanwhile. The phone triggers it on startup,
@@ -456,7 +476,8 @@ separately (see *Simplification opportunities*).
   in `hello` must match (`Protocol.Version`, raised whenever a build without a
   change would misread or drop what a build with it sends: 4 added the pause,
   every-N-weeks, volume and fade-in fields, which an older build would drop and
-  then erase everywhere with its next write).
+  then erase everywhere with its next write; 5 made a deletion outrank later
+  edits, which an older build would undo, and never converge with this one).
 - **Bounded noise.** At most 256 devices are remembered from announcements. When
   the table is full, a proven member still gets in, in place of the stalest
   stranger, and a stranger's announcement can't take over a fresh member's
@@ -626,7 +647,10 @@ separately (see *Simplification opportunities*).
   other window of the thread, ringing alarm windows included, and an alarm must
   stay answerable. In the editor, the description `TextBox` has
   `AcceptsReturn`, so Enter adds a line. There is no default button; Esc is
-  `IsCancel`, and Cancel closes the window.
+  `IsCancel`, and Cancel closes the window. An editor whose task is deleted
+  closes, when that was done on this computer (the list, an alarm window). When
+  the deletion came from a linked device, it says so, and Save adds the edits as
+  a new task.
 - `AlarmWindow`: one per ringing task, topmost. Closing it any way the user can
   dismisses the task; `CloseQuietly` and exiting the app (`AppHost.Exiting`,
   also set when Windows ends the session) don't. The task stays due and rings
@@ -832,6 +856,8 @@ it runs on Android 10 (API 29) and up. The root namespace is
   "Show alarm", it stays up while its task is merely waiting. Back counts as
   Close, remind me later, and only reminder and restart fields the user changed
   are written back.
+- `TaskEditActivity`: once its task is deleted (from its alarm screen, or on a
+  linked device), it says so, and Save adds the edits as a new task.
 - **Direct boot**: the app is `directBootAware`, and its files live in
   device-protected storage. The locked-boot receiver can then set alarms before
   the first unlock after a restart, so a phone that rebooted overnight for an

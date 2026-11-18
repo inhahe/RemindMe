@@ -57,8 +57,8 @@ public static class Platforms
     public const string Android = "android";
 }
 
-/// <summary>The part of a task the user edits. Synced last-writer-wins as a whole by
-/// <see cref="AlarmTask.DefVersion"/>.</summary>
+/// <summary>The part of a task the user edits. Synced as a whole, the copy of the higher
+/// <see cref="DefRank"/> winning.</summary>
 public sealed record TaskDefinition
 {
     public string Description { get; init; } = "";
@@ -119,6 +119,12 @@ public sealed record TaskDefinition
 
     /// <summary>Tombstone: the task was deleted. Kept so the deletion syncs.</summary>
     public bool Deleted { get; init; }
+
+    /// <summary>How many times the task has been brought back after a deletion (an import
+    /// restoring it). A deletion outranks every edit of the same incarnation, wherever and
+    /// whenever made, and only a later incarnation outranks the deletion: see
+    /// <see cref="DefRank"/>.</summary>
+    public int Incarnation { get; init; }
 
     public bool HasDay(DayOfWeek d) => (Days & (1 << (int)d)) != 0;
 

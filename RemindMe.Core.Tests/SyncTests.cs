@@ -108,7 +108,7 @@ public sealed class SyncTests : IDisposable
     }
 
     private static AlarmTask Add(TaskStore s, string description) =>
-        s.Save(null, new TaskDefinition { Description = description, Kind = ScheduleKind.Weekly, Days = 0b0111110 });
+        s.Add(new TaskDefinition { Description = description, Kind = ScheduleKind.Weekly, Days = 0b0111110 });
 
     [Fact]
     public async Task SameGroupSyncsBothWaysAndKeepsSyncingLaterChanges()

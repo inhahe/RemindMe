@@ -57,7 +57,7 @@ public class MergeTests
     public void ATaskCreatedOnOneDeviceAppearsOnTheOther()
     {
         var (a, b, ca, _) = TwoDevices();
-        var t = a.Save(null, Hourly(ca));
+        var t = a.Add(Hourly(ca));
         Sync(a, b);
         Assert.Equal(t, b.Get(t.Id));
         Assert.Empty(a.NewerThan(b.Digest()));
@@ -71,7 +71,7 @@ public class MergeTests
         // The phone comes back at 10:30 and, before syncing, sees the task triggered
         // and the user dismisses it there — a state write with a *newer* version.
         var (a, b, ca, cb) = TwoDevices();
-        var t = a.Save(null, Hourly(ca));
+        var t = a.Add(Hourly(ca));
         Sync(a, b);
         ca.UtcNow = NY(2026, 6, 1, 10, 5);
         a.MarkDone(t.Id);
@@ -89,7 +89,7 @@ public class MergeTests
     public void DismissOnOneDeviceSnoozesTheOther()
     {
         var (a, b, ca, cb) = TwoDevices();
-        var t = a.Save(null, Hourly(ca));
+        var t = a.Add(Hourly(ca));
         Sync(a, b);
         ca.UtcNow = cb.UtcNow = NY(2026, 6, 1, 10, 1);
         Assert.True(b.Status(t.Id)!.ShouldAlert);
@@ -103,7 +103,7 @@ public class MergeTests
     public void ConcurrentEditsConvergeOnTheLaterOne()
     {
         var (a, b, ca, cb) = TwoDevices();
-        var t = a.Save(null, Hourly(ca));
+        var t = a.Add(Hourly(ca));
         Sync(a, b);
         ca.Advance(TimeSpan.FromSeconds(1));
         a.Save(t.Id, t.Def with { Description = "from a" });
@@ -118,7 +118,7 @@ public class MergeTests
     public void ADeletionSyncs()
     {
         var (a, b, ca, _) = TwoDevices();
-        var t = a.Save(null, Hourly(ca));
+        var t = a.Add(Hourly(ca));
         Sync(a, b);
         b.Delete(t.Id);
         Sync(a, b);
@@ -126,31 +126,121 @@ public class MergeTests
         Assert.True(a.Get(t.Id)!.Def.Deleted);
     }
 
-    [Fact]
-    public void ADeletionStandsWhenTheOtherDeviceMarksItDoneLater()
+    /// <summary>What <paramref name="from"/> holds that <paramref name="to"/> lacks, sent one way.</summary>
+    private static void Send(TaskStore from, TaskStore to) => to.Merge(from.NewerThan(to.Digest()));
+
+    /// <summary>The two halves of a sync, in either order.</summary>
+    private static void Meet(TaskStore a, TaskStore b, bool aFirst)
+    {
+        if (aFirst) { Send(a, b); Send(b, a); }
+        else { Send(b, a); Send(a, b); }
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void ADeletionStandsWhenTheOtherDeviceMarksItDoneLater(bool deletionArrivesFirst)
     {
         // Deleted on one device while the other, out of touch, still rings it and has it
-        // marked done afterwards: sync doesn't bring it back, whichever way it runs.
+        // marked done afterwards: a state write newer than the deletion, which doesn't
+        // bring the task back, whichever device hears of the other's change first.
         var (a, b, ca, cb) = TwoDevices();
-        var t = a.Save(null, Hourly(ca));
+        var t = a.Add(Hourly(ca));
         Sync(a, b);
         ca.UtcNow = NY(2026, 6, 1, 10, 1);
         a.Delete(t.Id);
         cb.UtcNow = NY(2026, 6, 1, 10, 30);
-        Assert.NotNull(b.MarkDone(t.Id));
-        Sync(b, a);
+        Assert.True(b.Status(t.Id)!.ShouldAlert);
+        var done = b.MarkDone(t.Id)!;
+        Assert.True(done.StateVersion > a.Get(t.Id)!.DefVersion);
+        Meet(a, b, deletionArrivesFirst);
         Assert.Empty(a.Live());
         Assert.Empty(b.Live());
+        Assert.Equal(a.Get(t.Id), b.Get(t.Id));
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void ADeletionStandsAgainstALaterEditMadeBeforeItArrived(bool deletionArrivesFirst)
+    {
+        // As above, but on the other device's alarm screen the reminder interval is changed
+        // too, and later the description in its editor: definitions newer than the
+        // deletion, written without knowing of it.
+        var (a, b, ca, cb) = TwoDevices();
+        var t = a.Add(Hourly(ca));
+        Sync(a, b);
+        ca.UtcNow = NY(2026, 6, 1, 10, 1);
+        a.Delete(t.Id);
+        cb.UtcNow = NY(2026, 6, 1, 10, 30);
+        Assert.NotNull(b.Edit(t.Id, d => d with { ReminderMinutes = 5 }));
+        b.MarkDone(t.Id);
+        cb.UtcNow = NY(2026, 6, 1, 10, 45);
+        var edited = b.Save(t.Id, b.Get(t.Id)!.Def with { Description = "pills, with food" })!;
+        Assert.True(edited.DefVersion > a.Get(t.Id)!.DefVersion);
+        Meet(a, b, deletionArrivesFirst);
+        Assert.Empty(a.Live());
+        Assert.Empty(b.Live());
+        Assert.Equal(a.Get(t.Id), b.Get(t.Id));
+    }
+
+    [Fact]
+    public void SavingOrEditingADeletedTaskChangesNothing()
+    {
+        // An editor or alarm screen left open across a deletion, made here or arriving by
+        // sync, mustn't undo it. Keeping the edits means adding them as a new task.
+        var (a, _, ca, _) = TwoDevices();
+        var t = a.Add(Hourly(ca));
+        a.Delete(t.Id);
+        var tombstone = a.Get(t.Id)!;
+        ca.Advance(TimeSpan.FromMinutes(1));
+        Assert.Null(a.Save(t.Id, t.Def with { Description = "pills, with food" }));
+        Assert.Null(a.Edit(t.Id, d => d with { ReminderMinutes = 5 }));
+        Assert.Equal(tombstone, a.Get(t.Id));
+        var copy = a.Add(tombstone.Def with { Description = "pills, with food" });
+        Assert.NotEqual(t.Id, copy.Id);
+        Assert.Equal((false, 0, 1), (copy.Def.Deleted, copy.Def.Incarnation, copy.Def.ScheduleRevision));
+    }
+
+    [Fact]
+    public void ARestoreOutranksTheDeletionAndEditsOfTheTaskAsItWas()
+    {
+        // Brought back by importing a backup: a new incarnation, which neither the deletion
+        // nor an edit made elsewhere without knowing of either outranks. Deleting it again
+        // does, and importing again brings it back again.
+        var (a, b, ca, cb) = TwoDevices();
+        var t = a.Add(Hourly(ca));
+        Sync(a, b);
+        var backup = a.Export();
+        ca.UtcNow = NY(2026, 6, 1, 10, 1);
+        a.Delete(t.Id);
+        ca.UtcNow = NY(2026, 6, 1, 10, 5);
+        Assert.Equal(new ImportResult(1, 0, 0), a.Import(backup));
+        cb.UtcNow = NY(2026, 6, 1, 10, 30);
+        Assert.NotNull(b.Save(t.Id, t.Def with { Description = "edited on b" }));
+        Sync(a, b);
+        var restored = a.Get(t.Id)!;
+        Assert.Equal((false, 1, "pills"), (restored.Def.Deleted, restored.Def.Incarnation, restored.Def.Description));
+        Assert.Equal(restored, b.Get(t.Id));
+
+        cb.UtcNow = NY(2026, 6, 1, 10, 40);
+        b.Delete(t.Id);
         Sync(a, b);
         Assert.Empty(a.Live());
         Assert.Empty(b.Live());
+
+        ca.UtcNow = NY(2026, 6, 1, 10, 50);
+        Assert.Equal(new ImportResult(1, 0, 0), a.Import(backup));
+        Sync(a, b);
+        Assert.Equal((false, 2), (b.Get(t.Id)!.Def.Deleted, b.Get(t.Id)!.Def.Incarnation));
+        Assert.Equal(a.Get(t.Id), b.Get(t.Id));
     }
 
     [Fact]
     public void MergeIsOrderIndependent()
     {
         var (a, b, ca, cb) = TwoDevices();
-        var t = a.Save(null, Hourly(ca));
+        var t = a.Add(Hourly(ca));
         Sync(a, b);
         ca.UtcNow = NY(2026, 6, 1, 10, 5);
         var x = a.MarkDone(t.Id)!;
@@ -170,15 +260,19 @@ public class MergeTests
         var stores = clocks.Select((c, i) => new TaskStore(null, $"n{i}", c)).ToArray();
         var rng = new Random(42);
         var ids = new List<Guid>();
-        for (int step = 0; step < 200; step++)
+        var exports = new List<string>();
+        for (int step = 0; step < 300; step++)
         {
             int i = rng.Next(3);
             foreach (var c in clocks) c.Advance(TimeSpan.FromMinutes(rng.Next(1, 20)));
             var s = stores[i];
             var live = s.Live();
-            switch (rng.Next(6))
+            switch (rng.Next(8))
             {
-                case 0: ids.Add(s.Save(null, Hourly(clocks[i]) with { Description = $"t{step}" }).Id); break;
+                case 5 when rng.Next(3) == 0: exports.Add(s.Export()); break;
+                // An old export restores the tasks deleted since: new incarnations.
+                case 6 when exports.Count > 0 && rng.Next(2) == 0: s.Import(exports[rng.Next(exports.Count)]); break;
+                case 0: ids.Add(s.Add(Hourly(clocks[i]) with { Description = $"t{step}" }).Id); break;
                 case 1 when live.Count > 0: s.MarkDone(live[rng.Next(live.Count)].Id); break;
                 case 2 when live.Count > 0: s.Dismiss(live[rng.Next(live.Count)].Id); break;
                 case 3 when live.Count > 0:
@@ -196,6 +290,8 @@ public class MergeTests
         var expected = stores[0].All().OrderBy(t => t.Id).ToList();
         foreach (var s in stores.Skip(1))
             Assert.Equal(expected, s.All().OrderBy(t => t.Id).ToList());
+        Assert.Contains(expected, t => t.Def.Incarnation > 0);   // restores happened
+        Assert.Contains(expected, t => t.Def.Deleted);
     }
 }
 
@@ -210,8 +306,8 @@ public class PersistenceTests
             var path = Path.Combine(dir.FullName, "tasks.json");
             var clock = new FakeClock(NY(2026, 6, 1, 9), NewYork);
             var s = new TaskStore(path, "a", clock);
-            var t1 = s.Save(null, new TaskDefinition { Description = "one", Kind = ScheduleKind.Once, At = new DateTime(2026, 7, 1, 9, 0, 0) });
-            s.Save(null, new TaskDefinition { Description = "two", Kind = ScheduleKind.Once, At = new DateTime(2026, 7, 2, 9, 0, 0) });
+            var t1 = s.Add(new TaskDefinition { Description = "one", Kind = ScheduleKind.Once, At = new DateTime(2026, 7, 1, 9, 0, 0) });
+            s.Add(new TaskDefinition { Description = "two", Kind = ScheduleKind.Once, At = new DateTime(2026, 7, 2, 9, 0, 0) });
             File.WriteAllText(path, "{ not json");
             var logs = new List<string>();
             var reloaded = new TaskStore(path, "a", clock, logs.Add);
@@ -382,13 +478,13 @@ public class ExportImportTests
     public void AnExportImportsIntoAnotherDeviceWithoutRingingForThePast()
     {
         var a = NewStore("node-a");
-        var daily = a.Save(null, new TaskDefinition
+        var daily = a.Add(new TaskDefinition
         {
             Description = "daily", Kind = ScheduleKind.Interval, Unit = IntervalUnit.Days, Start = new DateTime(2026, 5, 1, 8, 0, 0),
             Restart = RestartMode.OnSchedule,
         });
-        var countdown = a.Save(null, new TaskDefinition { Description = "cd", Kind = ScheduleKind.Countdown, Duration = TimeSpan.FromHours(2) });
-        var gone = a.Save(null, new TaskDefinition { Description = "deleted", Kind = ScheduleKind.Once, At = new DateTime(2026, 7, 1, 9, 0, 0) });
+        var countdown = a.Add(new TaskDefinition { Description = "cd", Kind = ScheduleKind.Countdown, Duration = TimeSpan.FromHours(2) });
+        var gone = a.Add(new TaskDefinition { Description = "deleted", Kind = ScheduleKind.Once, At = new DateTime(2026, 7, 1, 9, 0, 0) });
         a.Delete(gone.Id);
         var file = a.Export();
 
@@ -406,7 +502,7 @@ public class ExportImportTests
     public void ImportingBringsBackADeletedTaskButNotOverANewerEdit()
     {
         var a = NewStore("node-a");
-        var t = a.Save(null, new TaskDefinition { Description = "v1", Kind = ScheduleKind.Weekly, Days = 0b0000010 });
+        var t = a.Add(new TaskDefinition { Description = "v1", Kind = ScheduleKind.Weekly, Days = 0b0000010 });
         var backup = a.Export();
         _clock.Advance(TimeSpan.FromMinutes(1));
         a.Save(t.Id, a.Get(t.Id)!.Def with { Description = "v2" });
@@ -431,7 +527,7 @@ public class ExportImportTests
     public void ATaskRescheduledThenDeletedComesBackAsTheFileHasIt()
     {
         var a = NewStore("node-a");
-        var t = a.Save(null, new TaskDefinition
+        var t = a.Add(new TaskDefinition
         {
             Description = "daily", Kind = ScheduleKind.Interval, Unit = IntervalUnit.Days, Start = new DateTime(2026, 6, 1, 8, 0, 0),
             Restart = RestartMode.OnSchedule,
@@ -456,7 +552,7 @@ public class ExportImportTests
     public void ATombstoneWhoseScheduleIsAheadOfItsStateIsOutrankedToo()
     {
         var a = NewStore("node-a");
-        var t = a.Save(null, new TaskDefinition
+        var t = a.Add(new TaskDefinition
         {
             Description = "daily", Kind = ScheduleKind.Interval, Unit = IntervalUnit.Days, Start = new DateTime(2026, 6, 1, 8, 0, 0),
             Restart = RestartMode.OnSchedule,
@@ -465,7 +561,7 @@ public class ExportImportTests
         var b = NewStore("node-b");
         b.Merge(a.All());
         _clock.Advance(TimeSpan.FromMinutes(1));
-        var rescheduled = b.Save(t.Id, t.Def with { Start = new DateTime(2026, 6, 1, 20, 0, 0) });   // revision 2
+        var rescheduled = b.Save(t.Id, t.Def with { Start = new DateTime(2026, 6, 1, 20, 0, 0) })!;   // revision 2
         a.Merge([rescheduled with { State = a.Get(t.Id)!.State, StateVersion = a.Get(t.Id)!.StateVersion }]);   // its definition only
         Assert.Equal((2, 1), (a.Get(t.Id)!.Def.ScheduleRevision, a.Get(t.Id)!.State.Revision));
         a.Delete(t.Id);
@@ -484,8 +580,8 @@ public class ExportImportTests
     public void AnExportSaysHowManyTasksItHolds()
     {
         var a = NewStore("node-a");
-        a.Save(null, new TaskDefinition { Description = "x", Kind = ScheduleKind.Once, At = new DateTime(2026, 7, 1, 9, 0, 0) });
-        var gone = a.Save(null, new TaskDefinition { Description = "y", Kind = ScheduleKind.Once, At = new DateTime(2026, 7, 1, 9, 0, 0) });
+        a.Add(new TaskDefinition { Description = "x", Kind = ScheduleKind.Once, At = new DateTime(2026, 7, 1, 9, 0, 0) });
+        var gone = a.Add(new TaskDefinition { Description = "y", Kind = ScheduleKind.Once, At = new DateTime(2026, 7, 1, 9, 0, 0) });
         a.Delete(gone.Id);
         a.Export(out int count);
         Assert.Equal(1, count);
@@ -499,7 +595,7 @@ public class ExportImportTests
     public void AnImportOutranksNothingTheDeviceItCameFromDidLater()
     {
         var pc = NewStore("node-pc");
-        var t = pc.Save(null, new TaskDefinition
+        var t = pc.Add(new TaskDefinition
         {
             Description = "pills", Kind = ScheduleKind.Interval, Unit = IntervalUnit.Days, Start = new DateTime(2026, 6, 1, 8, 0, 0),
             Restart = RestartMode.OnSchedule,
@@ -527,7 +623,7 @@ public class ExportImportTests
     public void ImportingANewerScheduleDoesNotRingForThePast()
     {
         var a = NewStore("node-a");
-        var t = a.Save(null, new TaskDefinition
+        var t = a.Add(new TaskDefinition
         {
             Description = "daily", Kind = ScheduleKind.Interval, Unit = IntervalUnit.Days, Start = new DateTime(2026, 6, 1, 8, 0, 0),
             Restart = RestartMode.OnSchedule,
@@ -550,8 +646,8 @@ public class ExportImportTests
     public void RecordsMissingWhatTheAppReliesOnAreSkipped()
     {
         var a = NewStore("node-a");
-        a.Save(null, new TaskDefinition { Description = "x", Kind = ScheduleKind.Once, At = new DateTime(2026, 7, 1, 9, 0, 0) });
-        var withSound = a.Save(null, new TaskDefinition { Description = "y", Kind = ScheduleKind.Once, At = new DateTime(2026, 7, 1, 9, 0, 0) }
+        a.Add(new TaskDefinition { Description = "x", Kind = ScheduleKind.Once, At = new DateTime(2026, 7, 1, 9, 0, 0) });
+        var withSound = a.Add(new TaskDefinition { Description = "y", Kind = ScheduleKind.Once, At = new DateTime(2026, 7, 1, 9, 0, 0) }
             .WithSound(Platforms.Windows, new SoundRef(SoundSource.File, "C:/a.wav", "a")));
         var file = a.Export();
         var nullDescription = file.Replace("\"description\": \"x\"", "\"description\": null");
@@ -574,7 +670,7 @@ public class ExportImportTests
     public void APausedCountdownImportsPausedWithItsTimeLeft()
     {
         var a = NewStore("node-a");
-        var t = a.Save(null, new TaskDefinition { Kind = ScheduleKind.Countdown, Duration = TimeSpan.FromMinutes(30) });
+        var t = a.Add(new TaskDefinition { Kind = ScheduleKind.Countdown, Duration = TimeSpan.FromMinutes(30) });
         _clock.Advance(TimeSpan.FromMinutes(10));
         a.Pause(t.Id);
         var file = a.Export();
@@ -590,7 +686,7 @@ public class ExportImportTests
     public void AFileExportedBeforeTheRenameStillImports()
     {
         var a = NewStore("node-a");
-        var t = a.Save(null, new TaskDefinition { Description = "x", Kind = ScheduleKind.Once, At = new DateTime(2026, 7, 1, 9, 0, 0) });
+        var t = a.Add(new TaskDefinition { Description = "x", Kind = ScheduleKind.Once, At = new DateTime(2026, 7, 1, 9, 0, 0) });
         var old = a.Export().Replace("\"app\": \"RemindMe\"", "\"app\": \"AlarmCalendar\"");
         Assert.Contains("\"AlarmCalendar\"", old);
         var b = NewStore("node-b");

@@ -239,6 +239,10 @@ public static class TextFormat
         return string.Join(", ", list);
     }
 
+    /// <summary>What an editor says once its task has been deleted, here or elsewhere.</summary>
+    public const string DeletedWhileEditing =
+        "This task has been deleted, here or on a linked device. Saving keeps your changes as a new task.";
+
     /// <summary>The first line of a description, cut to <paramref name="max"/> characters.</summary>
     public static string Snippet(string description, int max = 60)
     {

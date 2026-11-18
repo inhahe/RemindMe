@@ -11,7 +11,8 @@ namespace RemindMe.Droid;
 /// <summary>
 /// Creates or edits a task (R2–R10, R14), with the same layout as the desktop editor:
 /// Scheduled and Countdown each in their own rounded pane, the schedule kinds nested inside.
-/// Back and Cancel leave without saving; only Save saves.
+/// Back and Cancel leave without saving; only Save saves. Once its task is deleted (on its
+/// alarm screen, or on a linked device), it says so, and Save keeps the changes as a new task.
 /// </summary>
 [Activity(Label = "Task", Exported = false, WindowSoftInputMode = SoftInput.AdjustResize)]
 public sealed class TaskEditActivity : Screen
@@ -21,6 +22,8 @@ public sealed class TaskEditActivity : Screen
          IntervalUnit.Hours, IntervalUnit.Minutes, IntervalUnit.Seconds];
 
     private Guid? _id;
+    /// <summary>The task has been deleted since this opened.</summary>
+    private bool _deleted;
     private TaskDefinition _original = new();
     private readonly CheckBox[] _days = new CheckBox[7];
     private SoundChooser _chooser = null!;
@@ -131,6 +134,26 @@ public sealed class TaskEditActivity : Screen
         ShowTimes();
         ShowSound();
         UpdatePanes();
+        AppState.TasksChanged += CheckDeleted;
+        CheckDeleted();
+    }
+
+    protected override void OnDestroy()
+    {
+        AppState.TasksChanged -= CheckDeleted;
+        base.OnDestroy();
+    }
+
+    private void CheckDeleted()
+    {
+        if (!_deleted && _id is { } id && AppState.Store.Get(id) is not { Def.Deleted: false }) ShowDeleted();
+    }
+
+    private void ShowDeleted()
+    {
+        _deleted = true;
+        Find<TextView>(Resource.Id.error).Text = TextFormat.DeletedWhileEditing;
+        Find<Button>(Resource.Id.delete).Visibility = ViewStates.Gone;
     }
 
     // Recreating the activity (rotation, dark mode, the process restarted behind a picker)
@@ -278,7 +301,12 @@ public sealed class TaskEditActivity : Screen
             return;
         }
         var restart = Find<CheckBox>(Resource.Id.cd_restart);
-        AppState.Store.Save(_id, d, restart.Visibility == ViewStates.Visible && restart.Checked);
+        if (_id is not { } id || _deleted) AppState.Store.Add(d);
+        else if (AppState.Store.Save(id, d, restart.Visibility == ViewStates.Visible && restart.Checked) is null)
+        {
+            ShowDeleted();   // deleted an instant ago: say so first, and the next Save adds it
+            return;
+        }
         Finish();
     }
 

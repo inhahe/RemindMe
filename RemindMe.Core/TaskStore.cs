@@ -30,7 +30,26 @@ internal sealed class ExportFile
 public sealed record ImportResult(int Added, int Updated, int Unchanged);
 
 /// <summary>One line of a sync digest: enough to tell which side holds the newer record.</summary>
-public sealed record DigestEntry(Guid Id, Hlc DefVersion, int Revision, Hlc StateVersion, DateTimeOffset DoneThroughUtc);
+public sealed record DigestEntry(Guid Id, int Incarnation, bool Deleted, Hlc DefVersion, int Revision, Hlc StateVersion, DateTimeOffset DoneThroughUtc);
+
+/// <summary>
+/// What decides which of two copies of a task's definition wins: the later
+/// <see cref="TaskDefinition.Incarnation"/>, then, within one, a deletion over any edit, then
+/// the newer version. So a deletion stands against an edit made on another device before the
+/// deletion reached it: that edit was made without knowing of it, however much later. Only
+/// bringing the task back on purpose, which starts a new incarnation, outranks a deletion.
+/// </summary>
+public readonly record struct DefRank(int Incarnation, bool Deleted, Hlc Version) : IComparable<DefRank>
+{
+    public static DefRank Of(AlarmTask t) => new(t.Def.Incarnation, t.Def.Deleted, t.DefVersion);
+
+    public static DefRank Of(DigestEntry e) => new(e.Incarnation, e.Deleted, e.DefVersion);
+
+    public int CompareTo(DefRank other) =>
+        Incarnation != other.Incarnation ? Incarnation.CompareTo(other.Incarnation)
+        : Deleted != other.Deleted ? Deleted.CompareTo(other.Deleted)
+        : Version.CompareTo(other.Version);
+}
 
 /// <summary>The merge rules of design.md → <i>Sync merge</i>.</summary>
 public static class MergeRules
@@ -38,7 +57,7 @@ public static class MergeRules
     /// <summary>The record both sides converge on, whichever order they see the two in.</summary>
     public static AlarmTask Merge(AlarmTask local, AlarmTask remote)
     {
-        var (def, defVersion) = remote.DefVersion > local.DefVersion
+        var (def, defVersion) = DefRank.Of(remote).CompareTo(DefRank.Of(local)) > 0
             ? (remote.Def, remote.DefVersion) : (local.Def, local.DefVersion);
         var winner = StateOrder(remote.State.Revision, remote.StateVersion, local.State.Revision, local.StateVersion) > 0
             ? remote : local;
@@ -58,12 +77,12 @@ public static class MergeRules
     /// <summary>True when <paramref name="local"/> holds something <paramref name="peer"/>'s
     /// copy lacks, so it should be sent.</summary>
     public static bool IsNewerThan(AlarmTask local, DigestEntry peer) =>
-        local.DefVersion > peer.DefVersion
+        DefRank.Of(local).CompareTo(DefRank.Of(peer)) > 0
         || StateOrder(local.State.Revision, local.StateVersion, peer.Revision, peer.StateVersion) > 0
         || (local.State.Revision == peer.Revision && local.State.DoneThroughUtc > peer.DoneThroughUtc);
 
     public static DigestEntry DigestOf(AlarmTask t) =>
-        new(t.Id, t.DefVersion, t.State.Revision, t.StateVersion, t.State.DoneThroughUtc);
+        new(t.Id, t.Def.Incarnation, t.Def.Deleted, t.DefVersion, t.State.Revision, t.StateVersion, t.State.DoneThroughUtc);
 
     /// <summary>True when <paramref name="r"/>, a record from another device or a file, has
     /// everything the app relies on. JSON can leave a member null whatever its declared type
@@ -134,53 +153,66 @@ public sealed class TaskStore
 
     // ---- User actions --------------------------------------------------------------
 
-    /// <summary>Saves the editor's result: a new task when <paramref name="id"/> is null.</summary>
-    /// <param name="def">The definition as edited; its ScheduleRevision and Deleted are set here.</param>
+    /// <summary>Adds a new task, as the editor made it.</summary>
+    /// <param name="def">The definition; its ScheduleRevision, Deleted and Incarnation are set here.</param>
+    /// <returns>The stored task.</returns>
+    public AlarmTask Add(TaskDefinition def)
+    {
+        def = def with { ScheduleRevision = 1, Deleted = false, Incarnation = 0 };
+        AlarmTask result;
+        lock (_lock)
+        {
+            result = new AlarmTask
+            {
+                Id = Guid.NewGuid(),
+                Def = def,
+                DefVersion = Versions.Tick(),
+                State = AlarmEngine.FreshState(null, def, _clock.UtcNow),
+                StateVersion = Versions.Tick(),
+            };
+            _tasks[result.Id] = result;
+            SaveLocked();
+        }
+        Raise([result], false);
+        return result;
+    }
+
+    /// <summary>Saves the editor's result for the existing task <paramref name="id"/>.</summary>
+    /// <param name="def">The definition as edited; its ScheduleRevision, Deleted and Incarnation are set here.</param>
     /// <param name="restartCountdown">Start a countdown again from now, running even if it was
     /// paused, though its length didn't change. Ignored unless <paramref name="def"/> is a
     /// countdown: a paused task saved as another kind stays paused.</param>
-    /// <returns>The stored task.</returns>
-    public AlarmTask Save(Guid? id, TaskDefinition def, bool restartCountdown = false)
+    /// <returns>The stored task; null, with nothing saved, when there is no such task or it
+    /// has been deleted (here or on a linked device): an editor left open across a deletion
+    /// mustn't undo it. Keeping the edits means adding them as a new task.</returns>
+    public AlarmTask? Save(Guid id, TaskDefinition def, bool restartCountdown = false)
     {
         var now = _clock.UtcNow;
         AlarmTask result;
         lock (_lock)
         {
-            if (id is not { } existingId || !_tasks.TryGetValue(existingId, out var old))
+            if (!_tasks.TryGetValue(id, out var old) || old.Def.Deleted) return null;
+            bool reschedule = old.Def.ScheduleDiffers(def) || (restartCountdown && def.Kind == ScheduleKind.Countdown);
+            // Definition and state merge separately, so the state can already carry a
+            // higher revision than the definition; a new schedule must outrank both.
+            def = def with
             {
-                def = def with { ScheduleRevision = 1, Deleted = false };
-                result = new AlarmTask
+                ScheduleRevision = reschedule
+                    ? Math.Max(old.Def.ScheduleRevision, old.State.Revision) + 1
+                    : old.Def.ScheduleRevision,
+                Deleted = false,
+                Incarnation = old.Def.Incarnation,
+            };
+            result = old;
+            if (old.Def != def) result = result with { Def = def, DefVersion = Versions.Tick() };
+            if (reschedule)
+                result = result with
                 {
-                    Id = id ?? Guid.NewGuid(),
-                    Def = def,
-                    DefVersion = Versions.Tick(),
-                    State = AlarmEngine.FreshState(null, def, now),
+                    State = AlarmEngine.FreshState(old.State, def, now,
+                        keepPaused: !(restartCountdown && def.Kind == ScheduleKind.Countdown)),
                     StateVersion = Versions.Tick(),
                 };
-            }
-            else
-            {
-                bool reschedule = old.Def.ScheduleDiffers(def) || (restartCountdown && def.Kind == ScheduleKind.Countdown);
-                // Definition and state merge separately, so the state can already carry a
-                // higher revision than the definition; a new schedule must outrank both.
-                def = def with
-                {
-                    ScheduleRevision = reschedule
-                        ? Math.Max(old.Def.ScheduleRevision, old.State.Revision) + 1
-                        : old.Def.ScheduleRevision,
-                    Deleted = false,
-                };
-                result = old;
-                if (old.Def != def) result = result with { Def = def, DefVersion = Versions.Tick() };
-                if (reschedule)
-                    result = result with
-                    {
-                        State = AlarmEngine.FreshState(old.State, def, now,
-                            keepPaused: !(restartCountdown && def.Kind == ScheduleKind.Countdown)),
-                        StateVersion = Versions.Tick(),
-                    };
-                if (result == old) return old;
-            }
+            if (result == old) return old;
             _tasks[result.Id] = result;
             SaveLocked();
         }
@@ -190,13 +222,15 @@ public sealed class TaskStore
 
     /// <summary>Changes the definition without touching the schedule (the alarm window's
     /// reminder interval and restart mode, a sound choice).</summary>
+    /// <returns>The stored task; null, with nothing changed, when there is no such task or
+    /// it has been deleted.</returns>
     public AlarmTask? Edit(Guid id, Func<TaskDefinition, TaskDefinition> change)
     {
         AlarmTask result;
         lock (_lock)
         {
-            if (!_tasks.TryGetValue(id, out var old)) return null;
-            var def = change(old.Def) with { ScheduleRevision = old.Def.ScheduleRevision, Deleted = old.Def.Deleted };
+            if (!_tasks.TryGetValue(id, out var old) || old.Def.Deleted) return null;
+            var def = change(old.Def) with { ScheduleRevision = old.Def.ScheduleRevision, Deleted = false, Incarnation = old.Def.Incarnation };
             if (old.Def == def) return old;
             result = old with { Def = def, DefVersion = Versions.Tick() };
             _tasks[id] = result;
@@ -268,8 +302,8 @@ public sealed class TaskStore
     /// on the device it came from. Whatever came up before now is passed over (for a paused
     /// task, when it is resumed), so importing doesn't ring for the past: where the file's
     /// state replaces this device's, its DoneThrough is raised to now, which the sync rules
-    /// carry as "done" moving forward. A task deleted here comes back with a new version of
-    /// its definition, to outrank the deletion.
+    /// carry as "done" moving forward. A task deleted here comes back as a new incarnation
+    /// (<see cref="TaskDefinition.Incarnation"/>), to outrank the deletion.
     /// The changes reach linked devices like any edit made here.
     /// </summary>
     /// <exception cref="InvalidDataException">The text isn't an export file of this app.</exception>
@@ -333,14 +367,15 @@ public sealed class TaskStore
             : r with { State = r.State with { DoneThroughUtc = TimeMath.Max(r.State.DoneThroughUtc, now) } };
 
     /// <summary>The file's copy <paramref name="r"/> of a task this device deleted. The
-    /// definition gets a new version, outranking the deletion. The state keeps the file's
+    /// definition starts a new incarnation, outranking the deletion, and every edit of the
+    /// old incarnation, wherever they meet; it gets a new version too. The state keeps the file's
     /// revision unless this device's copy has a newer one, in its state or in its definition
     /// (which syncs apart from the state, and can be ahead of it): a later schedule's state
     /// exists, here or elsewhere, and only a new revision outranks it.</summary>
     private AlarmTask Restore(AlarmTask tombstone, AlarmTask r, DateTimeOffset now)
     {
-        var def = r.Def with { Deleted = false };
-        if (r.State.Revision >= Math.Max(tombstone.State.Revision, tombstone.Def.ScheduleRevision))
+        var def = r.Def with { Deleted = false, Incarnation = Math.Max(r.Def.Incarnation, tombstone.Def.Incarnation) + 1 };
+        if (r.State.Revision >=Math.Max(tombstone.State.Revision, tombstone.Def.ScheduleRevision))
         {
             var merged = PassOverPast(MergeRules.Merge(tombstone, r), now);
             return merged with { Def = def, DefVersion = Versions.Tick() };

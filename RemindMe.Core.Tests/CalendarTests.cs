@@ -32,9 +32,9 @@ public class CalendarTests
     [Fact]
     public void EachTaskShowsOnItsDays()
     {
-        var weekly = _store.Save(null, new TaskDefinition { Description = "gym", Kind = ScheduleKind.Weekly, TimeOfDay = new TimeOnly(18, 0) }
+        var weekly = _store.Add(new TaskDefinition { Description = "gym", Kind = ScheduleKind.Weekly, TimeOfDay = new TimeOnly(18, 0) }
             .WithDay(DayOfWeek.Tuesday, true));
-        _store.Save(null, new TaskDefinition { Description = "dentist", Kind = ScheduleKind.Once, At = new DateTime(2026, 6, 20, 9, 30, 0) });
+        _store.Add(new TaskDefinition { Description = "dentist", Kind = ScheduleKind.Once, At = new DateTime(2026, 6, 20, 9, 30, 0) });
         var days = June();
         var tue = Day(days, 6, 16).Entries.Single();
         Assert.Equal(("6:00 PM", "gym", weekly.Id), (tue.Text, tue.Title, tue.TaskId));
@@ -47,7 +47,7 @@ public class CalendarTests
     [Fact]
     public void WhatCameUpAndWaitsShowsUntilMarkedDone()
     {
-        var t = _store.Save(null, new TaskDefinition
+        var t = _store.Add(new TaskDefinition
         {
             Description = "pills", Kind = ScheduleKind.Interval, Unit = IntervalUnit.Days, Start = new DateTime(2026, 6, 10, 20, 0, 0),
             Restart = RestartMode.OnSchedule,
@@ -67,7 +67,7 @@ public class CalendarTests
     [Fact]
     public void SeveralTimesADayIsOneLineADay()
     {
-        _store.Save(null, new TaskDefinition
+        _store.Add(new TaskDefinition
         {
             Description = "drink water", Kind = ScheduleKind.Interval, IntervalCount = 15, Unit = IntervalUnit.Minutes,
             Start = new DateTime(2026, 6, 1, 8, 0, 0), Restart = RestartMode.OnSchedule,
@@ -82,7 +82,7 @@ public class CalendarTests
     [Fact]
     public void ARestartWhenDoneTaskShowsItsLaterTimesAsEstimates()
     {
-        var t = _store.Save(null, new TaskDefinition
+        var t = _store.Add(new TaskDefinition
         {
             Description = "water plants", Kind = ScheduleKind.Interval, IntervalCount = 3, Unit = IntervalUnit.Days,
             Start = new DateTime(2026, 6, 10, 12, 0, 0), Restart = RestartMode.FromDone,
@@ -101,7 +101,7 @@ public class CalendarTests
     [Fact]
     public void ARestartWhenDoneTaskThatCameUpWaitsOnceAndEstimatesFromNow()
     {
-        _store.Save(null, new TaskDefinition
+        _store.Add(new TaskDefinition
         {
             Description = "water plants", Kind = ScheduleKind.Interval, IntervalCount = 3, Unit = IntervalUnit.Days,
             Start = new DateTime(2026, 6, 10, 12, 0, 0), Restart = RestartMode.FromDone,
@@ -118,7 +118,7 @@ public class CalendarTests
     [Fact]
     public void ARestartWhenDoneTaskSeveralTimesADayWaitsOnItsOwnDayOnly()
     {
-        _store.Save(null, new TaskDefinition
+        _store.Add(new TaskDefinition
         {
             Description = "stretch", Kind = ScheduleKind.Interval, IntervalCount = 15, Unit = IntervalUnit.Minutes,
             Start = new DateTime(2026, 6, 10, 12, 0, 0), Restart = RestartMode.FromDone,
@@ -141,7 +141,7 @@ public class CalendarTests
     [Fact]
     public void OnlyTheNextTimeOfARestartWhenDoneTaskIsExact()
     {
-        _store.Save(null, new TaskDefinition
+        _store.Add(new TaskDefinition
         {
             Description = "stretch", Kind = ScheduleKind.Interval, IntervalCount = 15, Unit = IntervalUnit.Minutes,
             Start = new DateTime(2026, 6, 10, 12, 0, 0), Restart = RestartMode.FromDone,
@@ -173,7 +173,7 @@ public class CalendarTests
     [Fact]
     public void TheNextChangeIsTheFirstTimeStillToCome()
     {
-        _store.Save(null, new TaskDefinition { Description = "dentist", Kind = ScheduleKind.Once, At = new DateTime(2026, 6, 20, 9, 30, 0) });
+        _store.Add(new TaskDefinition { Description = "dentist", Kind = ScheduleKind.Once, At = new DateTime(2026, 6, 20, 9, 30, 0) });
         Assert.Equal(NY(2026, 6, 20, 9, 30), CalendarMonth.NextChange(June(), _clock.UtcNow));
         _clock.UtcNow = NY(2026, 6, 20, 9, 31);
         var days = June();

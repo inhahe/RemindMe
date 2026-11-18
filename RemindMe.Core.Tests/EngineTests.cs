@@ -12,7 +12,7 @@ public class EngineTests
     private TaskStatus Status(Guid id) => _store.Status(id)!;
 
     private AlarmTask EveryHourFromNow(RestartMode mode, int reminderMinutes = 10) =>
-        _store.Save(null, new TaskDefinition
+        _store.Add(new TaskDefinition
         {
             Description = "stretch",
             Kind = ScheduleKind.Interval,
@@ -122,7 +122,7 @@ public class EngineTests
         {
             var path = Path.Combine(dir.FullName, "tasks.json");
             var store = new TaskStore(path, "node-a", _clock);
-            var t = store.Save(null, new TaskDefinition { Kind = ScheduleKind.Countdown, Duration = TimeSpan.FromMinutes(25) });
+            var t = store.Add(new TaskDefinition { Kind = ScheduleKind.Countdown, Duration = TimeSpan.FromMinutes(25) });
 
             var reloaded = new TaskStore(path, "node-a", _clock);   // "after a reboot"
             Assert.Equal(NY(2026, 6, 1, 9, 25), reloaded.Status(t.Id)!.NextOccurrence);
@@ -191,7 +191,7 @@ public class EngineTests
     [Fact]
     public void APausedCountdownKeepsTheTimeItHadLeft()
     {
-        var t = _store.Save(null, new TaskDefinition { Kind = ScheduleKind.Countdown, Duration = TimeSpan.FromMinutes(25) });
+        var t = _store.Add(new TaskDefinition { Kind = ScheduleKind.Countdown, Duration = TimeSpan.FromMinutes(25) });
         _clock.UtcNow = NY(2026, 6, 1, 9, 10);
         _store.Pause(t.Id);
         var st = Status(t.Id);
@@ -208,7 +208,7 @@ public class EngineTests
     [Fact]
     public void EditingAPausedTaskKeepsItPausedButRestartingACountdownRunsIt()
     {
-        var t = _store.Save(null, new TaskDefinition { Kind = ScheduleKind.Countdown, Duration = TimeSpan.FromMinutes(25) });
+        var t = _store.Add(new TaskDefinition { Kind = ScheduleKind.Countdown, Duration = TimeSpan.FromMinutes(25) });
         _store.Pause(t.Id);
         _store.Save(t.Id, t.Def with { Duration = TimeSpan.FromMinutes(5) });
         var st = Status(t.Id);
@@ -224,7 +224,7 @@ public class EngineTests
     [Fact]
     public void TheEditorOffersToRestartOnlyAFinishedCountdown()
     {
-        var t = _store.Save(null, new TaskDefinition { Kind = ScheduleKind.Countdown, Duration = TimeSpan.FromMinutes(25) });
+        var t = _store.Add(new TaskDefinition { Kind = ScheduleKind.Countdown, Duration = TimeSpan.FromMinutes(25) });
         _clock.UtcNow = NY(2026, 6, 1, 9, 10);
         var running = Status(t.Id);
         Assert.False(TextFormat.RestartCountdownByDefault(running));
@@ -243,7 +243,7 @@ public class EngineTests
     [Fact]
     public void APausedCountdownSavedAsAnotherKindStaysPaused()
     {
-        var t = _store.Save(null, new TaskDefinition { Kind = ScheduleKind.Countdown, Duration = TimeSpan.FromMinutes(25) });
+        var t = _store.Add(new TaskDefinition { Kind = ScheduleKind.Countdown, Duration = TimeSpan.FromMinutes(25) });
         _store.Pause(t.Id);
         // The editor's box was ticked, but the task is no longer a countdown to restart.
         _store.Save(t.Id, t.Def with { Kind = ScheduleKind.Once, At = new DateTime(2026, 6, 2, 9, 0, 0) }, restartCountdown: true);
@@ -306,7 +306,7 @@ public class EngineTests
     [Fact]
     public void SwitchingToTheOriginalScheduleCountsFromTheStartAgain()
     {
-        var t = _store.Save(null, new TaskDefinition
+        var t = _store.Add(new TaskDefinition
         {
             Kind = ScheduleKind.Interval, Unit = IntervalUnit.Days, Start = new DateTime(2026, 6, 1, 9, 0, 0),
             Restart = RestartMode.FromDone,
@@ -324,7 +324,7 @@ public class EngineTests
         // 2026-11-01 01:30 happens twice in New York; mark done during the second (EST).
         var secondPass = new DateTimeOffset(2026, 11, 1, 1, 30, 0, TimeSpan.FromHours(-5));
         _clock.UtcNow = secondPass - TimeSpan.FromHours(3);
-        var t = _store.Save(null, new TaskDefinition
+        var t = _store.Add(new TaskDefinition
         {
             Kind = ScheduleKind.Interval, IntervalCount = 2, Unit = IntervalUnit.Hours,
             Start = Wall(_clock.UtcNow), Restart = RestartMode.FromDone,
@@ -342,7 +342,7 @@ public class EngineTests
         var skewed = t with { State = t.State with { Revision = 5 } };
         var store = new TaskStore(null, "b", _clock);
         store.Merge([skewed]);
-        var saved = store.Save(t.Id, t.Def with { IntervalCount = 3 });
+        var saved = store.Save(t.Id, t.Def with { IntervalCount = 3 })!;
         Assert.Equal(6, saved.Def.ScheduleRevision);
         Assert.Equal(6, saved.State.Revision);
     }
@@ -363,7 +363,7 @@ public class EngineTests
     public void NextWakeUpIsTheEarliestThingDue()
     {
         var a = EveryHourFromNow(RestartMode.FromDone);
-        _store.Save(null, new TaskDefinition { Kind = ScheduleKind.Countdown, Duration = TimeSpan.FromMinutes(20) });
+        _store.Add(new TaskDefinition { Kind = ScheduleKind.Countdown, Duration = TimeSpan.FromMinutes(20) });
         Assert.Equal(NY(2026, 6, 1, 9, 20), AlarmEngine.NextWakeUp(_store.Live(), _clock.UtcNow, NewYork));
         _store.Delete(a.Id);
         Assert.Single(_store.Live());

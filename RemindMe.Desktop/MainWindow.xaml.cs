@@ -210,11 +210,7 @@ public partial class MainWindow : Window
         string what = sel.Count == 1 ? $"\"{sel[0].Description}\"" : $"these {sel.Count} tasks";
         if (MessageBox.Show(this, $"Delete {what}?", "Delete", MessageBoxButton.OKCancel, MessageBoxImage.Question) != MessageBoxResult.OK)
             return;
-        foreach (var row in sel)
-        {
-            if (_editors.TryGetValue(row.Id, out var ed)) ed.Close();
-            AppHost.Store.Delete(row.Id);
-        }
+        foreach (var row in sel) AppHost.Store.Delete(row.Id);   // an editor open on one closes itself
     }
 
     private void Settings_Click(object sender, RoutedEventArgs e) => OpenSettings();
@@ -250,6 +246,7 @@ public partial class MainWindow : Window
         ShowFromTray();
         if (id is { } existingId && _editors.TryGetValue(existingId, out var open)) { open.Activate(); return; }
         var task = id is { } i ? AppHost.Store.Get(i) : null;
+        if (id is not null && task is not { Def.Deleted: false }) return;   // deleted since it was listed
         var ed = new TaskEditorWindow(task) { Owner = this };
         if (task is not null)
         {

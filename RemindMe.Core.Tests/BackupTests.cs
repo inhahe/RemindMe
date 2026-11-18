@@ -84,7 +84,7 @@ public class BackupTests
     public void OnlyAddingEditingOrDeletingCallsForANewBackup()
     {
         var store = new TaskStore(null, "node-a", _clock);
-        var t = store.Save(null, new TaskDefinition
+        var t = store.Add(new TaskDefinition
         {
             Description = "pills", Kind = ScheduleKind.Interval, Unit = IntervalUnit.Hours, Start = new DateTime(2026, 6, 1, 9, 0, 0),
         });
@@ -100,7 +100,7 @@ public class BackupTests
         store.Save(t.Id, store.Get(t.Id)!.Def with { Description = "pills, with food" });
         var edited = Backups.Fingerprint(store.Live());
         Assert.NotEqual(first, edited);
-        var other = store.Save(null, new TaskDefinition { Description = "x", Kind = ScheduleKind.Once, At = new DateTime(2026, 7, 1, 9, 0, 0) });
+        var other = store.Add(new TaskDefinition { Description = "x", Kind = ScheduleKind.Once, At = new DateTime(2026, 7, 1, 9, 0, 0) });
         Assert.NotEqual(edited, Backups.Fingerprint(store.Live()));
         store.Delete(other.Id);
         Assert.Equal(edited, Backups.Fingerprint(store.Live()));   // back to the same tasks
@@ -168,7 +168,7 @@ public class BackupTests
     {
         var log = new List<string>();
         var store = new TaskStore(null, NodeId, _clock);
-        var t = store.Save(null, new TaskDefinition { Description = "x", Kind = ScheduleKind.Once, At = new DateTime(2026, 7, 1, 9, 0, 0) });
+        var t = store.Add(new TaskDefinition { Description = "x", Kind = ScheduleKind.Once, At = new DateTime(2026, 7, 1, 9, 0, 0) });
         var folder = new FakeFolder();
         var runner = new BackupRunner(store, NodeId, log.Add);
 
@@ -199,7 +199,7 @@ public class BackupTests
     public void ABackupDatedAheadDoesNotCallForANewOneOnEveryStart()
     {
         var store = new TaskStore(null, NodeId, _clock);
-        store.Save(null, new TaskDefinition { Description = "x", Kind = ScheduleKind.Once, At = new DateTime(2026, 7, 1, 9, 0, 0) });
+        store.Add(new TaskDefinition { Description = "x", Kind = ScheduleKind.Once, At = new DateTime(2026, 7, 1, 9, 0, 0) });
         var folder = new FakeFolder();
         // Written three days "ahead" of a different set of tasks, while the clock was wrong.
         folder.Files[Backups.FileName(At(2026, 6, 4, 9), Me)] = "{}";
@@ -217,7 +217,7 @@ public class BackupTests
     public void AFolderEmptiedSinceTheLastBackupGetsANewOne()
     {
         var store = new TaskStore(null, NodeId, _clock);
-        var t = store.Save(null, new TaskDefinition { Description = "x", Kind = ScheduleKind.Once, At = new DateTime(2026, 7, 1, 9, 0, 0) });
+        var t = store.Add(new TaskDefinition { Description = "x", Kind = ScheduleKind.Once, At = new DateTime(2026, 7, 1, 9, 0, 0) });
         var folder = new FakeFolder();
         var runner = new BackupRunner(store, NodeId, _ => { });
         runner.Run(folder);
@@ -232,7 +232,7 @@ public class BackupTests
     public void TwoBackupsInOneSecondGetTwoNames()
     {
         var store = new TaskStore(null, NodeId, _clock);
-        var t = store.Save(null, new TaskDefinition { Description = "x", Kind = ScheduleKind.Once, At = new DateTime(2026, 7, 1, 9, 0, 0) });
+        var t = store.Add(new TaskDefinition { Description = "x", Kind = ScheduleKind.Once, At = new DateTime(2026, 7, 1, 9, 0, 0) });
         var folder = new FakeFolder();
         var runner = new BackupRunner(store, NodeId, _ => { });
         runner.Run(folder);
@@ -268,7 +268,7 @@ public class BackupTests
     {
         var log = new List<string>();
         var store = new TaskStore(null, NodeId, _clock);
-        store.Save(null, new TaskDefinition { Description = "x", Kind = ScheduleKind.Once, At = new DateTime(2026, 7, 1, 9, 0, 0) });
+        store.Add(new TaskDefinition { Description = "x", Kind = ScheduleKind.Once, At = new DateTime(2026, 7, 1, 9, 0, 0) });
         var folder = new FakeFolder();
         new BackupRunner(store, NodeId, log.Add).Run(folder);
         _clock.Advance(TimeSpan.FromMinutes(1));
@@ -286,7 +286,7 @@ public class BackupTests
     {
         var log = new List<string>();
         var store = new TaskStore(null, NodeId, _clock);
-        store.Save(null, new TaskDefinition { Description = "x", Kind = ScheduleKind.Once, At = new DateTime(2026, 7, 1, 9, 0, 0) });
+        store.Add(new TaskDefinition { Description = "x", Kind = ScheduleKind.Once, At = new DateTime(2026, 7, 1, 9, 0, 0) });
         var folder = new FakeFolder { FailWrites = true };
         var runner = new BackupRunner(store, NodeId, log.Add);
 
@@ -307,7 +307,7 @@ public class BackupTests
     {
         var log = new List<string>();
         var store = new TaskStore(null, NodeId, _clock);
-        var t = store.Save(null, new TaskDefinition { Description = "x", Kind = ScheduleKind.Once, At = new DateTime(2026, 7, 1, 9, 0, 0) });
+        var t = store.Add(new TaskDefinition { Description = "x", Kind = ScheduleKind.Once, At = new DateTime(2026, 7, 1, 9, 0, 0) });
         var folder = new FakeFolder();
         // Twelve backups from one day a week ago: older than a day, so beyond the ten newest
         // only the day's newest would stay, and it is among the ten.

@@ -178,6 +178,13 @@ Open **Devices…** (in the toolbar or the tray menu).
   networks use, and only over IPv4.
 - **Bridging**: a device linked to both a far device and the ones near it
   carries updates between them, so every linked device stays in sync.
+- **A deletion stands.** Suppose a device out of touch changed a task (say, its
+  reminder interval) after another device deleted it. When the two meet, the
+  task stays deleted, and the change goes with it. An editor still open on a
+  task deleted elsewhere says so, and saving there keeps your changes as a new
+  task. Only restoring a backup brings a deleted task back.
+- **Keep linked devices on the same version** of the app: versions whose sync
+  differs don't sync with each other until both are updated.
 - **Leave the sync group…** stops this device syncing. It keeps its tasks, and the
   others keep theirs.
 - **This device's name** is what your other devices call it. It is the computer's

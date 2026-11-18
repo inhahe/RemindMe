@@ -7,7 +7,9 @@ namespace RemindMe.Desktop;
 /// <summary>
 /// Creates or edits a task (R2–R10, R14). Not modal: a modal WPF window disables every
 /// other window, which would leave a ringing alarm impossible to dismiss while this is
-/// open. Esc and Cancel close it without saving; only Save saves.
+/// open. Esc and Cancel close it without saving; only Save saves. Once its task is deleted
+/// it closes, when that was done here (the list, an alarm window); deleted on a linked
+/// device, it says so, and Save keeps the changes as a new task.
 /// </summary>
 public partial class TaskEditorWindow : Window
 {
@@ -19,6 +21,8 @@ public partial class TaskEditorWindow : Window
     private readonly TaskDefinition _original;
     private readonly CheckBox[] _days = new CheckBox[7];
     private SoundRef? _sound;
+    /// <summary>The task has been deleted on a linked device since this opened.</summary>
+    private bool _deleted;
 
     /// <summary>The task being edited, or null for a new one.</summary>
     public Guid? TaskId => _id;
@@ -103,9 +107,23 @@ public partial class TaskEditorWindow : Window
         FadeInBox.SelectedIndex = d.FadeInSeconds is { } fade ? 1 + SoundLevels.Nearest(SoundLevels.FadeIns, fade) : 0;
         RefreshDefaults();
         AppHost.SettingsChanged += RefreshDefaults;
-        Closed += (_, _) => AppHost.SettingsChanged -= RefreshDefaults;
+        AppHost.Store.Changed += OnStoreChanged;
+        Closed += (_, _) => { AppHost.SettingsChanged -= RefreshDefaults; AppHost.Store.Changed -= OnStoreChanged; };
 
         Loaded += (_, _) => { Description.Focus(); Description.CaretIndex = Description.Text.Length; };
+    }
+
+    private void OnStoreChanged(StoreChange change)
+    {
+        if (_id is not { } id || !change.Tasks.Any(t => t.Id == id && t.Def.Deleted)) return;
+        AppHost.OnUi(() =>
+        {
+            if (!IsVisible) return;   // closed meanwhile
+            if (!change.FromSync) { Close(); return; }
+            _deleted = true;
+            Title = "Edit task (deleted)";
+            ErrorText.Text = TextFormat.DeletedWhileEditing;
+        });
     }
 
     private void BuildDayBoxes()
@@ -183,7 +201,14 @@ public partial class TaskEditorWindow : Window
             return;
         }
         bool restart = RestartCountdown.Visibility == Visibility.Visible && RestartCountdown.IsChecked == true;
-        AppHost.Store.Save(_id, def, restart);
+        if (_id is not { } id || _deleted) AppHost.Store.Add(def);
+        else if (AppHost.Store.Save(id, def, restart) is null)
+        {
+            // Deleted an instant ago: say so first, and the next Save adds it.
+            _deleted = true;
+            ErrorText.Text = TextFormat.DeletedWhileEditing;
+            return;
+        }
         Close();
     }
 

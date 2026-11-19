@@ -91,8 +91,8 @@ public static class Protocol
     /// everywhere. 5: incarnations and schedule stamps. A deletion outranks a later edit, and
     /// only a restore (a new incarnation) outranks it (<see cref="DefRank"/>). A definition's
     /// schedule merges apart from the rest of it, with the state, by
-    /// <see cref="ScheduleRank"/>, so the two are always of one schedule. Digests carry all of
-    /// it. A build without these would bring deleted tasks back, pair schedules with other
+    /// <see cref="ScheduleRank"/>, so the two are always of one schedule; its restart mode
+    /// merges on its own (<see cref="RestartRank"/>). Digests carry all of it. A build without these would bring deleted tasks back, pair schedules with other
     /// schedules' states, and never converge with this one.</summary>
     public const int Version = 5;
     public const int DefaultPort = 37660;

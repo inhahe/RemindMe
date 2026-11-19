@@ -419,9 +419,9 @@ public class MergeTests
     [Fact]
     public void ARestartModeChangeAndADescriptionEditElsewhereBothStand()
     {
-        // The restart mode says when an interval task comes up next: it is the schedule's. The
-        // PC moves the task and makes it keep to its schedule; the phone, later, changes only
-        // the description. Both stand, the restart mode with the move.
+        // The PC moves the task and makes it keep to its schedule; the phone, later, changes
+        // only the description. All three stand: the times, the restart mode and the rest
+        // merge apart.
         var (a, b, ca, cb) = TwoDevices();
         var t = a.Add(Hourly(ca) with { Restart = RestartMode.FromDone });
         Sync(a, b);
@@ -506,10 +506,10 @@ public class MergeTests
     }
 
     [Fact]
-    public void EveryFieldOfADefinitionIsInOneHalf()
+    public void EveryFieldOfADefinitionIsInOnePart()
     {
-        // The schedule merges apart from the rest (WithScheduleOf): a new field must be put in
-        // one half or the other, knowingly, here.
+        // The parts of a definition merge apart (WithScheduleOf, WithRestartOf, the rest): a new
+        // field must be put in one of them, knowingly, here.
         string[] schedule =
         [
             nameof(TaskDefinition.Kind), nameof(TaskDefinition.IntervalCount), nameof(TaskDefinition.Unit),
@@ -650,14 +650,31 @@ public class MergeTests
         var rng = new Random(42);
         var ids = new List<Guid>();
         var exports = new List<string>();
+        var opened = new List<(int Store, Guid Task, TaskDefinition From)>();
         for (int step = 0; step < 300; step++)
         {
             int i = rng.Next(3);
             foreach (var c in clocks) c.Advance(TimeSpan.FromMinutes(rng.Next(1, 20)));
             var s = stores[i];
             var live = s.Live();
-            switch (rng.Next(10))
+            switch (rng.Next(13))
             {
+                case 9 when live.Count > 0:
+                    s.Edit(live[rng.Next(live.Count)].Id, d => d with { Restart = d.Restart == RestartMode.FromDone ? RestartMode.OnSchedule : RestartMode.FromDone });
+                    break;
+                case 10 when live.Count > 0: s.RestartCountdown(live[rng.Next(live.Count)].Id); break;
+                case 11 when live.Count > 0:
+                    // An editor opened now, saved some steps later with only its own edits.
+                    var e2 = live[rng.Next(live.Count)];
+                    opened.Add((i, e2.Id, e2.Def));
+                    break;
+                case 12 when opened.Count > 0:
+                    var (store, task, openedWith) = opened[rng.Next(opened.Count)];
+                    stores[store].Save(task, rng.Next(2) == 0
+                        ? openedWith with { Description = $"edited{step}" }
+                        : openedWith with { Start = Wall(clocks[store].UtcNow).AddMinutes(rng.Next(1, 60)), Kind = ScheduleKind.Interval },
+                        editedFrom: openedWith);
+                    break;
                 case 7 when live.Count > 0:
                     // A schedule change: another length, a later start, or another kind.
                     var r = live[rng.Next(live.Count)];
@@ -694,6 +711,7 @@ public class MergeTests
         Assert.Contains(expected, t => t.Def.Incarnation > 0);   // restores happened
         Assert.Contains(expected, t => t.Def.Deleted);
         Assert.Contains(expected, t => t.Def.ScheduleRevision > 2);   // and schedule changes
+        Assert.Contains(expected, t => t.Def.Restart == RestartMode.FromDone);   // and restart modes
         Assert.All(expected, t => Assert.False(MergeRules.Mismatched(t), "a schedule with another's state"));
         Assert.Empty(repairs);   // nor did a merge ever make one, to be mended
     }
@@ -711,7 +729,11 @@ public class PersistenceTests
         for (int i = 0; i < tasks.Count; i++)
         {
             var t = tasks[i]!.AsObject();
-            if (states is not null) t["state"] = states[i]!["state"]!.DeepClone();
+            if (states is not null)
+            {
+                t["state"] = states[i]!["state"]!.DeepClone();
+                t["stateVersion"] = states[i]!["stateVersion"]!.DeepClone();
+            }
             t["def"]!.AsObject().Remove("scheduleStamp");
             t["def"]!.AsObject().Remove("restartVersion");
             t["state"]!.AsObject().Remove("scheduleStamp");
@@ -803,7 +825,7 @@ public class PersistenceTests
             var a = Load(dir, "a", LegacyStoreFile(other.Export(), stateFrom: src.Export()), clock, log);
             var x = a.Get(t.Id)!;
             Assert.False(MergeRules.Mismatched(x));
-            Assert.Equal(clock.UtcNow + TimeSpan.FromHours(3), x.State.CountdownEndsUtc);
+            Assert.Equal(clock.UtcNow + TimeSpan.FromHours(3), x.State.CountdownEndsUtc);   // written just now
             Assert.Contains(log, l => l.Contains("starts afresh"));
         }
         finally { dir.Delete(true); }
@@ -952,12 +974,23 @@ public class PersistenceTests
             clock.Advance(TimeSpan.FromMinutes(1));
             src.Save(t.Id, t.Def with { Kind = ScheduleKind.Once, At = new DateTime(2026, 6, 1, 12, 0, 0) });
             var once = src.Export();
+            var written = clock.UtcNow;
+            clock.Advance(TimeSpan.FromDays(1));
             var log = new List<string>();
-            var a = Load(dir, "a", LegacyStoreFile(countdown, stateFrom: once), clock, log);
+            var file = LegacyStoreFile(countdown, stateFrom: once);
+            var a = Load(dir, "a", file, clock, log);
             var x = a.Get(t.Id)!;
             Assert.False(MergeRules.Mismatched(x));
             Assert.Equal(ScheduleKind.Countdown, x.Def.Kind);
-            Assert.Equal(clock.UtcNow + TimeSpan.FromHours(2), x.State.CountdownEndsUtc);
+            // From when the task was last written, not from now: overdue, it rings late.
+            Assert.Equal(written + TimeSpan.FromHours(2), x.State.CountdownEndsUtc);
+            Assert.True(a.Status(t.Id)!.ShouldAlert);
+            // Another device repairing it a day later makes the very same task: nothing to send.
+            clock.Advance(TimeSpan.FromDays(1));
+            var b2 = Load(dir, "b", file, clock);
+            Assert.Equal(x, b2.Get(t.Id));
+            Assert.Empty(a.NewerThan(b2.Digest()));
+            Assert.Empty(b2.NewerThan(a.Digest()));
             Assert.Equal(3, x.Def.ScheduleRevision);   // past the one-time state's
             Assert.Contains(log, l => l.Contains("\"tea\"") && l.Contains("starts afresh"));
             // Saved so: loaded again, nothing more to repair.

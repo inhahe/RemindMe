@@ -58,7 +58,10 @@ public sealed class TaskEditActivity : Screen
         var s = AppState.Settings;
         var nowWall = TimeMath.TruncateToSecond(TimeMath.ToWall(AppState.Clock.UtcNow, AppState.Clock.Zone));
         var nextHour = nowWall.Date.AddHours(nowWall.Hour + 1);
-        _original = existing?.Def ?? new TaskDefinition
+        // Recreated, the editor goes on from what it opened with, not the task as it is by now:
+        // the fields it brings back are edits of that (Save keeps only what was edited here).
+        var opened = savedInstanceState?.GetString("original") is { } json ? Json.DeserializeDefinition(json) : null;
+        _original = opened ?? existing?.Def ?? new TaskDefinition
         {
             Kind = ScheduleKind.Interval, IntervalCount = 1, Unit = IntervalUnit.Days, Start = nowWall,
             Restart = s.DefaultRestartMode, TimeOfDay = s.DefaultTimeOfDay, At = nextHour,
@@ -138,16 +141,7 @@ public sealed class TaskEditActivity : Screen
         foreach (var id in new[] { Resource.Id.scheduled, Resource.Id.countdown, Resource.Id.interval, Resource.Id.weekly, Resource.Id.once })
             Find<RadioButton>(id).CheckedChange += (_, _) => UpdatePanes();
 
-        if (savedInstanceState is { } saved)
-        {
-            Restore(saved);
-            // "Start the countdown again" belongs to what the editor opened with (its ticked
-            // state comes back by itself); the task may be another kind by now, and then its
-            // status line would describe something else.
-            bool countdown = _original.Kind == ScheduleKind.Countdown;
-            Find<CheckBox>(Resource.Id.cd_restart).Visibility = countdown ? ViewStates.Visible : ViewStates.Gone;
-            if (!countdown || existing?.Def.Kind != ScheduleKind.Countdown) Find<TextView>(Resource.Id.cd_status).Visibility = ViewStates.Gone;
-        }
+        if (savedInstanceState is { } saved) Restore(saved);
         ShowTimes();
         ShowSound();
         UpdatePanes();
@@ -203,7 +197,6 @@ public sealed class TaskEditActivity : Screen
 
     private void Restore(Bundle s)
     {
-        if (s.GetString("original") is { } original && Json.DeserializeDefinition(original) is { } d) _original = d;
         _startDate = new DateTime(s.GetLong("startDate"));
         _startTime = new TimeOnly(s.GetLong("startTime"));
         _weeklyTime = new TimeOnly(s.GetLong("weeklyTime"));
@@ -255,12 +248,17 @@ public sealed class TaskEditActivity : Screen
         Ui.SetPaneEnabled(Find<View>(Resource.Id.countdown_pane), Find<RadioButton>(Resource.Id.countdown).Checked);
     }
 
+    /// <summary>"Start the countdown again" and the countdown's status: for a task the editor
+    /// opened as a countdown (<see cref="_original"/>, which is what a recreated editor goes on
+    /// from); the status only while the task still is one.</summary>
     private void ShowCountdownStatus(AlarmTask? existing)
     {
-        bool isCountdown = existing?.Def.Kind == ScheduleKind.Countdown;
+        bool opened = existing is not null && _original.Kind == ScheduleKind.Countdown;
+        bool isCountdown = opened && existing!.Def.Kind == ScheduleKind.Countdown;
         var status = Find<TextView>(Resource.Id.cd_status);
         var restart = Find<CheckBox>(Resource.Id.cd_restart);
-        status.Visibility = restart.Visibility = isCountdown ? ViewStates.Visible : ViewStates.Gone;
+        restart.Visibility = opened ? ViewStates.Visible : ViewStates.Gone;
+        status.Visibility = isCountdown ? ViewStates.Visible : ViewStates.Gone;
         if (!isCountdown) return;
         var now = AppState.Clock.UtcNow;
         var st = AlarmEngine.Evaluate(existing!, now, AppState.Clock.Zone);

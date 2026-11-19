@@ -1069,6 +1069,33 @@ public sealed class SyncTests : IDisposable
     }
 
     [Fact]
+    public async Task LeavingTheGroupForgetsWhatItsDevicesSaid()
+    {
+        // B, linked, was refused for another protocol. A leaves the group: B is no longer its
+        // device, so nothing is shown for it, and its next claim is anyone's, logged as such.
+        var a = NewIdentity("A");
+        var b = NewIdentity("B", a.GroupId, a.GroupKeyBase64);
+        var known = new List<KnownPeer> { new(b.NodeId, "B", DateTimeOffset.UtcNow) };
+        var log = new List<string>();
+        var (ea, _) = Node(a, Options(0, TimeSpan.FromMilliseconds(200), IPAddress.Loopback) with { KnownPeers = () => known }, log);
+        async Task Claim()
+        {
+            using var old = await RawPeer.ConnectAsync(ea, b.NodeId);
+            await old.HelloAsync(a.GroupId, proto: Protocol.Version - 1);
+            Assert.Equal(MessageTypes.Hello, (await old.ReceiveAsync())!.Type);
+            Assert.Null(await old.ReceiveAsync());
+        }
+        await Claim();
+        Assert.Equal(Protocol.Version - 1, ea.OtherProtocolOf(b.NodeId));
+        ea.LeaveGroup(Guid.NewGuid().ToString("N"), Convert.ToBase64String(RandomNumberGenerator.GetBytes(32)));
+        known.Clear();   // as the apps do on leaving
+        Assert.Null(ea.OtherProtocolOf(b.NodeId));
+        await Claim();
+        Assert.Null(ea.OtherProtocolOf(b.NodeId));
+        lock (log) Assert.Single(log, l => l.StartsWith($"A device speaking sync protocol {Protocol.Version - 1} "));
+    }
+
+    [Fact]
     public async Task AnAnnouncementInTheNameOfADeviceInSyncIsIgnored()
     {
         // While B is in sync, an announcement in its name in another protocol (a stale session,

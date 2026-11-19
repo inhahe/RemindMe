@@ -95,6 +95,19 @@ in the background, the PC's Devices list should show the phone in sync; the exit
 record above shows any kill, and the phone's log "Sync wasn't running; starting
 it again." where the watchdog stepped in.
 
+### An alarm screen that once didn't open over the lock screen (emulator)
+Seen once on 2026-11-18, in about a dozen runs of the emulator test's part 4
+(`scratch/delete-review-phone-test.ps1`). The test makes a 10-second
+countdown and turns the screen off, then wakes it 14 seconds later, by which
+point the alarm screen should be over the lock screen. Once, the task list was
+in front instead. The same part passed alone right after, and with parts 1
+and 2 before it, as in the failed run. Nothing then recorded whether the alarm
+rang, or whether only its screen failed to open. **To verify:** if it is seen
+again, take `adb shell dumpsys notification --noredact` and a logcat at once.
+They tell whether the full-screen intent was posted and refused (a timing of
+the emulator's keyguard), or never posted. The second would be an alarm that
+doesn't ring, and needs fixing.
+
 ### Paths the emulator couldn't reach
 - **An alarm firing from deep Doze.** Android refuses to enter deep Doze while
   an alarm clock is due within about 30 minutes, which is the guarantee, and the

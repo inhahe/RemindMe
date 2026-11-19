@@ -34,8 +34,9 @@ public sealed record DigestEntry(Guid Id, int Incarnation, bool Deleted, Hlc Def
     int StateIncarnation, Hlc StateScheduleStamp, Hlc StateVersion, DateTimeOffset DoneThroughUtc);
 
 /// <summary>
-/// What decides which of two copies of a task's definition wins, all but its schedule (the
-/// description, the reminder interval, the sounds, and whether it is deleted): the later
+/// What decides which of two copies of a task's definition wins, all but its schedule and its
+/// restart mode (the description, the reminder interval, the sounds, and whether it is
+/// deleted): the later
 /// <see cref="TaskDefinition.Incarnation"/>, then, within one, a deletion over any edit, then
 /// the newer version. So a deletion stands against an edit made on another device before the
 /// deletion reached it: that edit was made without knowing of it, however much later. Only
@@ -71,6 +72,21 @@ public readonly record struct ScheduleRank(int Incarnation, Hlc Stamp) : ICompar
 
     public int CompareTo(ScheduleRank other) =>
         Incarnation != other.Incarnation ? Incarnation.CompareTo(other.Incarnation) : Stamp.CompareTo(other.Stamp);
+}
+
+/// <summary>
+/// Which of two restart modes wins: the later incarnation's, then the later set
+/// (<see cref="TaskDefinition.RestartVersion"/>). It merges on its own: any state serves
+/// either mode.
+/// </summary>
+public readonly record struct RestartRank(int Incarnation, Hlc Version) : IComparable<RestartRank>
+{
+    public static RestartRank Of(TaskDefinition d) => new(d.Incarnation, d.RestartVersion);
+
+    public static RestartRank Of(DigestEntry e) => new(e.Incarnation, e.RestartVersion);
+
+    public int CompareTo(RestartRank other) =>
+        Incarnation != other.Incarnation ? Incarnation.CompareTo(other.Incarnation) : Version.CompareTo(other.Version);
 }
 
 /// <summary>
@@ -112,7 +128,7 @@ public static class MergeRules
     {
         var rest = DefRank.Of(remote).CompareTo(DefRank.Of(local)) > 0 ? remote : local;
         var schedule = ScheduleRank.Of(remote.Def).CompareTo(ScheduleRank.Of(local.Def)) > 0 ? remote.Def : local.Def;
-        var restart = RestartRank(remote.Def).CompareTo(RestartRank(local.Def)) > 0 ? remote.Def : local.Def;
+        var restart = RestartRank.Of(remote.Def).CompareTo(RestartRank.Of(local.Def)) > 0 ? remote.Def : local.Def;
         StateRank localRank = StateRank.Of(local), remoteRank = StateRank.Of(remote);
         var winner = remoteRank.CompareTo(localRank) > 0 ? remote : local;
         // Within one schedule, "done" only ever moves forward, whichever write wins. A newer
@@ -128,9 +144,6 @@ public static class MergeRules
         };
     }
 
-    /// <summary>Which of two restart modes wins: the later incarnation's, then the later set.</summary>
-    private static (int Incarnation, Hlc Version) RestartRank(TaskDefinition d) => (d.Incarnation, d.RestartVersion);
-
     /// <summary>True when <paramref name="local"/> holds something <paramref name="peer"/>'s
     /// copy lacks, so it should be sent.</summary>
     public static bool IsNewerThan(AlarmTask local, DigestEntry peer)
@@ -138,7 +151,7 @@ public static class MergeRules
         StateRank mine = StateRank.Of(local), theirs = StateRank.Of(peer);
         return DefRank.Of(local).CompareTo(DefRank.Of(peer)) > 0
             || ScheduleRank.Of(local.Def).CompareTo(ScheduleRank.OfDefinition(peer)) > 0
-            || RestartRank(local.Def).CompareTo((peer.Incarnation, peer.RestartVersion)) > 0
+            || RestartRank.Of(local.Def).CompareTo(RestartRank.Of(peer)) > 0
             || mine.CompareTo(theirs) > 0
             || (mine.SameSchedule(theirs) && local.State.DoneThroughUtc > peer.DoneThroughUtc);
     }
@@ -270,14 +283,22 @@ public sealed class TaskStore
         // not taken from the clock: every device that repairs this task (upgrading on different
         // days, say) gives it the same one, and it ranks below any change made since, on a
         // device that repaired it before.
-        // Its state's version is below any written since too (milliseconds 0; another device's
-        // repair of it ties by node), so a mark done or a pause made since outranks it.
+        // Its state too is the one every device writes for this record: started from when the
+        // record was last written, not from now, and versioned below any real state (milliseconds
+        // 0). So repairs made on different days are one, and what was marked done, snoozed or
+        // paused since on a device that repaired first outranks it. A countdown whose end has
+        // passed rings late, as any missed alarm does.
         var def = t.Def with { ScheduleRevision = NextRevision(t) };
         def = def with { ScheduleStamp = def.LegacyScheduleStamp() };
+        var written = DateTimeOffset.FromUnixTimeMilliseconds(Math.Max(t.DefVersion.Ms, t.StateVersion.Ms));
         _log?.Invoke($"\"{name}\": its state was another kind of schedule's (an older version's merge), so it "
-            + "couldn't ring; it starts afresh on its schedule.");
-        return t with { Def = def, State = AlarmEngine.FreshState(t.State, def, now), StateVersion = new Hlc(0, 0, NodeId) };
+            + "couldn't ring; it starts afresh on its schedule, from when it was last changed.");
+        return t with { Def = def, State = AlarmEngine.FreshState(t.State, def, written), StateVersion = RepairedVersion };
     }
+
+    /// <summary>The version of a repaired state (<see cref="Repaired"/>): the same on every
+    /// device, and below any a device issues.</summary>
+    private static readonly Hlc RepairedVersion = new(0, 0, "~repaired");
 
     /// <summary>The revision of a new schedule of <paramref name="t"/>: past both its
     /// definition's and its state's (an older version's records can have the state's ahead).

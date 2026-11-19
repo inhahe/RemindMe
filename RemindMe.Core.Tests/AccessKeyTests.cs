@@ -54,8 +54,11 @@ public class AccessKeyTests
             var code = new FileInfo(xaml.FullName + ".cs");
             if (code.Exists)
             {
-                // Comments aren't code: "// Content = "_Save"" makes no control.
-                var source = Regex.Replace(File.ReadAllText(code.FullName), @"//[^\r\n]*|/\*.*?\*/", "", RegexOptions.Singleline);
+                // Comments aren't code: "// Content = "_Save"" makes no control. Strings are read
+                // first, so a "//" inside one ("pack://...") stays.
+                var source = Regex.Replace(File.ReadAllText(code.FullName),
+                    @"(@""(?:[^""]|"""")*""|\$?""(?:[^""\\\r\n]|\\.)*"")|//[^\r\n]*|/\*.*?\*/",
+                    m => m.Groups[1].Success ? m.Value : "", RegexOptions.Singleline);
                 static List<char> KeysIn(string expression) =>
                     Regex.Matches(expression, @"\$?""((?:[^""\\]|\\.)*)""").Select(l => KeyOf(l.Groups[1].Value)).OfType<char>().ToList();
                 foreach (Match m in Regex.Matches(source, @"((?:\w+\.(?:Content|Header)\s*=\s*)+)([^;]*);"))
@@ -69,11 +72,12 @@ public class AccessKeyTests
                         c.Keys.UnionWith(found);
                     }
                 }
-                // A control made in code: its text runs to the end of the initializer's entry, a
-                // comma in a literal included. A menu item made in code is in a menu of its own,
-                // which this can't tell apart, so it is left out rather than taken for the window's.
-                foreach (Match m in Regex.Matches(source, @"(?<![.\w])(Content|Header)\s*=\s*((?:\$?""(?:[^""\\]|\\.)*""|[^,;}""\r\n])*)"))
-                    if (m.Groups[1].Value == "Content" && KeysIn(m.Groups[2].Value) is { Count: > 0 } found)
+                // A control made in code: its text runs to the end of the initializer's entry, over
+                // lines and past a comma in a literal. (A menu item made in code is in a menu of
+                // its own, which this can't tell apart: its Header is left out rather than taken
+                // for the window's.)
+                foreach (Match m in Regex.Matches(source, @"(?<![.\w])Content\s*=\s*((?:\$?""(?:[^""\\]|\\.)*""|[^,;}""])*)"))
+                    if (KeysIn(m.Groups[1].Value) is { Count: > 0 } found)
                         keys[$"new at {code.Name}:{m.Index}"] = ("window", [.. found]);
             }
             foreach (var scope in keys.GroupBy(kv => kv.Value.Scope))

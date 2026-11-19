@@ -271,10 +271,10 @@ the document picker on Android.
 once the tasks have changed and nothing more has changed for 5 s
 (`Backups.Settle`). Import is therefore the restore.
 - **What counts as a change**: `Backups.Fingerprint`, the live tasks' IDs and
-  the versions of both halves of each definition (`DefVersion` and
-  `ScheduleStamp`; saving a schedule alone leaves `DefVersion`). Adding,
-  editing and deleting change it, whether made here or arriving by sync. Marking done, snoozing and pausing don't, so they write
-  nothing. A backup is written only when the fingerprint differs from that of
+  the versions of each definition's parts (`DefVersion`, `ScheduleStamp` and
+  `RestartVersion`; saving a schedule alone leaves `DefVersion`). Adding,
+  editing and deleting change it, whether made here or arriving by sync.
+  Marking done, snoozing and pausing don't, so they write nothing. A backup is written only when the fingerprint differs from that of
   this device's newest backup, so a restart or an import that changes nothing
   writes nothing.
 - **A series, not one file**: overwriting a single file would make it a mirror.
@@ -409,12 +409,14 @@ serve the definition's schedule (`StateFits`: any but a countdown's without an
 end) is taken as that schedule's. It keeps its "done", anchor and snooze, and
 every device does the same with the same record, so nothing new is written. A
 state that can't serve it gives way to a new schedule, the one the definition
-describes, starting now. That schedule's stamp is worked out as a legacy one
-is, not taken from the clock, and its state's version is below any real one
-(milliseconds 0; two devices' repairs tie by node). Every device that repairs
-the task (updating on different days, say) gives it the same schedule, and any
-change made since on a device that repaired it earlier outranks the repair:
-a schedule change, a mark done, a pause. A restart mode saved before it had a
+describes. All of it is worked out from the record, the same on every device
+that repairs it (updating on different days, say): the schedule's stamp as a
+legacy one is, the state from when the record was last written (a countdown
+whose end has passed rings late, as any missed alarm), and the state's version
+below any real one (`RepairedVersion`, milliseconds 0). So every repair of it
+is one, nothing new is sent, and any change made since on a device that
+repaired it earlier outranks the repair: a schedule change, a mark done, a
+snooze, a pause. A restart mode saved before it had a
 version takes the definition's, as it merged then. A
 schedule saved before stamps existed has none: `MergeRules.WithLegacyStamps`
 gives it `TaskDefinition.LegacyScheduleStamp`, a hash of the schedule that every
@@ -587,9 +589,11 @@ separately (see *Simplification opportunities*).
   `OtherProtocolOf` says nothing while a device is in sync. A member announcing
   another protocol isn't dialled: its hello would only be refused, every few
   seconds. Its announcement, which its MAC proves, is kept and logged instead,
-  once. Once it announces this protocol, what was kept is dropped, and it is
-  shown so. What was logged is remembered apart, until it is in sync, so later
-  claims in its name are logged once all the same. One from a member in sync
+  once. Each such device has one note (`OtherProtocolNote`): the protocol, when
+  it last said so, and whether to show it. Once it announces this protocol the
+  note is no longer shown, but stays, so later claims in its name are still
+  logged once. Notes go once the device is in sync, or when the group changes,
+  since its devices are then others. One from a member in sync
   now (a stale session, or another install with its ID) is ignored. And a
   nearby device on another protocol can't be linked: neither Devices list
   offers Link for it.

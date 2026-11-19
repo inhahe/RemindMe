@@ -199,9 +199,7 @@ public partial class MainWindow : Window
 
     private void RestartCountdown_Click(object sender, RoutedEventArgs e)
     {
-        foreach (var row in SelectedRows())
-            if (AppHost.Store.Get(row.Id) is { Def.Kind: ScheduleKind.Countdown } t)
-                AppHost.Store.Save(t.Id, t.Def, restartCountdown: true);
+        foreach (var row in SelectedRows()) AppHost.Store.RestartCountdown(row.Id);
     }
 
     private void Delete_Click(object sender, RoutedEventArgs e)

@@ -438,18 +438,51 @@ public class MergeTests
     [Fact]
     public void ARestartModeChangedOnTheAlarmScreenKeepsTheState()
     {
-        // Changed with the alarm still waiting: a schedule of its own (it merges with the
-        // times), but the same times, so the state, waiting alarm and all, carries on.
+        // Changed with the alarm still waiting: the restart mode has a version of its own, and
+        // neither the schedule nor the state changes: the waiting alarm carries on.
         var (a, _, ca, _) = TwoDevices();
         var t = a.Add(Hourly(ca) with { Restart = RestartMode.FromDone });
         ca.Advance(TimeSpan.FromMinutes(61));
         Assert.True(a.Status(t.Id)!.ShouldAlert);
         var before = a.Get(t.Id)!;
         var after = a.Edit(t.Id, d => d with { Restart = RestartMode.OnSchedule })!;
-        Assert.True(after.Def.ScheduleStamp > before.Def.ScheduleStamp);
-        Assert.False(MergeRules.Mismatched(after));
-        Assert.Equal(before.State.DoneThroughUtc, after.State.DoneThroughUtc);
+        Assert.True(after.Def.RestartVersion > before.Def.RestartVersion);
+        Assert.Equal((before.Def.ScheduleStamp, before.DefVersion), (after.Def.ScheduleStamp, after.DefVersion));
+        Assert.Equal((before.State, before.StateVersion), (after.State, after.StateVersion));
         Assert.True(a.Status(t.Id)!.ShouldAlert);
+    }
+
+    [Fact]
+    public void ARestartModeChangeAndATimesChangeElsewhereBothStand()
+    {
+        // Out of touch, the phone moves the task to 7:00 and marks it done; later, the PC's
+        // alarm screen switches it to keep to its schedule. Both stand: the move with what the
+        // phone marked done, and the restart mode.
+        var (a, b, ca, cb) = TwoDevices();
+        var t = a.Add(Hourly(ca) with { Restart = RestartMode.FromDone });
+        Sync(a, b);
+        cb.Advance(TimeSpan.FromMinutes(1));
+        var moved = b.Save(t.Id, t.Def with { Start = new DateTime(2026, 6, 1, 7, 0, 0) })!;
+        cb.Advance(TimeSpan.FromMinutes(5));
+        var done = b.MarkDone(t.Id)!;
+        ca.Advance(TimeSpan.FromMinutes(30));
+        a.Edit(t.Id, d => d with { Restart = RestartMode.OnSchedule });
+        Sync(a, b);
+        var x = a.Get(t.Id)!;
+        Assert.Equal((new DateTime(2026, 6, 1, 7, 0, 0), RestartMode.OnSchedule), (x.Def.Start, x.Def.Restart));
+        Assert.Equal(done.State, x.State);
+        Assert.Equal(x, b.Get(t.Id));
+        Assert.Equal(moved.Def.ScheduleStamp, x.Def.ScheduleStamp);
+    }
+
+    [Fact]
+    public void EditDoesntChangeWhenATaskComesUp()
+    {
+        // That is Save's, which starts a new schedule: Edit says so out loud rather than do it.
+        var (a, _, ca, _) = TwoDevices();
+        var t = a.Add(Hourly(ca));
+        Assert.Throws<ArgumentException>(() => a.Edit(t.Id, d => d with { Start = d.Start.AddHours(1) }));
+        Assert.Equal(t, a.Get(t.Id));
     }
 
     [Fact]
@@ -480,7 +513,7 @@ public class MergeTests
         string[] schedule =
         [
             nameof(TaskDefinition.Kind), nameof(TaskDefinition.IntervalCount), nameof(TaskDefinition.Unit),
-            nameof(TaskDefinition.Start), nameof(TaskDefinition.Restart), nameof(TaskDefinition.Days),
+            nameof(TaskDefinition.Start), nameof(TaskDefinition.Days),
             nameof(TaskDefinition.TimeOfDay), nameof(TaskDefinition.WeekInterval), nameof(TaskDefinition.WeeksFrom),
             nameof(TaskDefinition.FirstDayOfWeek), nameof(TaskDefinition.At), nameof(TaskDefinition.Duration),
             nameof(TaskDefinition.ScheduleRevision), nameof(TaskDefinition.ScheduleStamp),
@@ -492,10 +525,12 @@ public class MergeTests
             nameof(TaskDefinition.WindowsSound), nameof(TaskDefinition.AndroidSound), nameof(TaskDefinition.SoundMode),
             nameof(TaskDefinition.Volume), nameof(TaskDefinition.FadeInSeconds),
         ];
+        // The restart mode merges on its own (WithRestartOf).
+        string[] restart = [nameof(TaskDefinition.Restart), nameof(TaskDefinition.RestartVersion)];
         // The store's to set.
         string[] store = [nameof(TaskDefinition.Deleted), nameof(TaskDefinition.Incarnation)];
         var all = typeof(TaskDefinition).GetProperties().Where(p => p.CanWrite).Select(p => p.Name).Order().ToList();
-        Assert.Equal(all, schedule.Concat(edited).Concat(store).Order().ToList());
+        Assert.Equal(all, schedule.Concat(edited).Concat(restart).Concat(store).Order().ToList());
 
         // And WithScheduleOf takes exactly the schedule's fields from the other.
         var one = new TaskDefinition();
@@ -506,9 +541,11 @@ public class MergeTests
             FirstDayOfWeek = DayOfWeek.Sunday, At = new DateTime(2030, 2, 2), Duration = TimeSpan.FromHours(7), ReminderMinutes = 77,
             WindowsSound = new SoundRef(SoundSource.File, "w", "w"), AndroidSound = new SoundRef(SoundSource.File, "a", "a"), SoundMode = SoundMode.Repeat,
             Volume = 70, FadeInSeconds = 7, ScheduleRevision = 7, ScheduleStamp = new Hlc(7, 7, "n"), Deleted = true, Incarnation = 7,
+            RestartVersion = new Hlc(7, 7, "r"),
         };
         var merged = one.WithScheduleOf(other);
         var edits = one.WithRestEditsOf(one, other);
+        var restarted = one.WithRestartOf(other);
         foreach (var p in typeof(TaskDefinition).GetProperties().Where(p => p.CanWrite))
         {
             var expected = schedule.Contains(p.Name) ? p.GetValue(other) : p.GetValue(one);
@@ -516,6 +553,8 @@ public class MergeTests
             Assert.False(Equals(p.GetValue(one), p.GetValue(other)), $"{p.Name} isn't set apart in this test");
             expected = edited.Contains(p.Name) ? p.GetValue(other) : p.GetValue(one);
             Assert.True(Equals(expected, p.GetValue(edits)), $"{p.Name}, edited");
+            expected = restart.Contains(p.Name) ? p.GetValue(other) : p.GetValue(one);
+            Assert.True(Equals(expected, p.GetValue(restarted)), $"{p.Name}, restart mode");
         }
     }
 
@@ -663,7 +702,7 @@ public class MergeTests
 public class PersistenceTests
 {
     /// <summary>The tasks of <paramref name="export"/> (an export file) as an older version's
-    /// tasks.json holds them: no schedule stamps. <paramref name="stateFrom"/>, another export
+    /// tasks.json holds them: no schedule stamps, no restart mode versions. <paramref name="stateFrom"/>, another export
     /// of the same tasks, gives each its state instead.</summary>
     private static string LegacyStoreFile(string export, string? stateFrom = null)
     {
@@ -674,6 +713,7 @@ public class PersistenceTests
             var t = tasks[i]!.AsObject();
             if (states is not null) t["state"] = states[i]!["state"]!.DeepClone();
             t["def"]!.AsObject().Remove("scheduleStamp");
+            t["def"]!.AsObject().Remove("restartVersion");
             t["state"]!.AsObject().Remove("scheduleStamp");
         }
         return new System.Text.Json.Nodes.JsonObject { ["format"] = 1, ["tasks"] = tasks.DeepClone() }.ToJsonString();
@@ -796,6 +836,66 @@ public class PersistenceTests
             pc.Merge(phone.NewerThan(pc.Digest()));
             Assert.Equal(changed.Def.At, phone.Get(t.Id)!.Def.At);
             Assert.Equal(pc.Get(t.Id), phone.Get(t.Id));
+        }
+        finally { dir.Delete(true); }
+    }
+
+    [Fact]
+    public void ARepairedStateRanksBelowAStateWrittenSince()
+    {
+        // The PC updates first and repairs an older version's countdown that couldn't ring, and
+        // the user pauses it. The phone updates the next day and repairs its own copy: the same
+        // schedule, so the states rank by version, and a repair's is below any written since.
+        var dir = Directory.CreateTempSubdirectory();
+        try
+        {
+            var clock = new FakeClock(NY(2026, 6, 1, 9), NewYork);
+            var src = new TaskStore(null, "src", clock);
+            var t = src.Add(new TaskDefinition { Description = "tea", Kind = ScheduleKind.Countdown, Duration = TimeSpan.FromHours(2) });
+            var countdown = src.Export();
+            clock.Advance(TimeSpan.FromMinutes(1));
+            src.Save(t.Id, t.Def with { Kind = ScheduleKind.Once, At = new DateTime(2026, 6, 1, 12, 0, 0) });
+            var file = LegacyStoreFile(countdown, stateFrom: src.Export());
+            var pc = Load(dir, "pc", file, clock);
+            clock.Advance(TimeSpan.FromMinutes(10));
+            var paused = pc.Pause(t.Id)!;
+            clock.Advance(TimeSpan.FromDays(1));
+            var phone = Load(dir, "phone", file, clock);
+            phone.Merge(pc.NewerThan(phone.Digest()));
+            pc.Merge(phone.NewerThan(pc.Digest()));
+            Assert.NotNull(phone.Get(t.Id)!.State.PausedAtUtc);
+            Assert.Equal(paused.State.CountdownEndsUtc, phone.Get(t.Id)!.State.CountdownEndsUtc);
+            Assert.Equal(pc.Get(t.Id), phone.Get(t.Id));
+        }
+        finally { dir.Delete(true); }
+    }
+
+    [Fact]
+    public void TwoOlderCopiesThatDifferInTheirRestartModeComeTogether()
+    {
+        // Under an older version the restart mode merged with the definition, by its version:
+        // given that version, the later of two copies' restart modes wins, as it would have.
+        var dir = Directory.CreateTempSubdirectory();
+        try
+        {
+            var clock = new FakeClock(NY(2026, 6, 1, 9), NewYork);
+            var src = new TaskStore(null, "src", clock);
+            var t = src.Add(new TaskDefinition
+            {
+                Description = "pills", Kind = ScheduleKind.Interval, Unit = IntervalUnit.Hours, Start = Wall(clock.UtcNow),
+                Restart = RestartMode.OnSchedule,
+            });
+            var other = new TaskStore(null, "other", clock);
+            other.Merge(src.All());
+            clock.Advance(TimeSpan.FromMinutes(1));
+            // As an older version saved it: with a new version of the whole definition.
+            other.Save(t.Id, other.Get(t.Id)!.Def with { Restart = RestartMode.FromDone, Description = "pills, from done" });
+            var a = Load(dir, "a", LegacyStoreFile(src.Export()), clock);
+            var b = Load(dir, "b", LegacyStoreFile(other.Export()), clock);
+            b.Merge(a.NewerThan(b.Digest()));
+            a.Merge(b.NewerThan(a.Digest()));
+            Assert.Equal((RestartMode.FromDone, "pills, from done"), (a.Get(t.Id)!.Def.Restart, a.Get(t.Id)!.Def.Description));
+            Assert.Equal(a.Get(t.Id), b.Get(t.Id));
         }
         finally { dir.Delete(true); }
     }

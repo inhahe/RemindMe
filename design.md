@@ -47,12 +47,13 @@ is.
 ## Data model (`Model/`)
 
 An `AlarmTask` is `Id` (a `Guid`) plus parts that sync independently, each with
-its own version (a hybrid logical clock, `Hlc`): the definition's schedule, the
-rest of the definition, and the state (*Sync merge*).
+its own version (a hybrid logical clock, `Hlc`): the definition's schedule, its
+restart mode, the rest of the definition, and the state (*Sync merge*).
 
 **`TaskDefinition`** is what the user edits. Its schedule (the fields
-`ScheduleFields` lists, `Kind` through `Duration`) is versioned by
-`ScheduleStamp`, and the rest by `DefVersion`:
+`WithScheduleOf` copies, `Kind` through `Duration`) is versioned by
+`ScheduleStamp`, its restart mode by `RestartVersion`, and the rest by
+`DefVersion`:
 
 | Field | Meaning |
 |---|---|
@@ -61,6 +62,7 @@ rest of the definition, and the state (*Sync merge*).
 | `IntervalCount`, `Unit` | N and its unit: seconds through years |
 | `Start` | Wall-clock start of an Interval schedule: occurrence *k* is `Start + k·N·unit` |
 | `Restart` | `FromDone` (the next occurrence is N after you mark it done) or `OnSchedule` (it keeps to the grid set by `Start`). Interval only. |
+| `RestartVersion` | The `Hlc` of the change that set `Restart`, which merges on its own: no state is unable to serve either mode. |
 | `Days`, `TimeOfDay` | Weekly: a bitmask indexed by `DayOfWeek` (bit 0 is Sunday), and a wall-clock time |
 | `WeekInterval`, `WeeksFrom`, `FirstDayOfWeek` | Weekly, every N weeks (S7): N (1 is every week), a date in the first week that rings, and the day weeks start on. That day comes from the culture of the device that first saved the schedule, and editing elsewhere keeps it, so every device agrees which weeks ring. Both editors save through `TaskDefinition.AsWeekly`, which keeps that rule. |
 | `At` | Once: a wall-clock date and time |
@@ -142,8 +144,8 @@ sync: each device reaches the same answer independently.
   interval as it is.
 - **Saving a schedule change**: a new schedule (`ScheduleStamp`, and
   `ScheduleRevision++`), a fresh state with `DoneThrough = save time`, and
-  `Anchor` cleared. A new restart mode alone is a new schedule too, but keeps
-  the state: the times are the same. Only occurrences after the save
+  `Anchor` cleared. A new restart mode alone changes neither the schedule nor
+  the state: it has a version of its own. Only occurrences after the save
   fire. A start of "now", the editor's default, therefore means the first alarm
   comes one interval from now, not immediately. A paused task stays paused,
   except a countdown restarted on purpose, which runs. The editor's "start the
@@ -343,24 +345,29 @@ once the tasks have changed and nothing more has changed for 5 s
 
 ## Sync merge
 
-Each part of a task merges on its own. The definition is two parts:
+Each part of a task merges on its own. The definition is three parts:
 
-- **Definition, all but the schedule** (the description, the reminder
-  interval, the sounds, whether it is deleted): the higher
+- **Definition, all but the schedule and the restart mode** (the description,
+  the reminder interval, the sounds, whether it is deleted): the higher
   `DefRank` wins: `(Incarnation, Deleted, DefVersion)`, compared in that order.
   Within one incarnation, then, a deletion outranks every edit, and otherwise
   the last writer wins.
 - **The definition's schedule** (the fields `TaskDefinition.WithScheduleOf`
-  copies: when the task comes up, the restart mode included, which says when an
-  interval task comes up next): the higher `ScheduleRank`
+  copies: when the task comes up): the higher `ScheduleRank`
   wins: `(Incarnation, ScheduleStamp)`. The stamp is the `Hlc` of the change
   that set the schedule, so the schedule set last wins. A schedule set after
   another was seen has a later stamp, since every version a device issues is
   later than all it has seen. A device that changes the schedule more often
   doesn't win for that.
+- **The restart mode** (`WithRestartOf`): the higher `(Incarnation,
+  RestartVersion)` wins. It says how an interval task counts from being marked
+  done, but any state serves either mode. So its change neither undoes a change
+  of the times made elsewhere, nor throws away what was marked done under them,
+  nor gives way to either, nor to an edit of the rest.
 - **State**: the higher `StateRank` wins: the schedule it was written for
-  (`ScheduleRank`, from its own incarnation and stamp), then `StateVersion`. Within one schedule, `DoneThroughUtc` is always the
-  **maximum** of the two sides, whichever wins.
+  (`ScheduleRank`, from its own incarnation and stamp), then `StateVersion`.
+  Within one schedule, `DoneThroughUtc` is always the **maximum** of the two
+  sides, whichever wins.
 
 The maximum is what makes "done" stick. Suppose the phone was off when a task
 fell due, and the PC marked it done meanwhile. The phone triggers it on startup,
@@ -378,14 +385,15 @@ make that pair:
   and the rest merge apart, so both edits stand. `Save` gives each part a new
   version only when it changes: saving only a schedule doesn't make the old
   description outrank one made elsewhere. And a save that keeps the schedule
-  keeps it exactly, fields that don't count included, and `Edit` never touches
-  it (the alarm screen's restart mode is a new schedule of the same times,
-  with the state kept). An editor passes the definition it opened with
-  (`Save`'s `editedFrom`; Android keeps it across the screen's recreation).
-  Only what was changed in it is saved, laid on the task as it is now: the
-  schedule's times as a whole, the restart mode, and each other field on its
-  own (`WithRestEditsOf`). "Start the countdown again" restarts the countdown
-  the task has now, unless the editor changed the times. So an editor left open
+  keeps it exactly, fields that don't count included. `Edit` (the alarm
+  screen's reminder interval and restart mode) never touches it, and throws if
+  asked to. An editor passes the definition it opened with (`Save`'s
+  `editedFrom`; Android keeps it across the screen's recreation, and its
+  "start the countdown again" box with it). Only what was changed in it is
+  saved, laid on the task as it is now: the schedule's times as a whole, the
+  restart mode, and each other field on its own (`WithRestEditsOf`). "Start the
+  countdown again" (and the list's Restart countdown, `RestartCountdown`)
+  restarts the countdown the task has now, unless the editor changed the times. So an editor left open
   while a change elsewhere synced in doesn't write its stale copy over it.
 - Both devices change the schedule out of touch: the later stamp wins, the
   definition's schedule and the state alike.
@@ -402,9 +410,12 @@ end) is taken as that schedule's. It keeps its "done", anchor and snooze, and
 every device does the same with the same record, so nothing new is written. A
 state that can't serve it gives way to a new schedule, the one the definition
 describes, starting now. That schedule's stamp is worked out as a legacy one
-is, not taken from the clock. Every device that repairs the task (updating on
-different days, say) gives it the same stamp, and it ranks below any change made
-since on a device that repaired it earlier. A
+is, not taken from the clock, and its state's version is below any real one
+(milliseconds 0; two devices' repairs tie by node). Every device that repairs
+the task (updating on different days, say) gives it the same schedule, and any
+change made since on a device that repaired it earlier outranks the repair:
+a schedule change, a mark done, a pause. A restart mode saved before it had a
+version takes the definition's, as it merged then. A
 schedule saved before stamps existed has none: `MergeRules.WithLegacyStamps`
 gives it `TaskDefinition.LegacyScheduleStamp`, a hash of the schedule that every
 device works out alike (culture-free), with the revision as its counter, so
@@ -576,8 +587,9 @@ separately (see *Simplification opportunities*).
   `OtherProtocolOf` says nothing while a device is in sync. A member announcing
   another protocol isn't dialled: its hello would only be refused, every few
   seconds. Its announcement, which its MAC proves, is kept and logged instead,
-  once. Once it announces this protocol it is shown so: its announcement is read
-  first, and what was kept stays to keep the log to once. One from a member in sync
+  once. Once it announces this protocol, what was kept is dropped, and it is
+  shown so. What was logged is remembered apart, until it is in sync, so later
+  claims in its name are logged once all the same. One from a member in sync
   now (a stale session, or another install with its ID) is ignored. And a
   nearby device on another protocol can't be linked: neither Devices list
   offers Link for it.

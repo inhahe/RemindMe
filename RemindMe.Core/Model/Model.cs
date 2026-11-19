@@ -57,9 +57,9 @@ public static class Platforms
     public const string Android = "android";
 }
 
-/// <summary>The part of a task the user edits. Synced in two halves: its schedule (the
-/// fields <see cref="WithScheduleOf"/> copies) by <see cref="ScheduleRank"/>, as the state is,
-/// and the rest by <see cref="DefRank"/>.</summary>
+/// <summary>The part of a task the user edits. Synced in three parts: its schedule (the
+/// fields <see cref="WithScheduleOf"/> copies) by <see cref="ScheduleRank"/>, as the state is;
+/// its restart mode by <see cref="RestartVersion"/>; and the rest by <see cref="DefRank"/>.</summary>
 public sealed record TaskDefinition
 {
     public string Description { get; init; } = "";
@@ -72,6 +72,12 @@ public sealed record TaskDefinition
     /// device's zone): occurrence k is Start + k·N·unit.</summary>
     public DateTime Start { get; init; }
     public RestartMode Restart { get; init; } = RestartMode.FromDone;
+
+    /// <summary>The version of <see cref="Restart"/>, which merges on its own: it says how an
+    /// interval task counts from being marked done, but no state is unable to serve either
+    /// mode, so a change of it neither undoes a change of the times made elsewhere nor gives
+    /// way to one, nor to an edit of the rest.</summary>
+    public Hlc RestartVersion { get; init; }
 
     // Weekly
     /// <summary>Bit (int)DayOfWeek set for each day the task fires; bit 0 is Sunday.</summary>
@@ -158,15 +164,14 @@ public sealed record TaskDefinition
     }
 
     /// <summary>This definition with <paramref name="other"/>'s schedule: every field that
-    /// says when the task comes up (the restart mode included, which says when an interval
-    /// task comes up next), and the schedule's revision and stamp. The rest (the
-    /// description, the reminder interval, the sounds, whether it is deleted, its
-    /// incarnation) stays this one's. The two halves merge apart: an edit of either doesn't
-    /// undo one of the other made elsewhere.</summary>
+    /// says when the task comes up, and the schedule's revision and stamp. The rest (the
+    /// description, the reminder interval, the sounds, the restart mode, whether it is
+    /// deleted, its incarnation) stays this one's. The parts merge apart: an edit of one
+    /// doesn't undo one of another made elsewhere.</summary>
     public TaskDefinition WithScheduleOf(TaskDefinition other) => this with
     {
         Kind = other.Kind,
-        IntervalCount = other.IntervalCount, Unit = other.Unit, Start = other.Start, Restart = other.Restart,
+        IntervalCount = other.IntervalCount, Unit = other.Unit, Start = other.Start,
         Days = other.Days, TimeOfDay = other.TimeOfDay, WeekInterval = other.WeekInterval,
         WeeksFrom = other.WeeksFrom, FirstDayOfWeek = other.FirstDayOfWeek,
         At = other.At,
@@ -187,7 +192,10 @@ public sealed record TaskDefinition
         return new Hlc(0, ScheduleRevision, "~" + Convert.ToHexString(hash, 0, 16));
     }
 
-    /// <summary>This definition, with the fields outside its schedule that
+    /// <summary>This definition with <paramref name="other"/>'s restart mode, and its version.</summary>
+    public TaskDefinition WithRestartOf(TaskDefinition other) => this with { Restart = other.Restart, RestartVersion = other.RestartVersion };
+
+    /// <summary>This definition, with the fields outside its schedule and restart mode that
     /// <paramref name="edited"/> changes from <paramref name="from"/>: an editor's save, laid
     /// on the task as it is now. A field changed elsewhere since the editor opened, and not
     /// here, keeps its newer value. Whether the task is deleted, and its incarnation, are the

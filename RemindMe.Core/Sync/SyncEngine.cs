@@ -159,6 +159,10 @@ public sealed class SyncEngine : IDisposable
     /// another one says so again at the next dial, whichever side dials (each redials a
     /// linked device it can reach a minute apart at most).</summary>
     private static readonly TimeSpan OtherProtocolShown = TimeSpan.FromMinutes(10);
+    /// <summary>The protocol each such device was last logged for, apart from what is shown:
+    /// an announcement of this protocol clears what is shown, which mustn't make every later
+    /// claim in the device's name news again. The same devices only; cleared once in sync.</summary>
+    private readonly ConcurrentDictionary<string, int> _otherProtocolLogged = new();
     /// <summary>This process's ID in its announcements, and how many it has sent.</summary>
     private readonly string _boot = Guid.NewGuid().ToString("N");
     private long _announced;
@@ -558,6 +562,7 @@ public sealed class SyncEngine : IDisposable
             NoteOtherProtocol(node, msg.Name, msg.Proto ?? 0, ep.ToString(), member: true);
             return;
         }
+        _otherProtocol.TryRemove(node, out _);   // updated: what it said before no longer holds
         lock (_lock) if (_sessions.ContainsKey(node)) { _nearby[node] = _nearby[node] with { FirstSeen = now }; return; }
         if (MayDial(node, now - (old?.FirstSeen ?? now))) _ = DialNodeAsync(node, ep);
     }
@@ -978,10 +983,12 @@ public sealed class SyncEngine : IDisposable
         string who = !ours ? "A device" : linked?.Name ?? Protocol.CleanName(name, node![..8]);
         if (ours)
         {
-            bool news = !_otherProtocol.TryGetValue(node!, out var old) || old.Proto != proto;
+            bool shownNews = !_otherProtocol.TryGetValue(node!, out var old) || old.Proto != proto;
             _otherProtocol[node!] = (proto, Ticks);
-            if (!news) return;
-            RaisePeersChanged();
+            if (shownNews) RaisePeersChanged();
+            bool logNews = !_otherProtocolLogged.TryGetValue(node!, out var logged) || logged != proto;
+            _otherProtocolLogged[node!] = proto;
+            if (!logNews) return;
         }
         string update = proto < Protocol.Version ? $"update {(ours ? who : "it")}" : "update this one";
         _log?.Invoke($"{who} speaking sync protocol {proto} {(member ? "announced itself at" : "connected from")} {from}; "
@@ -1012,6 +1019,7 @@ public sealed class SyncEngine : IDisposable
         replaced?.Close();
         _remoteErrors.TryRemove(s.RemoteAddress ?? "", out _);
         _otherProtocol.TryRemove(s.PeerNode!, out _);
+        _otherProtocolLogged.TryRemove(s.PeerNode!, out _);
         _log?.Invoke($"In sync with {s.Describe()}.");
         _ = s.SendAsync(new SyncMessage { Type = MessageTypes.Digest, Digest = _store.Digest().ToList() });
         _redial.TryRemove(s.PeerNode!, out _);

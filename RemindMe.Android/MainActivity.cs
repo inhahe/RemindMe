@@ -97,7 +97,7 @@ public sealed class MainActivity : Screen
                 case 2: AppState.Store.MarkDone(id); break;
                 case 3: StartActivity(AlarmActivity.IntentFor(this, id, onRequest: true)); break;
                 case 4:
-                    if (AppState.Store.Get(id) is { } t) AppState.Store.Save(id, t.Def, restartCountdown: true);
+                    AppState.Store.RestartCountdown(id);
                     break;
                 case 6:
                     if (st.Paused) AppState.Store.Resume(id);

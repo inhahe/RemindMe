@@ -215,7 +215,7 @@ public class EngineTests
         Assert.True(st.Paused);
         Assert.Equal(TimeSpan.FromMinutes(5), st.CountdownLeft);
 
-        _store.Save(t.Id, _store.Get(t.Id)!.Def, restartCountdown: true);
+        _store.RestartCountdown(t.Id);
         st = Status(t.Id);
         Assert.False(st.Paused);
         Assert.Equal(NY(2026, 6, 1, 9, 5), st.NextOccurrence);

@@ -110,6 +110,10 @@ public class BackupTests
         Assert.Equal(before.DefVersion, moved.DefVersion);
         Assert.NotEqual(edited, Backups.Fingerprint(store.Live()));
         edited = Backups.Fingerprint(store.Live());
+        // And of the restart mode alone, which has a version of its own.
+        store.Edit(t.Id, d => d with { Restart = RestartMode.OnSchedule });
+        Assert.NotEqual(edited, Backups.Fingerprint(store.Live()));
+        edited = Backups.Fingerprint(store.Live());
 
         // A file's fingerprint is its tasks', and survives an import, which keeps versions.
         var json = store.Export();

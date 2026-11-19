@@ -30,7 +30,7 @@ internal sealed class ExportFile
 public sealed record ImportResult(int Added, int Updated, int Unchanged);
 
 /// <summary>One line of a sync digest: enough to tell which side holds the newer record.</summary>
-public sealed record DigestEntry(Guid Id, int Incarnation, bool Deleted, Hlc DefVersion, Hlc ScheduleStamp,
+public sealed record DigestEntry(Guid Id, int Incarnation, bool Deleted, Hlc DefVersion, Hlc ScheduleStamp, Hlc RestartVersion,
     int StateIncarnation, Hlc StateScheduleStamp, Hlc StateVersion, DateTimeOffset DoneThroughUtc);
 
 /// <summary>
@@ -105,13 +105,14 @@ public static class MergeRules
     public static int Next(int n, int max) => n < max ? n + 1 : max;
 
     /// <summary>The record both sides converge on, whichever order they see the two in. The
-    /// definition's schedule merges apart from the rest of it, with the state: an edit of
-    /// either half doesn't undo one of the other made elsewhere, and the schedule and the
-    /// state that win are of one schedule.</summary>
+    /// definition's schedule merges apart from the rest of it, with the state, and its restart
+    /// mode on its own: an edit of one part doesn't undo one of another made elsewhere, and
+    /// the schedule and the state that win are of one schedule.</summary>
     public static AlarmTask Merge(AlarmTask local, AlarmTask remote)
     {
         var rest = DefRank.Of(remote).CompareTo(DefRank.Of(local)) > 0 ? remote : local;
         var schedule = ScheduleRank.Of(remote.Def).CompareTo(ScheduleRank.Of(local.Def)) > 0 ? remote.Def : local.Def;
+        var restart = RestartRank(remote.Def).CompareTo(RestartRank(local.Def)) > 0 ? remote.Def : local.Def;
         StateRank localRank = StateRank.Of(local), remoteRank = StateRank.Of(remote);
         var winner = remoteRank.CompareTo(localRank) > 0 ? remote : local;
         // Within one schedule, "done" only ever moves forward, whichever write wins. A newer
@@ -122,10 +123,13 @@ public static class MergeRules
             : winner.State;
         return local with
         {
-            Def = rest.Def.WithScheduleOf(schedule), DefVersion = rest.DefVersion,
+            Def = rest.Def.WithScheduleOf(schedule).WithRestartOf(restart), DefVersion = rest.DefVersion,
             State = state, StateVersion = winner.StateVersion,
         };
     }
+
+    /// <summary>Which of two restart modes wins: the later incarnation's, then the later set.</summary>
+    private static (int Incarnation, Hlc Version) RestartRank(TaskDefinition d) => (d.Incarnation, d.RestartVersion);
 
     /// <summary>True when <paramref name="local"/> holds something <paramref name="peer"/>'s
     /// copy lacks, so it should be sent.</summary>
@@ -134,12 +138,13 @@ public static class MergeRules
         StateRank mine = StateRank.Of(local), theirs = StateRank.Of(peer);
         return DefRank.Of(local).CompareTo(DefRank.Of(peer)) > 0
             || ScheduleRank.Of(local.Def).CompareTo(ScheduleRank.OfDefinition(peer)) > 0
+            || RestartRank(local.Def).CompareTo((peer.Incarnation, peer.RestartVersion)) > 0
             || mine.CompareTo(theirs) > 0
             || (mine.SameSchedule(theirs) && local.State.DoneThroughUtc > peer.DoneThroughUtc);
     }
 
     public static DigestEntry DigestOf(AlarmTask t) =>
-        new(t.Id, t.Def.Incarnation, t.Def.Deleted, t.DefVersion, t.Def.ScheduleStamp,
+        new(t.Id, t.Def.Incarnation, t.Def.Deleted, t.DefVersion, t.Def.ScheduleStamp, t.Def.RestartVersion,
             t.State.Incarnation, t.State.ScheduleStamp, t.StateVersion, t.State.DoneThroughUtc);
 
     /// <summary>True when <paramref name="r"/>, a record from another device or a file, has
@@ -164,9 +169,11 @@ public static class MergeRules
     /// <summary><paramref name="r"/>, written before schedules had stamps (it has none),
     /// with one: <see cref="TaskDefinition.LegacyScheduleStamp"/>, which every device works
     /// out alike, on its definition, and on its state if that is of the same schedule (its
-    /// incarnation and revision). Stamped records are returned as they are.</summary>
+    /// incarnation and revision). Its restart mode, then, merged with the definition: its
+    /// version is the definition's. Stamped records are returned as they are.</summary>
     public static AlarmTask WithLegacyStamps(AlarmTask r)
     {
+        if (IsUnstamped(r.Def.RestartVersion)) r = r with { Def = r.Def with { RestartVersion = r.DefVersion } };
         if (!IsUnstamped(r.Def.ScheduleStamp)) return r;
         var stamp = r.Def.LegacyScheduleStamp();
         var s = r.State;
@@ -225,6 +232,7 @@ public sealed class TaskStore
             if (t.StateVersion > last) last = t.StateVersion;
             if (t.Def.ScheduleStamp > last) last = t.Def.ScheduleStamp;
             if (t.State.ScheduleStamp > last) last = t.State.ScheduleStamp;
+            if (t.Def.RestartVersion > last) last = t.Def.RestartVersion;
         }
         Versions = new HlcClock(nodeId, () => _clock.UtcNow.ToUnixTimeMilliseconds(), last);
         bool changed = false;
@@ -262,11 +270,13 @@ public sealed class TaskStore
         // not taken from the clock: every device that repairs this task (upgrading on different
         // days, say) gives it the same one, and it ranks below any change made since, on a
         // device that repaired it before.
+        // Its state's version is below any written since too (milliseconds 0; another device's
+        // repair of it ties by node), so a mark done or a pause made since outranks it.
         var def = t.Def with { ScheduleRevision = NextRevision(t) };
         def = def with { ScheduleStamp = def.LegacyScheduleStamp() };
         _log?.Invoke($"\"{name}\": its state was another kind of schedule's (an older version's merge), so it "
             + "couldn't ring; it starts afresh on its schedule.");
-        return t with { Def = def, State = AlarmEngine.FreshState(t.State, def, now), StateVersion = Versions.Tick() };
+        return t with { Def = def, State = AlarmEngine.FreshState(t.State, def, now), StateVersion = new Hlc(0, 0, NodeId) };
     }
 
     /// <summary>The revision of a new schedule of <paramref name="t"/>: past both its
@@ -299,7 +309,10 @@ public sealed class TaskStore
         AlarmTask result;
         lock (_lock)
         {
-            def = def with { ScheduleRevision = 1, ScheduleStamp = Versions.Tick(), Deleted = false, Incarnation = 0 };
+            def = def with
+            {
+                ScheduleRevision = 1, ScheduleStamp = Versions.Tick(), RestartVersion = Versions.Tick(), Deleted = false, Incarnation = 0,
+            };
             result = new AlarmTask
             {
                 Id = Guid.NewGuid(),
@@ -324,7 +337,7 @@ public sealed class TaskStore
     /// paused.</param>
     /// <param name="editedFrom">The definition the editor opened with. Only what the editor
     /// changed from it is saved, laid on the task as it is now: the schedule's times as a
-    /// whole, the restart mode, and each other field on its own. So what changed elsewhere
+    /// whole, and each other field on its own. So what changed elsewhere
     /// meanwhile (synced in while the editor was open), and not in the editor, stays. Null:
     /// the task as it is now.</param>
     /// <returns>The stored task; null, with nothing saved, when there is no such task or it
@@ -334,11 +347,23 @@ public sealed class TaskStore
         Write(id, _ => def, editedFrom, restartCountdown);
 
     /// <summary>Changes the definition without touching when the task comes up (the alarm
-    /// window's reminder interval, a sound choice); or its restart mode, which keeps the
-    /// task's state. <paramref name="change"/> is applied to the task as it is now.</summary>
+    /// window's reminder interval and restart mode, a sound choice). <paramref name="change"/>
+    /// is applied to the task as it is now.</summary>
     /// <returns>The stored task; null, with nothing changed, when there is no such task or
     /// it has been deleted.</returns>
-    public AlarmTask? Edit(Guid id, Func<TaskDefinition, TaskDefinition> change) => Write(id, change, null, false);
+    /// <exception cref="ArgumentException"><paramref name="change"/> changes when the task
+    /// comes up: that is <see cref="Save"/>'s, which starts a new schedule.</exception>
+    public AlarmTask? Edit(Guid id, Func<TaskDefinition, TaskDefinition> change) => Write(id, d =>
+    {
+        var changed = change(d);
+        if (d.ScheduleDiffers(changed)) throw new ArgumentException("Edit doesn't change when a task comes up: Save does.", nameof(change));
+        return changed;
+    }, null, false);
+
+    /// <summary>Starts the countdown <paramref name="id"/> is again, from now (the list's
+    /// "Restart countdown"). Nothing for a task of another kind.</summary>
+    /// <returns>The stored task; null when there is no such task or it has been deleted.</returns>
+    public AlarmTask? RestartCountdown(Guid id) => Write(id, d => d, null, restartCountdown: true);
 
     /// <summary>Saves what <paramref name="edit"/> makes of the task as it is now, changed from
     /// <paramref name="editedFrom"/> (or from the task as it is now): see <see cref="Save"/>.</summary>
@@ -351,27 +376,21 @@ public sealed class TaskStore
             if (!_tasks.TryGetValue(id, out var old) || old.Def.Deleted) return null;
             var def = edit(old.Def);
             var from = editedFrom ?? old.Def;
-            // The two halves merge apart (MergeRules.Merge), so each gets a new version only
-            // when it changes. A new schedule outranks every one this device has seen of the
-            // task (its stamp is later than all of them); unchanged, it is kept exactly, fields
-            // that don't count included, so that one schedule is always the same everywhere.
+            // The parts merge apart (MergeRules.Merge), so each gets a new version only when it
+            // changes. A new schedule outranks every one this device has seen of the task (its
+            // stamp is later than all of them); unchanged, it is kept exactly, fields that don't
+            // count included, so that one schedule is always the same everywhere.
             bool newTimes = from.ScheduleDiffers(def);
-            bool newRestart = def.Restart != from.Restart;
             var times = newTimes ? def : old.Def;   // the times: the editor's, or the task's as it is now
             bool restart = restartCountdown && times.Kind == ScheduleKind.Countdown;
             var rest = old.Def.WithRestEditsOf(from, def);
             bool restChanged = rest != old.Def;
+            if (def.Restart != from.Restart) rest = rest with { Restart = def.Restart, RestartVersion = Versions.Tick() };
             result = old;
-            if (newTimes || newRestart || restart)
+            if (newTimes || restart)
             {
-                var schedule = times with { Restart = newRestart ? def.Restart : old.Def.Restart };
-                rest = rest.WithScheduleOf(schedule) with { ScheduleRevision = NextRevision(old), ScheduleStamp = Versions.Tick() };
-                // New times, or the countdown restarted, start the state afresh; a new restart
-                // mode alone keeps it, as the schedule it now is.
-                var state = newTimes || restart
-                    ? AlarmEngine.FreshState(old.State, rest, now, keepPaused: !restart)
-                    : old.State with { Incarnation = rest.Incarnation, Revision = rest.ScheduleRevision, ScheduleStamp = rest.ScheduleStamp };
-                result = result with { State = state, StateVersion = Versions.Tick() };
+                rest = rest.WithScheduleOf(times) with { ScheduleRevision = NextRevision(old), ScheduleStamp = Versions.Tick() };
+                result = result with { State = AlarmEngine.FreshState(old.State, rest, now, keepPaused: !restart), StateVersion = Versions.Tick() };
             }
             result = result with { Def = rest, DefVersion = restChanged ? Versions.Tick() : old.DefVersion };
             if (result == old) return old;
@@ -586,6 +605,7 @@ public sealed class TaskStore
         Versions.Observe(r.DefVersion);
         Versions.Observe(r.StateVersion);
         Versions.Observe(r.Def.ScheduleStamp);
+        Versions.Observe(r.Def.RestartVersion);
         Versions.Observe(r.State.ScheduleStamp);
     }
 

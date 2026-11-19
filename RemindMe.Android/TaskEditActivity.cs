@@ -138,7 +138,16 @@ public sealed class TaskEditActivity : Screen
         foreach (var id in new[] { Resource.Id.scheduled, Resource.Id.countdown, Resource.Id.interval, Resource.Id.weekly, Resource.Id.once })
             Find<RadioButton>(id).CheckedChange += (_, _) => UpdatePanes();
 
-        if (savedInstanceState is { } saved) Restore(saved);
+        if (savedInstanceState is { } saved)
+        {
+            Restore(saved);
+            // "Start the countdown again" belongs to what the editor opened with (its ticked
+            // state comes back by itself); the task may be another kind by now, and then its
+            // status line would describe something else.
+            bool countdown = _original.Kind == ScheduleKind.Countdown;
+            Find<CheckBox>(Resource.Id.cd_restart).Visibility = countdown ? ViewStates.Visible : ViewStates.Gone;
+            if (!countdown || existing?.Def.Kind != ScheduleKind.Countdown) Find<TextView>(Resource.Id.cd_status).Visibility = ViewStates.Gone;
+        }
         ShowTimes();
         ShowSound();
         UpdatePanes();
